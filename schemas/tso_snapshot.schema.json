@@ -1,0 +1,28 @@
+{
+  "table": "tso_snapshot",
+  "file": "tso_snapshot_sample.csv",
+  "primary_key": ["tso_snapshot_id"],
+  "unique": [["earnings_event_id", "as_of_datetime", "signal_id"]],
+  "foreign_keys": [
+    {"columns": ["earnings_event_id"], "ref_table": "earnings_event", "ref_columns": ["earnings_event_id"]}
+  ],
+  "columns": [
+    {"name": "tso_snapshot_id", "type": "string", "required": true},
+    {"name": "earnings_event_id", "type": "string", "required": true},
+    {"name": "as_of_datetime", "type": "datetime", "required": true},
+    {"name": "signal_id", "type": "string", "required": true},
+    {"name": "cbs", "type": "decimal", "required": false, "min": 0, "max": 100},
+    {"name": "ems", "type": "decimal", "required": false, "min": 0, "max": 100},
+    {"name": "mes", "type": "decimal", "required": false, "min": 0, "max": 100},
+    {"name": "expected_r", "type": "decimal", "required": false, "min": -10, "max": 10},
+    {"name": "trend_score", "type": "decimal", "required": false, "min": 0, "max": 100},
+    {"name": "regime", "type": "enum", "required": true, "allowed": ["risk_on", "risk_off", "neutral", "mixed", "unknown"]},
+    {"name": "rank", "type": "integer", "required": false, "min": 1, "max": 9999},
+    {"name": "no_trade_flag", "type": "boolean", "required": true},
+    {"name": "no_trade_reason", "type": "string", "required": false},
+    {"name": "reason_codes", "type": "string", "required": false},
+    {"name": "source_file", "type": "string", "required": true},
+    {"name": "source_row_hash", "type": "string", "required": true},
+    {"name": "recorded_at", "type": "datetime", "required": true}
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "table": "earnings_event",
+  "file": "earnings_event_sample.csv",
+  "primary_key": ["earnings_event_id"],
+  "unique": [["company_id", "fiscal_period", "fiscal_year", "quarter"]],
+  "foreign_keys": [
+    {"columns": ["company_id"], "ref_table": "company_master", "ref_columns": ["company_id"]}
+  ],
+  "columns": [
+    {"name": "earnings_event_id", "type": "string", "required": true},
+    {"name": "company_id", "type": "string", "required": true},
+    {"name": "fiscal_period", "type": "string", "required": true},
+    {"name": "fiscal_year", "type": "integer", "required": true, "min": 2000, "max": 2100},
+    {"name": "quarter", "type": "enum", "required": true, "allowed": ["Q1", "Q2", "Q3", "Q4", "FY"]},
+    {"name": "announcement_date", "type": "date", "required": true},
+    {"name": "announcement_time", "type": "time", "required": true},
+    {"name": "announcement_status", "type": "enum", "required": true, "allowed": ["scheduled", "announced", "delayed", "unknown"]},
+    {"name": "event_type", "type": "enum", "required": true, "allowed": ["quarterly_earnings", "full_year_earnings", "guidance_revision", "monthly_disclosure", "earnings_presentation", "other_disclosure"]},
+    {"name": "announcement_session", "type": "enum", "required": true, "allowed": ["before_open", "intraday", "after_close", "unknown"]},
+    {"name": "accounting_standard", "type": "enum", "required": true, "allowed": ["JGAAP", "IFRS", "USGAAP", "unknown"]},
+    {"name": "return_base_price_policy", "type": "enum", "required": true, "allowed": ["previous_close", "pre_announcement_price", "announcement_day_close", "next_open", "vwap_after_announcement", "manual", "unknown"]},
+    {"name": "source_url", "type": "string", "required": false},
+    {"name": "created_at", "type": "datetime", "required": true},
+    {"name": "updated_at", "type": "datetime", "required": true}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "table": "company_master",
+  "file": "company_master_sample.csv",
+  "primary_key": ["company_id"],
+  "unique": [["ticker", "exchange"]],
+  "foreign_keys": [],
+  "columns": [
+    {"name": "company_id", "type": "string", "required": true},
+    {"name": "ticker", "type": "string", "required": true},
+    {"name": "exchange", "type": "string", "required": true},
+    {"name": "company_name", "type": "string", "required": true},
+    {"name": "sector", "type": "string", "required": true},
+    {"name": "industry", "type": "string", "required": true},
+    {"name": "sub_industry", "type": "string", "required": false},
+    {"name": "market_cap_category", "type": "enum", "required": true, "allowed": ["micro", "small", "mid", "large", "mega"]},
+    {"name": "fiscal_year_end", "type": "string", "required": true},
+    {"name": "primary_currency", "type": "string", "required": true},
+    {"name": "listing_status", "type": "enum", "required": true, "allowed": ["listed", "delisted", "watch"]},
+    {"name": "created_at", "type": "datetime", "required": true},
+    {"name": "updated_at", "type": "datetime", "required": true}
+  ]
+}

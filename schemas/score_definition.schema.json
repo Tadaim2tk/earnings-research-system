@@ -1,0 +1,20 @@
+{
+  "table": "score_definition",
+  "file": "score_definition_sample.csv",
+  "primary_key": ["scoring_version", "score_name", "component_name"],
+  "unique": [],
+  "foreign_keys": [],
+  "columns": [
+    {"name": "scoring_version", "type": "string", "required": true},
+    {"name": "score_name", "type": "enum", "required": true, "allowed": ["pre_event_score", "post_event_score"]},
+    {"name": "component_name", "type": "string", "required": true},
+    {"name": "weight", "type": "decimal", "required": true, "min": -1, "max": 1},
+    {"name": "min_value", "type": "decimal", "required": true},
+    {"name": "max_value", "type": "decimal", "required": true},
+    {"name": "missing_value_policy", "type": "enum", "required": true, "allowed": ["require", "neutral", "exclude_with_note", "human_review"]},
+    {"name": "effective_from", "type": "date", "required": true},
+    {"name": "effective_to", "type": "date", "required": false},
+    {"name": "change_reason", "type": "string", "required": true},
+    {"name": "created_at", "type": "datetime", "required": true}
+  ]
+}

@@ -1,0 +1,7 @@
+company_id,ticker,exchange,company_name,sector,industry,sub_industry,market_cap_category,fiscal_year_end,primary_currency,listing_status,created_at,updated_at
+CMP-ASTER,ASTR,TSE-Growth,Aster Cloud Works,Technology,Software,AI workflow,small,03-31,JPY,listed,2026-07-01T09:00:00+09:00,2026-07-01T09:00:00+09:00
+CMP-HOKUTO,HOKT,TSE-Prime,Hokuto Precision Components,Industrials,Electronic Components,Factory automation,mid,03-31,JPY,listed,2026-07-01T09:00:00+09:00,2026-07-01T09:00:00+09:00
+CMP-MINATO,MNTO,TSE-Standard,Minato Legacy Retail,Consumer Discretionary,Retail,Regional department stores,small,02-28,JPY,watch,2026-07-01T09:00:00+09:00,2026-07-01T09:00:00+09:00
+CMP-KISARAGI,KSRG,TSE-Prime,Kisaragi Robotics,Industrials,Machinery,Factory robots,mid,03-31,JPY,listed,2026-07-19T09:00:00+09:00,2026-07-19T09:00:00+09:00
+CMP-NOZOMI,NZMI,TSE-Growth,Nozomi Subscription Games,Technology,Software,Online entertainment SaaS,small,12-31,JPY,listed,2026-07-19T09:00:00+09:00,2026-07-19T09:00:00+09:00
+CMP-SHIZUKU,SZKK,TSE-Standard,Shizuku Household Materials,Consumer Staples,Household Products,Private-label materials,small,03-31,JPY,watch,2026-07-19T09:00:00+09:00,2026-07-19T09:00:00+09:00

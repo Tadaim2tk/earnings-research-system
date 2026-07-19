@@ -1,0 +1,11 @@
+kpi_id,earnings_event_id,company_id,kpi_name,kpi_category,value_type,value,unit,period,source_evidence_id,used_for_score,recorded_at,notes
+KPI-KISARAGI-BACKLOG-EXP-001,EVT-KISARAGI-2026REV,CMP-KISARAGI,order_backlog_growth,manufacturing,expected,12.0,pct_yoy,2026Q2,EVD-KISARAGI-ORDER-001,true,2026-09-10T12:25:00+09:00,Expectation row captured before the 13:00 revision.
+KPI-KISARAGI-BACKLOG-ACT-001,EVT-KISARAGI-2026REV,CMP-KISARAGI,order_backlog_growth,manufacturing,actual,18.0,pct_yoy,2026Q2,EVD-KISARAGI-POST-001,false,2026-09-10T13:35:00+09:00,Actual row appended after announcement; it is not pre-score evidence.
+KPI-NOZOMI-ARR-EXP-001,EVT-NOZOMI-2026Q2,CMP-NOZOMI,arr_growth,saas,expected,24.0,pct_yoy,2026Q2,EVD-NOZOMI-CROWD-001,true,2026-09-11T16:40:00+09:00,Pre-event ARR expectation row.
+KPI-NOZOMI-ARR-ACT-001,EVT-NOZOMI-2026Q2,CMP-NOZOMI,arr_growth,saas,actual,28.0,pct_yoy,2026Q2,EVD-NOZOMI-POST-001,false,2026-09-13T09:10:00+09:00,Actual ARR row appended after earnings review evidence.
+KPI-NOZOMI-MARGIN-BUY-EXP-001,EVT-NOZOMI-2026Q2,CMP-NOZOMI,margin_buying_balance_index,finance,expected,75.0,index_0_100,2026Q2,EVD-NOZOMI-CREDIT-001,true,2026-09-11T16:42:00+09:00,Crowding expectation KPI for sell-the-news risk.
+KPI-NOZOMI-MARGIN-BUY-ACT-001,EVT-NOZOMI-2026Q2,CMP-NOZOMI,margin_buying_balance_index,finance,actual,88.0,index_0_100,2026Q2,EVD-NOZOMI-POST-001,false,2026-09-13T09:12:00+09:00,Actual crowding state recorded after the reaction review.
+KPI-SHIZUKU-OCF-EXP-001,EVT-SHIZUKU-2026FY,CMP-SHIZUKU,operating_cash_flow_growth,cash_flow,expected,-8.0,pct_yoy,2026FY,EVD-SHIZUKU-CF-001,true,2026-09-15T16:10:00+09:00,Pre-event cash-flow expectation row.
+KPI-SHIZUKU-OCF-ACT-001,EVT-SHIZUKU-2026FY,CMP-SHIZUKU,operating_cash_flow_growth,cash_flow,actual,-24.0,pct_yoy,2026FY,EVD-SHIZUKU-POST-001,false,2026-09-16T09:30:00+09:00,Actual cash-flow row appended after announcement.
+KPI-SHIZUKU-INVENTORY-EXP-001,EVT-SHIZUKU-2026FY,CMP-SHIZUKU,inventory_growth,inventory,expected,10.0,pct_yoy,2026FY,EVD-SHIZUKU-CF-001,true,2026-09-15T16:12:00+09:00,Pre-event inventory-risk expectation row.
+KPI-SHIZUKU-INVENTORY-ACT-001,EVT-SHIZUKU-2026FY,CMP-SHIZUKU,inventory_growth,inventory,actual,31.0,pct_yoy,2026FY,EVD-SHIZUKU-POST-001,false,2026-09-16T09:32:00+09:00,Actual inventory row appended after announcement.

@@ -1,0 +1,24 @@
+{
+  "table": "hypothesis_log",
+  "file": "hypothesis_log_sample.csv",
+  "primary_key": ["hypothesis_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["earnings_event_id"], "ref_table": "earnings_event", "ref_columns": ["earnings_event_id"]},
+    {"columns": ["parent_hypothesis_id"], "ref_table": "hypothesis_log", "ref_columns": ["hypothesis_id"], "nullable": true}
+  ],
+  "columns": [
+    {"name": "hypothesis_id", "type": "string", "required": true},
+    {"name": "earnings_event_id", "type": "string", "required": true},
+    {"name": "parent_hypothesis_id", "type": "string", "required": false},
+    {"name": "hypothesis_type", "type": "enum", "required": true, "allowed": ["pre_event", "correction", "invalidation", "post_review"]},
+    {"name": "hypothesis_text", "type": "string", "required": true},
+    {"name": "evidence", "type": "string", "required": true},
+    {"name": "confidence", "type": "decimal", "required": true, "min": 0, "max": 1},
+    {"name": "status", "type": "enum", "required": true, "allowed": ["active", "superseded", "invalidated", "supported", "mixed", "pending"]},
+    {"name": "created_by", "type": "string", "required": true},
+    {"name": "created_at", "type": "datetime", "required": true},
+    {"name": "invalidated_at", "type": "datetime", "required": false},
+    {"name": "invalidation_reason", "type": "string", "required": false}
+  ]
+}

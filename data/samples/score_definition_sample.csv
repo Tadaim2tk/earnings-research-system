@@ -1,0 +1,8 @@
+scoring_version,score_name,component_name,weight,min_value,max_value,missing_value_policy,effective_from,effective_to,change_reason,created_at
+ERS-SCORE-0.1,pre_event_score,guidance_reliability_score,0.10,0,100,require,2026-07-19,,Initial placeholder component; not a formal production weight.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,pre_event_score,earnings_quality_score,0.10,0,100,require,2026-07-19,,Initial placeholder component; not a formal production weight.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,pre_event_score,peer_trend_score,0.08,0,100,human_review,2026-07-19,,Initial placeholder component; not a formal production weight.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,pre_event_score,meme_overheat_penalty,-0.08,0,100,human_review,2026-07-19,,Penalty is provisional and requires governance review.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,pre_event_score,value_trap_penalty,-0.08,0,100,human_review,2026-07-19,,Penalty is provisional and requires governance review.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,post_event_score,surprise_quality,0.12,0,100,human_review,2026-07-19,,Post-event score placeholder; no trading threshold approved.,2026-07-19T09:00:00+09:00
+ERS-SCORE-0.1,post_event_score,market_reaction_quality,0.08,0,100,human_review,2026-07-19,,Post-event score placeholder; no trading threshold approved.,2026-07-19T09:00:00+09:00

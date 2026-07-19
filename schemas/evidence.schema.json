@@ -1,0 +1,29 @@
+{
+  "table": "evidence",
+  "file": "evidence_sample.csv",
+  "primary_key": ["evidence_id"],
+  "unique": [],
+  "foreign_keys": [],
+  "columns": [
+    {"name": "evidence_id", "type": "string", "required": true},
+    {"name": "related_entity_type", "type": "enum", "required": true, "allowed": ["company_master", "earnings_event", "pre_earnings_baseline", "post_earnings_review", "tso_snapshot", "hypothesis_log", "score_definition", "kpi_observation"]},
+    {"name": "related_entity_id", "type": "string", "required": true},
+    {"name": "source_name", "type": "string", "required": true},
+    {"name": "source_type", "type": "enum", "required": true, "allowed": ["tdnet", "edinet", "jpx", "company_ir", "price_data", "margin_short_data", "analyst_consensus", "minkabu", "sns", "message_board", "news", "tso_log", "post_event_review", "manual_note", "other"]},
+    {"name": "source_url", "type": "string", "required": false},
+    {"name": "source_title", "type": "string", "required": true},
+    {"name": "publisher", "type": "string", "required": false},
+    {"name": "published_at", "type": "datetime", "required": true},
+    {"name": "observed_at", "type": "datetime", "required": true},
+    {"name": "recorded_at", "type": "datetime", "required": true},
+    {"name": "as_of_datetime", "type": "datetime", "required": true},
+    {"name": "evidence_summary", "type": "string", "required": true},
+    {"name": "raw_excerpt", "type": "string", "required": false},
+    {"name": "reliability_score", "type": "decimal", "required": true, "min": 0, "max": 100},
+    {"name": "verified_status", "type": "enum", "required": true, "allowed": ["verified", "partially_verified", "unverified", "terms_unreviewed", "retracted"]},
+    {"name": "used_for_score", "type": "boolean", "required": true},
+    {"name": "score_component", "type": "string", "required": false},
+    {"name": "created_by", "type": "string", "required": true},
+    {"name": "notes", "type": "string", "required": false}
+  ]
+}

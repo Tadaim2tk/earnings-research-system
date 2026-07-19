@@ -1,0 +1,26 @@
+{
+  "table": "kpi_observation",
+  "file": "kpi_observation_sample.csv",
+  "primary_key": ["kpi_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["earnings_event_id"], "ref_table": "earnings_event", "ref_columns": ["earnings_event_id"]},
+    {"columns": ["company_id"], "ref_table": "company_master", "ref_columns": ["company_id"]},
+    {"columns": ["source_evidence_id"], "ref_table": "evidence", "ref_columns": ["evidence_id"]}
+  ],
+  "columns": [
+    {"name": "kpi_id", "type": "string", "required": true},
+    {"name": "earnings_event_id", "type": "string", "required": true},
+    {"name": "company_id", "type": "string", "required": true},
+    {"name": "kpi_name", "type": "string", "required": true},
+    {"name": "kpi_category", "type": "enum", "required": true, "allowed": ["retail", "saas", "manufacturing", "construction", "restaurant", "finance", "real_estate", "trading_company", "cash_flow", "inventory", "other"]},
+    {"name": "value_type", "type": "enum", "required": true, "allowed": ["expected", "actual"]},
+    {"name": "value", "type": "decimal", "required": true},
+    {"name": "unit", "type": "string", "required": true},
+    {"name": "period", "type": "string", "required": true},
+    {"name": "source_evidence_id", "type": "string", "required": true},
+    {"name": "used_for_score", "type": "boolean", "required": true},
+    {"name": "recorded_at", "type": "datetime", "required": true},
+    {"name": "notes", "type": "string", "required": false}
+  ]
+}

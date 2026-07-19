@@ -1,0 +1,26 @@
+# Open Questions
+
+- What is the final TSO_LOG column definition, including the formal 28-column mapping?
+- How many target companies should the first real research universe contain?
+- Which markets are in scope first: Japan only, US only, or mixed?
+- What update frequency is required before and after earnings?
+- Should the long-term source of truth be CSV, SQLite, or PostgreSQL?
+- What role should Excel or Google Sheets play: manual entry surface, review surface, or non-authoritative export only?
+- Which SNS collection method is legally and operationally acceptable?
+- Can paid consensus data be used, and under what license?
+- Which source should provide price data?
+- Which reference price defines post-earnings returns: prior close, announcement-time price, next open, VWAP, or another benchmark?
+- How should intraday earnings announcements be handled?
+- How should trade decisions be separated from research evaluation?
+- How many reviewed historical cases are needed before score calibration is credible?
+- How should multiple TSO signals at the same timestamp be selected or aggregated?
+- Should corrections require human approval before a new baseline version is accepted?
+- What is the official definition of SNS overheat versus misinformation risk?
+- What minimum evidence is required before a hypothesis can be marked verified?
+- How should `baseline_record_hash` be computed and independently verified?
+- How should TSO `source_row_hash` be computed from source rows?
+- Should surprise percentage ranges allow values beyond +/-100 for loss-making or near-zero denominators?
+- Should validation add warning tiers for `unknown` return policies and expired score versions?
+- Should `score_definition` include `approval_status`, `approved_by`, and `approved_at`?
+- How should component weights be reconstructed from stored score rows?
+- Should KPI units become a controlled enum after hand-entry trials?

@@ -1,0 +1,4 @@
+tso_snapshot_id,earnings_event_id,as_of_datetime,signal_id,cbs,ems,mes,expected_r,trend_score,regime,rank,no_trade_flag,no_trade_reason,reason_codes,source_file,source_row_hash,recorded_at
+TSO-ASTER-001,EVT-ASTER-2026Q1,2026-08-07T15:00:00+09:00,TSO-SIG-1001,42,48,55,0.3,58,mixed,118,true,"Overheat and event-risk gate","NO_TRADE_EVENT;SENTIMENT_OVERHEAT",external/tso_log_20260807.csv,hash_tso_aster_001,2026-08-07T18:10:00+09:00
+TSO-HOKUTO-001,EVT-HOKUTO-2026Q1,2026-08-04T15:00:00+09:00,TSO-SIG-1002,69,73,66,1.4,71,risk_on,34,false,,"REGIME_OK;QUALITY_OK",external/tso_log_20260804.csv,hash_tso_hokuto_001,2026-08-04T18:10:00+09:00
+TSO-MINATO-001,EVT-MINATO-2026Q2,2026-08-11T15:00:00+09:00,TSO-SIG-1003,31,36,44,-0.9,28,risk_off,201,true,"Weak liquidity and structural risk","NO_TRADE_LIQUIDITY;VALUE_TRAP",external/tso_log_20260811.csv,hash_tso_minato_001,2026-08-11T18:10:00+09:00

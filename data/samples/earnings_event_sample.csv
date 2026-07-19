@@ -1,0 +1,7 @@
+earnings_event_id,company_id,fiscal_period,fiscal_year,quarter,announcement_date,announcement_time,announcement_status,event_type,announcement_session,accounting_standard,return_base_price_policy,source_url,created_at,updated_at
+EVT-ASTER-2026Q1,CMP-ASTER,2026Q1,2026,Q1,2026-08-08,15:30,scheduled,quarterly_earnings,after_close,JGAAP,next_open,https://example.invalid/ir/aster/2026q1,2026-07-01T09:10:00+09:00,2026-07-01T09:10:00+09:00
+EVT-HOKUTO-2026Q1,CMP-HOKUTO,2026Q1,2026,Q1,2026-08-05,12:30,scheduled,quarterly_earnings,intraday,JGAAP,pre_announcement_price,https://example.invalid/ir/hokuto/2026q1,2026-07-01T09:10:00+09:00,2026-07-01T09:10:00+09:00
+EVT-MINATO-2026Q2,CMP-MINATO,2026Q2,2026,Q2,2026-08-12,15:00,scheduled,quarterly_earnings,after_close,JGAAP,next_open,https://example.invalid/ir/minato/2026q2,2026-07-01T09:10:00+09:00,2026-07-01T09:10:00+09:00
+EVT-KISARAGI-2026REV,CMP-KISARAGI,2026Q2,2026,Q2,2026-09-10,13:00,scheduled,guidance_revision,intraday,JGAAP,pre_announcement_price,https://example.invalid/ir/kisaragi/upward-revision,2026-07-19T09:10:00+09:00,2026-07-19T09:10:00+09:00
+EVT-NOZOMI-2026Q2,CMP-NOZOMI,2026Q2,2026,Q2,2026-09-12,15:30,scheduled,quarterly_earnings,after_close,IFRS,next_open,https://example.invalid/ir/nozomi/2026q2,2026-07-19T09:10:00+09:00,2026-07-19T09:10:00+09:00
+EVT-SHIZUKU-2026FY,CMP-SHIZUKU,2026FY,2026,FY,2026-09-16,08:30,scheduled,full_year_earnings,before_open,JGAAP,previous_close,https://example.invalid/ir/shizuku/2026fy,2026-07-19T09:10:00+09:00,2026-07-19T09:10:00+09:00
