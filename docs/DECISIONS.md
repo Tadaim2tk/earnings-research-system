@@ -145,3 +145,17 @@ Decision: Add `return_reference_price_type`, `return_reference_price`, and `retu
 Consequences: Later reviewers can reconstruct which price anchored day0/day1/day5/day20 returns. Price-data source selection and intraday availability remain open questions.
 
 Alternatives Considered: Store only policy-level information on `earnings_event`. Rejected because policy alone is insufficient for reproducible return calculations.
+
+## ERS-ADR-0010
+
+Date: 2026-07-20
+
+Status: 暫定文書方針として承認
+
+Context: 現行TSO ledgerは29列だが、従来ERS文書はformal 28-column contractを前提としていた。複数のTSO fieldはERSのtype・controlled vocabularyとも衝突する。また、実在caseのhand-entry test前に、決算後return検証の最低price-data granularityを定める必要がある。
+
+Decision: `TSO_LOG_COLUMN_DEFINITION.md` で観測済み29列を定義し、不確定mappingは `unknown` のまま保持する。現フェーズではtrading/execution fieldを取り込まない。一般の最低price datasetはadjusted daily OHLCとし、確定的なintraday-event returnにはminute barsまたは監査可能なmanual referenceを要求する。vendor integration、return自動計算、tick storage、backtestingは延期する。
+
+Consequences: TSOを変更せず、不一致fieldを確定済みに見せずに、ERSでTSO contextとprice referenceをreviewできる。監査可能なpre-announcement priceがないintraday caseはprovisionalとし、依存するreturn fieldsを空欄にする。categorical rank、raw regime、non-company asset、ingestion originのschema変更は、後続の承認taskで扱う。
+
+Alternatives Considered: TSO値を現行ERS schemaへ強制変換し、全sessionでdaily closeを使う案。source semanticsを失い、intraday announcementにlook-ahead riskを持ち込むため採用しない。
