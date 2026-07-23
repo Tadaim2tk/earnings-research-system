@@ -21,7 +21,7 @@
 
 ## 暫定の最低データセット
 
-- `before_open` と `after_close` の一般データはcorporate-action-adjusted `daily OHLC` を最低要件とする。
+- `before_open` と `after_close` の一般データはunadjusted/adjustedを識別できる `daily OHLC` を最低要件とする。
 - `intraday` の再現可能な `pre_announcement_price` または `vwap_after_announcement` には `minute bar` を要求する。
 - `manual` はevidenceと変更不能な選択理由を持つ例外としてのみ許容する。
 - `tick data` は、実在手入力caseで必要性が確認されるまで延期する。
@@ -31,15 +31,15 @@
 
 ### `before_open`
 
-主referenceは `previous_close`。直前regular sessionのadjusted closeと定義する。
+主referenceは `previous_close`。直前regular sessionのunadjusted closeと定義する。
 
 announcement-day openは別値で記録し、overnight gapとregular-session内の動きを分離する。`next_open` はfirst-tradable-priceを測る別の問いなので、`previous_close` の代替として黙って使用しない。
 
-最低要件はadjusted daily OHLCと、regular-session open前であることを確認できるannouncement timestamp。
+最低要件はunadjusted/adjustedを識別できるdaily OHLCと、regular-session open前であることを確認できるannouncement timestamp。
 
 ### `intraday`
 
-主referenceは `pre_announcement_price`。暫定的に「公開announcement timestampより厳密に前に終了した最後の完全な1-minute barのclose」と定義する。announcement timestamp、market timezone、daylight-saving、bar interval convention、halt stateを記録する。
+主referenceは `pre_announcement_price`。暫定的に「公開announcement timestampより厳密に前に終了した最後の完全な1-minute barのunadjusted close」と定義する。announcement timestamp、market timezone、daylight-saving、bar interval convention、halt stateを記録する。
 
 発表がminute境界と一致する場合も、終了時刻が発表時刻より厳密に前のbarを使う。post-announcement tradeを含むbarをpre-announcement referenceにしない。
 
@@ -47,11 +47,11 @@ announcement-day openは別値で記録し、overnight gapとregular-session内�
 
 ### `after_close`
 
-first-tradable reactionの主referenceは `next_open`。announcement後の次regular session opening priceと定義する。announcement-day adjusted closeは別のprice evidenceとして保持し、overnight gapを再構成可能にする。
+first-tradable reactionの主referenceは `next_open`。announcement後の次regular sessionのunadjusted opening priceと定義する。announcement-dayのunadjusted closeをraw gapのbase、adjusted closeを期間横断比較用の別price evidenceとして保持する。
 
 close-to-closeのannouncement impactを測る分析では `previous_close` を使い、`next_open` cohortと分離する。
 
-最低要件はadjusted daily OHLCと、regular-session close後であることを確認できるannouncement timestamp。extended-hours releaseやdelayed announcementは明記する。
+最低要件はunadjusted/adjustedを識別できるdaily OHLCと、regular-session close後であることを確認できるannouncement timestamp。extended-hours releaseやdelayed announcementは明記する。
 
 ## `pre_announcement_price` を取得できない場合
 
@@ -102,3 +102,26 @@ daily OHLCによるintraday caseの粗いdescriptive labelは許容できるが�
 ## 将来自動化に必要なprovenance
 
 将来のprice sourceはsymbol/instrument mapping、exchange calendar、timezone、adjustment flags、bar timestamp convention、ingestion time、source/vendor、raw-row identityまたはhashを保持する。vendor、license、retention、redistributionは未決事項とする。
+
+## market reactionと参加可能価格の分離
+
+`next_open` はafter-close announcementに対する最初のmarket reactionを測る基準として有用だが、実際の参加可能価格と常に一致するわけではない。特別気配、halt、寄付直後のslippage等を扱う将来フェーズでは、次の概念を分ける可能性を残す。
+
+- `market_reaction_reference_price`
+- `trade_entry_reference_price`
+
+現段階ではschema列を追加せず、同じ値であると仮定もしない。pilotでは差が生じたcaseと理由を記録する。
+
+## raw priceとadjusted priceの分離
+
+event reactionは当時の約定可能価格を再現するためunadjusted priceで計算する。adjusted priceはsplit等をまたぐ期間横断比較に使い、raw event returnと同じ値として扱わない。
+
+将来のschema候補は次の3列とする。
+
+- `return_reference_price_raw`
+- `return_reference_price_adjusted`
+- `corporate_action_adjustment_factor`
+
+現行pilotではschemaを変更せず、`post_earnings_review.return_reference_price` にraw price、linkしたevidenceにadjusted price、adjustment factor、basis、sourceを記録する。3件終了後に専用列の必要性を判断する。
+
+価格source候補の公開仕様・費用・license論点は `PRICE_DATA_SOURCE_REVIEW.md`、手入力時の具体ruleは `MANUAL_ENTRY_POLICY.md` を参照する。

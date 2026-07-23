@@ -63,3 +63,5 @@
 - TSO `regime` はopen text、ERSは狭いenumで不一致。
 - TSO `asset` はnon-company instrumentを含むため、`company_master.ticker` との文字列一致joinは不可。
 - score acronym、計算version、歴史的互換性は正式import contractになっていない。
+
+未確定列をraw保存する場合の列名、score非接続、mapping version方針は `TSO_RAW_FIELD_POLICY.md` を参照する。現行schemaへ未承認の `_raw` 列を追加してはならない。

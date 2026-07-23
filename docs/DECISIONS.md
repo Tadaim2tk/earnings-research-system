@@ -154,8 +154,22 @@ Status: 暫定文書方針として承認
 
 Context: 現行TSO ledgerは29列だが、従来ERS文書はformal 28-column contractを前提としていた。複数のTSO fieldはERSのtype・controlled vocabularyとも衝突する。また、実在caseのhand-entry test前に、決算後return検証の最低price-data granularityを定める必要がある。
 
-Decision: `TSO_LOG_COLUMN_DEFINITION.md` で観測済み29列を定義し、不確定mappingは `unknown` のまま保持する。現フェーズではtrading/execution fieldを取り込まない。一般の最低price datasetはadjusted daily OHLCとし、確定的なintraday-event returnにはminute barsまたは監査可能なmanual referenceを要求する。vendor integration、return自動計算、tick storage、backtestingは延期する。
+Decision: `TSO_LOG_COLUMN_DEFINITION.md` で観測済み29列を定義し、不確定mappingは `unknown` のまま保持する。現フェーズではtrading/execution fieldを取り込まない。一般の最低price datasetはunadjusted/adjustedを識別できるdaily OHLCとし、確定的なintraday-event returnにはminute barsまたは監査可能なmanual referenceを要求する。event reactionはunadjusted actual traded priceで測り、adjusted priceは期間横断比較用に分離する。vendor integration、return自動計算、tick storage、backtestingは延期する。
 
 Consequences: TSOを変更せず、不一致fieldを確定済みに見せずに、ERSでTSO contextとprice referenceをreviewできる。監査可能なpre-announcement priceがないintraday caseはprovisionalとし、依存するreturn fieldsを空欄にする。categorical rank、raw regime、non-company asset、ingestion originのschema変更は、後続の承認taskで扱う。
 
 Alternatives Considered: TSO値を現行ERS schemaへ強制変換し、全sessionでdaily closeを使う案。source semanticsを失い、intraday announcementにlook-ahead riskを持ち込むため採用しない。
+
+## ERS-ADR-0011
+
+Date: 2026-07-23
+
+Status: Accepted for manual pilot with conditions
+
+Context: 実在銘柄のhand-entry pilot前に、価格source候補、manual fallback、TSO unknown列のraw保存、mapping versionを定義する必要がある。providerのstorage/license条件とpilot結果はまだ確認されていない。
+
+Decision: 価格dataの第一候補をJ-Quants、actual announcement timestampの正本候補をTDnetとする。event reactionはunadjusted actual traded priceを使い、adjusted priceとadjustment factorは期間横断比較用に分離する。intradayは発表前に終了した最後の完全な1-minute barを使い、取得不能時のみ監査可能な `manual` を許容する。daily closeをintraday発表前価格へ代用せず、tick dataは使わない。異なるreference typeはcohortを分離する。TSOの意味衝突列は取り込まず、raw保存候補列はscoreへ使わない。最初の3件は `after_close`, `intraday`, `before_open` を各1件とする。
+
+Consequences: 外部API実装や有料契約前に、入力負荷と欠落fieldを確認できる。J-Quants dataの保存、解約後retention、agent処理、派生値、screenshot、Git格納の可否は人間確認条件として残す。raw/adjusted/factorの専用schema列と本番利用は未承認であり、3件pilot後に判断する。
+
+Alternatives Considered: 無料web scrapingでrecent minute dataを集める案はtermsと再現性のriskから採用しない。最初からFLEX Historicalまたは法人vendorを契約する案はpilot規模に対して過剰なためdeferredとする。

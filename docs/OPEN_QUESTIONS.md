@@ -17,8 +17,10 @@
 
 ## 価格データ取得元と粒度
 
-- 各target marketのadjusted daily OHLCとminute barsをどのvendorまたはofficial sourceから取得するか。
-- source termsがlocal storage、derived VWAP、Git tracking、reviewer accessを許可するか。
+- `J-Quants API Light + Tick/Minute Add-on` のtermsがlocal research DBへの継続保存、解約後retention、agent処理を許可するか。
+- raw price rowsをGit trackingせずlocal-only保存とする運用で十分か。
+- calculated return、VWAP、chart screenshotを保存・共有できる範囲はどこまでか。
+- broker chartからの数値転記・screenshot保存・再利用がterms上許容されるか。
 - authoritativeなexchange calendar、timezone database、corporate-action adjustment policyは何か。
 - after-close/before-open announcementにextended-hours tradeが必要か。
 - correctionやdelayを含む信頼できるpublic announcement timestampをどこから取得するか。
@@ -27,12 +29,14 @@
 - 承認するVWAP windowは何分か。market liquidityやevent session別に変えるか。
 - VWAPに含めるtrade/quote condition、auction、halt、correction、zero-volume barのrule。
 - raw minute barsと計算inputの保存期間。
+- `market_reaction_reference_price` と `trade_entry_reference_price` を将来別fieldへ分けるか。
+- `return_reference_price_raw`, `return_reference_price_adjusted`, `corporate_action_adjustment_factor` をpilot後に正式schema列へ追加するか。
 
 ## 人間承認が必要な手入力暫定rule
 
-- `before_open`, `after_close` の最低datasetをadjusted daily OHLCとする。
-- before-openの主referenceを `previous_close` とし、announcement-day openを別保存する。
-- after-closeのfirst-tradable主referenceを `next_open` とし、prior closeを別保存する。
+- `before_open`, `after_close` の最低datasetをunadjusted/adjustedを識別できるdaily OHLCとする。
+- before-openの主referenceをunadjusted `previous_close` とし、adjusted comparisonとannouncement-day openを別保存する。
+- after-closeのfirst-tradable主referenceをunadjusted `next_open` とし、raw prior closeとadjusted comparisonを別保存する。
 - `intraday` はannouncement前に終了した最後の完全なminute barを使い、取得不能時のみtimestamp・source付き `manual` を許容する。
 - minute/manual referenceがなければ `unknown` とし、依存するreturn fieldsを空欄にする。
 - `announcement_session` と `return_reference_price_type` ごとにcohortを分離する。
@@ -60,3 +64,4 @@
 - `score_definition` に `approval_status`, `approved_by`, `approved_at` を追加するか。
 - stored score rowからcomponent weightをどう再構成するか。
 - hand-entry trial後にKPI unitをcontrolled enum化するか。
+- TSO raw fieldの `mapping_version` ownerと、TSO schema/version identifierの取得元をどう定めるか。
