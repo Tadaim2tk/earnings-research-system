@@ -13,4 +13,8 @@
 11. Propose score improvements without rewriting historical scores.
 12. After human approval, create a new `scoring_version` and preserve the prior version.
 
+For knowledge preservation, an approved workflow may also update the corresponding Obsidian Company, Earnings Event, Hypothesis, Failure Mode, or Validated Finding notes. Vault updates remain separate from ERS record writes and must not change locked baselines or elevate unsourced interpretation into verified evidence.
+
+Use `OBSIDIAN_SAVE_WORKFLOW.md` for pre-event, post-event, and weekly knowledge maintenance. Use `OBSIDIAN_CONTEXT_LOADING_POLICY.md` before allowing an AI to reuse Vault knowledge.
+
 Baseline lock means a pre-event snapshot should no longer be edited in place after the event. Corrections should be appended as a new version or as a documented correction record.

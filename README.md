@@ -9,6 +9,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Fictional sample data, including complex earnings scenarios
 - Validation CLI for required columns, types, keys, event semantics, temporal constraints, scoring versions, evidence lineage, KPI references, NO_TRADE handling, and basic future-information contamination checks
 - Pytest coverage for the initial validation contract
+- Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
 
 ## Out of Scope
 

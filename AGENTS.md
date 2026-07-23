@@ -15,4 +15,6 @@ This project is a research foundation, not a trading bot. Codex, ChatGPT, Claude
 - Do not mark unverified information as verified.
 - Do not add non-approved experimental factors to production scoring.
 - Record uncertain assumptions in `docs/OPEN_QUESTIONS.md` rather than silently deciding them.
+- Treat Obsidian as a knowledge layer, not as the authoritative ERS record. Do not promote Vault notes to verified evidence or score inputs without ERS evidence lineage, temporal checks, and human approval.
+- Do not recursively rewrite the existing Vault, install plugins, or ingest third-party raw content without explicit human approval and a reviewed rollback plan.
 - If future data could leak into a pre-event baseline, stop and add a validation rule or documented review step first.

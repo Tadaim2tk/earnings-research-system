@@ -67,3 +67,22 @@
 - stored score rowからcomponent weightをどう再構成するか。
 - hand-entry trial後にKPI unitをcontrolled enum化するか。
 - TSO raw fieldの `mapping_version` ownerと、TSO schema/version identifierの取得元をどう定めるか。
+
+## Obsidian連携
+
+- `Maruyama AI Research Lab/Earnings Research/` を既存Vaultへ追加することを誰が承認するか。
+- ObsidianをERSの正本にせずknowledge layerとして運用する境界を正式採用するか。
+- 初期pilot後に `ers_knowledge_link` tableを追加するか、Obsidian側参照だけを継続するか。
+- `obsidian_note_id`, `knowledge_version`, `knowledge_status`, `knowledge_last_reviewed_at` のownerとvalidatorをどう定めるか。
+- 自動双方向同期を将来も禁止するか、限定的なone-way exportを許可するか。
+- noteを `reviewed` / `validated` へ昇格できるhuman roleと必要evidence量をどう定義するか。
+- Vault全体の再編成、既存noteの一括移動、重複folder統合を行うか。
+- external claude-obsidian pluginまたは同等scriptを導入するか。repository、license、install script、telemetry、write scopeのauditが必要。
+- `.raw/` のGit除外、backup、retention、削除記録をどこで管理するか。
+- 決算資料、news、SNS、message board、J-Quants raw dataのsource別保存条件を誰が確認するか。
+- AIが外部providerへraw sourceを送信できる条件をどう制御するか。
+- `index.md` / `hot.md` / domain indexを手動管理するか、review付き生成物にするか。
+- lint automationのmachine check範囲とhuman audit範囲をどう分けるか。
+- historical reconstruction noteをprospective baseline contextから機械的に除外する方法。
+- TSOとERSのCompany/Asset/Hypothesis ID衝突をどう防ぐか。
+- plugin、Vault再編、自動Web調査、自動validated昇格、J-Quants raw保存はいずれも未承認のままとするか。

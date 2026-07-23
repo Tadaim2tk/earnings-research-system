@@ -173,3 +173,17 @@ Decision: 価格dataの第一候補をJ-Quants、actual announcement timestamp�
 Consequences: 外部API実装や有料契約前に、入力負荷と欠落fieldを確認できる。J-Quants dataの保存、解約後retention、agent処理、派生値、screenshot、Git格納の可否は人間確認条件として残す。raw/adjusted/factorの専用schema列と本番利用は未承認であり、3件pilot後に判断する。
 
 Alternatives Considered: 無料web scrapingでrecent minute dataを集める案はtermsと再現性のriskから採用しない。最初からFLEX Historicalまたは法人vendorを契約する案はpilot規模に対して過剰なためdeferredとする。
+
+## ERS-ADR-0012
+
+Date: 2026-07-23
+
+Status: Proposed
+
+Context: ERSのstructured recordだけでは、企業固有のguidance pattern、業種KPIの意味、失敗条件、複数eventから得たlessonを選択的に再利用しにくい。既存Obsidian VaultにはMaruyama AI Research Lab、Facts/Hypotheses/Lessons taxonomy、Protocol/Observation workflowが存在する。一方、Vaultには未commit変更があり、claude-obsidian固有のindex/hot/raw/ingest/lint機構は導入済みと確認できない。
+
+Proposed Decision: ERS Git repositoryをschema、CSV、validator、baseline lock、evidence lineage、scoring version、ADRの正本とし、既存Obsidian Research Labをcompany pattern、industry knowledge、hypothesis、failure mode、lessonのknowledge layerとする。初期段階はObsidian noteにERS stable IDとcommitを保持するmanual reference方式とし、自動同期、schema変更、自動validated昇格、external plugin導入を行わない。Nintendo、Toyota、Olympic Groupのhistorical reconstructionを最大5〜8notes/companyでpilotする。
+
+Consequences: 機械処理の正本と解釈知識を分離しながら、後続AIが必要contextだけを読める。Vault noteは単独でverified evidenceまたはscore inputにならず、人間reviewとERS evidence gateが必要になる。link table、lint code、raw retention、plugin導入、Vault変更はpilot後の別承認となる。
+
+Alternatives Considered: ObsidianをERSのsource of truthにする案はbaseline lockとschema validationを弱めるため採用しない。全Vault自動同期はfuture leakageと競合riskが高い。各ERS rowへWikilinkを直接追加する案は多対多・rename・version管理に弱いため、将来は独立 `ers_knowledge_link` tableを第一候補とする。
