@@ -45,6 +45,8 @@
 
 ## プロジェクト全体
 
+- historical reconstructionを `pre_earnings_baseline` と分離する専用tableまたは `baseline_mode` が必要か。
+- 正式rubricで未採点のbaselineについて、required score componentを `unknown` として保存できるようにするか。
 - 最初のreal research universeは何社にするか。
 - 対象marketはJapan only、US only、mixedのどれから始めるか。
 - 決算前後のupdate frequencyをどうするか。
