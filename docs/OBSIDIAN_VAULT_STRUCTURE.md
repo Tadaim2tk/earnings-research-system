@@ -54,7 +54,7 @@ Maruyama AI Research Lab/
 - note type別sub-index
 - active company/eventへのlink
 - validated findingとopen questionの入口
-- ERS repository pathとlatest approved commit
+- ERS `repository_remote` とlatest approved `ers_commit`
 - TSO cross-domain links
 
 pilotの `index.md` にはcompany identity registryを置き、少なくとも次の列を持たせる。

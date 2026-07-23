@@ -5,7 +5,7 @@ Role: Maruyama AI Research Lab Scientific Reviewer / Code Auditor
 Target project:
 
 ```text
-/Users/maruyamayuuki/Documents/Codex/2026-07-19/record-and-replay-plugin-record-and-3/earnings-research-system
+/Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system
 ```
 
 This is an independent Earnings Research System for recording pre-earnings expectations, announced results, price reactions, TSO snapshots, evidence/source lineage, KPI observations, and later review. Tactical Swing OS itself must remain untouched.
@@ -32,7 +32,7 @@ Do not make file changes unless there is a clearly broken typo or test fixture. 
 ## First Commands
 
 ```bash
-cd /Users/maruyamayuuki/Documents/Codex/2026-07-19/record-and-replay-plugin-record-and-3/earnings-research-system
+cd /Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system
 pwd
 find . -maxdepth 3 -type f | sort
 git status --short

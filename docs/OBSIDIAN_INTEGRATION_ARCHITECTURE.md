@@ -57,6 +57,7 @@ Source
 
 frontmatterに次を保持できるようにする。
 
+- `repository_remote`
 - `company_id`
 - `earnings_event_ids`
 - `source_evidence_ids`
@@ -64,7 +65,7 @@ frontmatterに次を保持できるようにする。
 - `ers_commit`
 - `knowledge_version`
 
-pathは人間向け、stable IDは整合性検査向けとする。note renameで関係が失われないよう、pathだけをidentityにしない。
+ERSの永続参照は `repository_remote` + `ers_commit` とする。local repository pathは環境依存の実行補助であり、正本identityにしない。Vault pathは人間向け、stable IDは整合性検査向けとし、note renameで関係が失われないようpathだけをidentityにしない。
 
 ### 将来のlink schema候補
 

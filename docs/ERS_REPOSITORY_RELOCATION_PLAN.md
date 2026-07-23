@@ -2,23 +2,31 @@
 
 ## 状態と目的
 
-本書は計画だけを定義する。現在のrepositoryを移動せず、remoteやGitHub repositoryも作成しない。
+Status: Completed on 2026-07-23
 
-現在のERS repositoryには次の恒久化riskがある。
+ERS repositoryは次の恒久保存先とprivate remoteへ移設済みである。
 
-- 日付付きCodex作業directory配下にあり、恒久保管場所として不安定である。
-- Git remoteが未設定で、local disk以外にhistoryの正本がない。
-- Obsidianが参照する `ers_commit` はlocal repositoryが失われると追跡不能になる。
-- 作業directoryの整理・削除により、repository全体を失う可能性がある。
+```text
+permanent_local_path: /Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system
+repository_remote: https://github.com/Tadaim2tk/earnings-research-system
+visibility: private
+preserved_head: 855ebb531d45938e1d55a201faa5dfc350d354ae
+```
+
+旧pathはrollback用copyとして保持し、今回削除しない。
+
+```text
+/Users/maruyamayuuki/Documents/Codex/2026-07-19/record-and-replay-plugin-record-and-3/earnings-research-system
+```
 
 ## 移設要件
 
 - `.git` directoryを含むhistoryを保持し、既存commit hashを変えない。
 - 旧pathは移設直後に削除せず、検証期間中はread-only backupとして保持する。
 - 新pathでsample validationとpytestを実行する。
-- Humanが承認したprivate GitHub repositoryをremoteとして設定する。
+- Humanが承認したprivate GitHub repositoryを `origin` として設定する。
 - private remoteへのpush後、branch、HEAD commit、remote参照を検証する。
-- Obsidianは最終的にremote URLとcommit hashを正本参照とする。local pathは実行補助に限定する。
+- Obsidianは `repository_remote` と `ers_commit` を永続参照とする。local pathは環境依存の実行補助に限定する。
 - 移設失敗時は旧pathへ戻せるrollback手順と判定条件を記録する。
 
 ## 実施手順
@@ -41,6 +49,10 @@
 - partial remote設定は原因を記録して解除または修正し、historyを書き換えない。
 - commit hashが一致しない場合は移設完了と判定せず、copy/move方法を再確認する。
 
-## Human decision
+## 完了確認
 
-実行前に恒久local path、private repository名、remote URL、実施時期、Obsidian参照形式の承認が必要である。具体的なpathやrepository名は本書では決定しない。
+- 旧新repositoryのHEADとtree hashは移設時点で一致した。
+- `origin/main` へ全local branch（`main`のみ）をpushした。
+- GitHub visibilityは `PRIVATE` と確認した。
+- 旧pathは保持している。
+- 移設完了後のvalidation、pytest、remote HEAD照合結果は作業報告と移設完了commitで記録する。

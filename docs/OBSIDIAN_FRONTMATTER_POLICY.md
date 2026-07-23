@@ -30,6 +30,7 @@ source_evidence_ids:
 earnings_event_ids:
   - EVT-XXXX
 related_note_ids: []
+repository_remote: https://github.com/Tadaim2tk/earnings-research-system
 ers_commit:
   - 5a2393e
 knowledge_version: 1
@@ -51,10 +52,13 @@ knowledge_version: 1
 | `created_at` | date | noteを実際に初回作成した日。遡及しない |
 | `updated_at` | date | content変更日 |
 | `source_evidence_ids` | list | source不要typeは空listを許容 |
+| `repository_remote` | URL | ERS正本remote。`https://github.com/Tadaim2tk/earnings-research-system` |
 | `ers_commit` | list | 正式採用・参照commit。未採用は空list可 |
 | `knowledge_version` | integer | semantic change時にincrement |
 
 type別entity IDは追加requiredとする。例としてCompanyは `company_id`、Earnings Eventは `earnings_event_id`、Hypothesisは `hypothesis_id` を持つ。
+
+ERSへの永続参照は `repository_remote` と `ers_commit` の組で表す。local pathは実行環境ごとに変わり得る補助情報であり、note identityや正本参照に使用しない。
 
 ## `knowledge_class` enum
 

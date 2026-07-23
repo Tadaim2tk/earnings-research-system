@@ -192,12 +192,12 @@ Alternatives Considered: ObsidianをERSのsource of truthにする案はbaseline
 
 Date: 2026-07-23
 
-Status: Pending Human Decision
+Status: Accepted and completed
 
-Context: 現在のERS repositoryは日付付きCodex作業directoryにあり、remoteが設定されていない。Obsidianの `ers_commit` が参照する履歴をlocal deletionから保護し、将来のagent handoffで恒久的に参照できる場所が必要である。
+Context: ERS repositoryは日付付きCodex作業directoryにあり、remoteが設定されていなかった。Obsidianの `ers_commit` が参照する履歴をlocal deletionから保護し、将来のagent handoffで恒久的に参照できる場所が必要だった。
 
-Proposed Decision: `ERS_REPOSITORY_RELOCATION_PLAN.md` に従い、Humanが恒久local path、private repository名、remote URL、実施時期、Obsidianからの参照形式を決定した後、Git historyを保持して移設・private pushする。現段階では移設、remote設定、GitHub repository作成を行わない。
+Decision: Git historyを保持して `/Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system` へ移設し、private repository `https://github.com/Tadaim2tk/earnings-research-system` を `origin` とする。Obsidianの永続参照は `repository_remote` + `ers_commit` とし、local pathは環境依存の実行補助に限定する。旧pathは移設確認後もrollback用に保持する。
 
-Consequences: 文書とpilot governanceは先に承認できる一方、実際の恒久化はHuman decisionとして分離される。移設後もcommit hashを変えず、旧pathを直ちに削除せずrollback可能にする。
+Consequences: commit hashを維持したprivate remoteが実行履歴の正本となり、Mac上のpath変更でObsidian参照が失われない。旧pathの保持期間だけは運用判断として残る。
 
 Alternatives Considered: 現在のCodex作業directoryを恒久pathとして使い続ける案は削除riskと参照安定性に弱い。履歴なしで新repositoryへcopyする案は既存 `ers_commit` を無効化するため採用しない。

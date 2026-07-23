@@ -95,8 +95,11 @@
 
 ## ERS repository恒久化
 
-- 恒久的なlocal pathをどこにするか。
-- private GitHub repository名を何にするか。
-- remote URLを何にするか。
-- 3社pilotの前後どちらで移設するか。
-- ObsidianからERSをremote URL + commitで参照するか、repository名 + commitで参照するか。
+2026-07-23に次を決定・実施した。
+
+- permanent local path: `/Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system`
+- private remote: `https://github.com/Tadaim2tk/earnings-research-system`
+- Obsidian永続参照: `repository_remote` + `ers_commit`
+- local pathは環境依存の実行補助情報とする。
+
+残る運用判断は、rollback用の旧pathをいつ削除可能と判定するかである。

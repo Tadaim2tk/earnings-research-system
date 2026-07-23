@@ -79,6 +79,7 @@ pre-event taskでは、noteの現在内容をそのまま使用しない。claim
 task_id
 loaded_note_ids
 loaded_versions
+repository_remote
 ers_commit
 vault_commit
 cutoff_datetime

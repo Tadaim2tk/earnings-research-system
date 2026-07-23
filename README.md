@@ -2,6 +2,12 @@
 
 Earnings Research System is an initial research foundation for recording pre-earnings expectations, announced results, market reaction, and later hypothesis review. It is designed as an independent module that can later exchange CSV, JSON, or database views with Tactical Swing OS without changing TSO itself.
 
+## Repository
+
+- Authoritative remote: `https://github.com/Tadaim2tk/earnings-research-system`
+- Permanent local working path: `/Users/maruyamayuuki/Documents/MaruyamaAIResearchLab/earnings-research-system`
+- Durable external references use `repository_remote` plus `ers_commit`. The local path is environment-dependent execution metadata, not repository identity.
+
 ## Current Scope
 
 - Project folder structure and agent handoff rules
