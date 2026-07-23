@@ -80,7 +80,7 @@ Vault noteの知識は、ERS evidence timingを満たすsourceに遡れない限
 
 ## Pilot
 
-Nintendo `7974`、Toyota `7203`、Olympic Group `8289` をhistorical reconstructionとして扱う。過去時点の正式baselineとして偽装しない。
+Nintendo `CMP-7974` / `ERS-COMPANY-7974`、Toyota `CMP-7203` / `ERS-COMPANY-7203`、Olympic Group `CMP-8289` / `ERS-COMPANY-8289` を `origin_mode=historical_reconstruction` として扱う。`reconstructed_at` に実際の作業時刻を記録し、過去時点の正式baselineとして偽装しない。
 
 各社最大5〜8noteに限定する。
 
@@ -93,4 +93,3 @@ Nintendo `7974`、Toyota `7203`、Olympic Group `8289` をhistorical reconstruct
 7. Knowledge Gap
 
 目的はnote数ではなく、source分離、ERS ID link、context loading、lint負荷を測ることである。
-

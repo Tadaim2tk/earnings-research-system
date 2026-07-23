@@ -178,12 +178,26 @@ Alternatives Considered: 無料web scrapingでrecent minute dataを集める案�
 
 Date: 2026-07-23
 
-Status: Proposed
+Status: Accepted for documentation and pilot governance
 
 Context: ERSのstructured recordだけでは、企業固有のguidance pattern、業種KPIの意味、失敗条件、複数eventから得たlessonを選択的に再利用しにくい。既存Obsidian VaultにはMaruyama AI Research Lab、Facts/Hypotheses/Lessons taxonomy、Protocol/Observation workflowが存在する。一方、Vaultには未commit変更があり、claude-obsidian固有のindex/hot/raw/ingest/lint機構は導入済みと確認できない。
 
-Proposed Decision: ERS Git repositoryをschema、CSV、validator、baseline lock、evidence lineage、scoring version、ADRの正本とし、既存Obsidian Research Labをcompany pattern、industry knowledge、hypothesis、failure mode、lessonのknowledge layerとする。初期段階はObsidian noteにERS stable IDとcommitを保持するmanual reference方式とし、自動同期、schema変更、自動validated昇格、external plugin導入を行わない。Nintendo、Toyota、Olympic Groupのhistorical reconstructionを最大5〜8notes/companyでpilotする。
+Decision: ERS Git repositoryをschema、CSV、validator、baseline lock、evidence lineage、scoring version、ADRの正本とし、既存Obsidian Research Labをcompany pattern、industry knowledge、hypothesis、failure mode、lessonのknowledge layerとする。初期段階はObsidian noteにERS stable IDとcommitを保持するmanual reference方式とし、自動同期、schema変更、自動validated昇格、external plugin導入を行わない。共通frontmatterとclaim enumは `OBSIDIAN_FRONTMATTER_POLICY.md` を正本とし、`origin_mode` でprospective、historical reconstruction、syntheticを区別する。すべてのstatus変更はHuman承認を必要とする。Nintendo、Toyota、Olympic Groupのhistorical reconstructionを最大5〜8notes/companyでpilotする。
 
 Consequences: 機械処理の正本と解釈知識を分離しながら、後続AIが必要contextだけを読める。Vault noteは単独でverified evidenceまたはscore inputにならず、人間reviewとERS evidence gateが必要になる。link table、lint code、raw retention、plugin導入、Vault変更はpilot後の別承認となる。
 
 Alternatives Considered: ObsidianをERSのsource of truthにする案はbaseline lockとschema validationを弱めるため採用しない。全Vault自動同期はfuture leakageと競合riskが高い。各ERS rowへWikilinkを直接追加する案は多対多・rename・version管理に弱いため、将来は独立 `ers_knowledge_link` tableを第一候補とする。
+
+## ERS-ADR-0013
+
+Date: 2026-07-23
+
+Status: Pending Human Decision
+
+Context: 現在のERS repositoryは日付付きCodex作業directoryにあり、remoteが設定されていない。Obsidianの `ers_commit` が参照する履歴をlocal deletionから保護し、将来のagent handoffで恒久的に参照できる場所が必要である。
+
+Proposed Decision: `ERS_REPOSITORY_RELOCATION_PLAN.md` に従い、Humanが恒久local path、private repository名、remote URL、実施時期、Obsidianからの参照形式を決定した後、Git historyを保持して移設・private pushする。現段階では移設、remote設定、GitHub repository作成を行わない。
+
+Consequences: 文書とpilot governanceは先に承認できる一方、実際の恒久化はHuman decisionとして分離される。移設後もcommit hashを変えず、旧pathを直ちに削除せずrollback可能にする。
+
+Alternatives Considered: 現在のCodex作業directoryを恒久pathとして使い続ける案は削除riskと参照安定性に弱い。履歴なしで新repositoryへcopyする案は既存 `ers_commit` を無効化するため採用しない。

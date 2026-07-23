@@ -2,24 +2,28 @@
 
 ## 基本分類
 
-既存Research Labの `Facts / Hypotheses / Lessons` を上位taxonomyとして維持する。ERS固有note typeはtopicと責務を示し、claim classはnote内の各claimがraw fact、metric、interpretation等のどれかを示す。
-
-```text
-Raw Source
-Observed Fact
-Derived Metric
-Analyst Interpretation
-Hypothesis
-Decision
-Outcome
-Knowledge Update
-```
+既存Research Labの `Facts / Hypotheses / Lessons` を上位taxonomyとして維持する。ERS固有note typeはtopicと責務を示し、claim classはnote内の各claimの性質を示す。formal `knowledge_class` enumと共通frontmatterの正本は `OBSIDIAN_FRONTMATTER_POLICY.md` とし、本書では再定義しない。
 
 1つのnoteに複数claim classがある場合はsectionを分ける。タイトルやfrontmatterだけでfactとinterpretationを混同しない。
 
 ## Note type
 
-共通required frontmatterは `note_type`, `note_id`, `status`, `confidence`, `verified_status`, `created_at`, `updated_at`, `knowledge_version` とする。
+共通required frontmatterは `OBSIDIAN_FRONTMATTER_POLICY.md` に従う。下表はnote type固有fieldだけを定義する。
+
+## 上位taxonomyとの概念対応
+
+この対応は概念上のroutingであり、物理folderへの固定mappingではない。
+
+| `knowledge_class` | Research Lab concept | rule |
+| --- | --- | --- |
+| `raw_source` | Factsのevidence | claimそのものではなく、factを裏付ける原資料 |
+| `observed_fact` | Facts | sourceから直接確認できる事実 |
+| `derived_metric` | Facts | inputと計算過程を再現できる派生事実 |
+| `interpretation` | Hypotheses | 事実からの解釈。代替説明を残す |
+| `hypothesis` | Hypotheses | 検証可能な仮説 |
+| `decision` | Protocol / Decision | Human承認済み判断または検証方針 |
+| `outcome` | Observation / Facts | event後に観測した結果 |
+| `knowledge_update` | Lessons | prior knowledgeからの更新と学習 |
 
 | note_type | purpose | additional required_frontmatter | recommended_sections | allowed_links | ERS_reference | review_status | update_trigger |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -45,15 +49,14 @@ Knowledge Update
 | `tool_workflow` | 再現可能な運用知識 | `workflow_id`, `owner` | Inputs、Steps、Checks、Rollback | data source、audit | commit/ADR | reviewed以上推奨 | process変更 |
 | `reconstruction_limitation` | retrospective pilotの制約 | `earnings_event_ids` | Limitation、Impact、Allowed Use | event、failure mode、open question | pilot/event IDs | reviewed以上推奨 | schema/policy決定 |
 
-## Claim昇格rule
+## Claim取扱rule
 
-- `Observed Fact`: sourceとpublished/observed時刻が必要。
-- `Derived Metric`: input、formula、basis、calculated_atが必要。
-- `Analyst Interpretation`: factと明確に分け、competing explanationを残す。
-- `Hypothesis`: invalidationとreview triggerが必要。
-- `Decision`: 人間承認またはERS ADR/PRが必要。
-- `Outcome`: eventとmeasurement policyが必要。
-- `Knowledge Update`: prior version、変更理由、reviewerが必要。
+- `observed_fact`: sourceとpublished/observed時刻が必要。
+- `derived_metric`: input、formula、basis、calculated_atが必要。
+- `interpretation`: factと明確に分け、competing explanationを残す。
+- `hypothesis`: invalidationとreview triggerが必要。
+- `decision`: Human承認またはERS ADR/PRが必要。
+- `outcome`: eventとmeasurement policyが必要。
+- `knowledge_update`: prior version、変更理由、reviewerが必要。
 
 「保守的予想型」「ビッグマウス」「value trap」は初期状態でinterpretationまたはhypothesisとする。複数事例があっても自動的にfactへ変えない。
-

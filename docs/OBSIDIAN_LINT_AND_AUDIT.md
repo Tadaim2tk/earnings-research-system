@@ -15,7 +15,9 @@ VaultのMarkdown品質だけでなく、research claim、ERS参照、future leak
 | duplicate `note_id` | error | frontmatter uniqueness |
 | duplicate entity | error | same `company_id` / `earnings_event_id` |
 | missing frontmatter | error | note type別required key |
-| invalid enum | error | status/confidence/verified status |
+| invalid enum | error | status/confidence/verified status/knowledge class |
+| missing/invalid `origin_mode` | error | frontmatter policyのenumとrequired field |
+| historical reconstruction timestamp missing | error | `origin_mode=historical_reconstruction` で `reconstructed_at` が空 |
 | invalid status transition | error | git diffとtransition rule |
 | missing source | error for fact/validated | evidence/source list empty |
 | duplicate source ID/hash | warning/error | manifest comparison |
@@ -25,8 +27,7 @@ VaultのMarkdown品質だけでなく、research claim、ERS参照、future leak
 | ERS ID missing | warning/error | formal note type別rule |
 | Git commit not found | warning | ERS repo `git cat-file -e` |
 | future contamination | error | source published/observed time > baseline cutoff |
-| ticker/name conflict | warning | company identity registry comparison |
-| KPI spelling variation | warning | alias/controlled vocabulary comparison |
+| prospective context contamination | error | `historical_reconstruction` noteがprospective context packまたはcalibration cohortへ混入 |
 | peer-group circular reference | warning | graph cycle rule |
 | hot cache stale | warning | latest approved commit/event mismatch |
 
@@ -44,6 +45,10 @@ VaultのMarkdown品質だけでなく、research claim、ERS参照、future leak
 | confidence | calibrationされた意味か、主観ラベルか |
 | failure mode | 実際の失敗と単なる悪い結果を区別したか |
 | deprecated replacement | historical contextを失っていないか |
+| ticker/name conflict | identity registry未導入の間、同一企業・別企業・aliasのどれか |
+| KPI spelling variation | KPI alias registry未導入の間、同義語・単位差・別KPIのどれか |
+
+`ticker/name conflict` と `KPI spelling variation` は、identity registryおよびKPI alias registryが存在するまで機械検査に含めない。各registryのcontrolled vocabularyと更新手順が承認された後、機械検査へ戻す。
 
 ## Future leakage audit
 

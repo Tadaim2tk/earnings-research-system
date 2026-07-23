@@ -75,7 +75,7 @@
 - 初期pilot後に `ers_knowledge_link` tableを追加するか、Obsidian側参照だけを継続するか。
 - `obsidian_note_id`, `knowledge_version`, `knowledge_status`, `knowledge_last_reviewed_at` のownerとvalidatorをどう定めるか。
 - 自動双方向同期を将来も禁止するか、限定的なone-way exportを許可するか。
-- noteを `reviewed` / `validated` へ昇格できるhuman roleと必要evidence量をどう定義するか。
+- formalなvalidated rubricとHuman roleをどう定義するか。反復patternの3 independent eventsはpilot暫定ruleであり、pilot後にcalibrateする。
 - Vault全体の再編成、既存noteの一括移動、重複folder統合を行うか。
 - external claude-obsidian pluginまたは同等scriptを導入するか。repository、license、install script、telemetry、write scopeのauditが必要。
 - `.raw/` のGit除外、backup、retention、削除記録をどこで管理するか。
@@ -86,3 +86,17 @@
 - historical reconstruction noteをprospective baseline contextから機械的に除外する方法。
 - TSOとERSのCompany/Asset/Hypothesis ID衝突をどう防ぐか。
 - plugin、Vault再編、自動Web調査、自動validated昇格、J-Quants raw保存はいずれも未承認のままとするか。
+
+## Historical reconstruction識別
+
+- pilotではまずVault frontmatterの `origin_mode` を正本として記録し、`historical_reconstruction` をprospective contextとcalibrationから除外する。
+- ERS tableにもreconstruction識別が必要と判明した場合、現行schemaへ暗黙追加せず、`baseline_mode` または専用tableを別ADRで判断する。
+- historical caseとprospective caseをどのaudit reportで比較可能にするか。
+
+## ERS repository恒久化
+
+- 恒久的なlocal pathをどこにするか。
+- private GitHub repository名を何にするか。
+- remote URLを何にするか。
+- 3社pilotの前後どちらで移設するか。
+- ObsidianからERSをremote URL + commitで参照するか、repository名 + commitで参照するか。

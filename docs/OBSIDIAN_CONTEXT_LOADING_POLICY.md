@@ -60,7 +60,7 @@ TSO contextが必要な場合だけ、既存TSO domain index、Asset、regime/Me
 
 pre-event taskでは、noteの現在内容をそのまま使用しない。claimごとのsource timeとERS baseline cutoffを確認し、cutoff後のOutcome、Lesson、Knowledge Updateをcontextから除外する。
 
-historical reconstructionでは、現在知っているoutcomeを別context blockに隔離し、当時利用可能だったsourceだけをpre-event reconstructionへ渡す。
+`origin_mode=historical_reconstruction` はprospective context packおよびprospective calibration cohortから機械的に除外する。historical reconstruction内では、現在知っているoutcomeを別context blockに隔離し、当時利用可能だったsourceだけをpre-event reconstructionへ渡す。
 
 ## Status filter
 
@@ -87,4 +87,3 @@ unresolved_conflicts
 ```
 
 これにより同じ質問を後日再現し、古い `hot.md` に依存していないことを確認できる。
-
