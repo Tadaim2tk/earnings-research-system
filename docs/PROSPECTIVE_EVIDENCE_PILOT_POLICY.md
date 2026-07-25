@@ -37,6 +37,33 @@ baseline_draft
 - official event evidence未登録のままpost-event scoring/reviewを確定しない。
 - session、price reference、corporate actionが未確認なら、event evidence登録後も依存するreturnを未確定に保つ。
 
+## Lifecycle exception handling
+
+以下はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのenumではない。正式なevent/evidence status名、baseline version relation、correction relationはimplementation前のschema decisionで確定する。それまでは既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
+
+### Event延期
+
+- locked baselineを上書きせず、元のlock timestamp、hash、evidence lineageを保持する。
+- 新しいevent日でもbaselineが有効かHuman reviewを再実施する。
+- baselineが有効な場合も、延期判断と再review結果を元baselineとは別のaudit recordへ残す。
+- KPI対象期間、新規開示、前提条件、情報鮮度等により有効性を失った場合は、既存baselineを変更せずnew versionを作成する。
+- 延期後に公表された資料を旧baselineへ追記せず、新versionまたはevent evidenceとしてappend-onlyで登録する。
+
+### Event中止
+
+- `event_cancelled`相当のconceptual terminal stateと取消理由を記録する。implementation enumはschema decisionまで未確定とする。
+- baseline、evidence、lock timestamp、hash、lineageを保持する。
+- 当該eventをscoring、calibration、通常のpost-event review対象から除外する。
+- 後日別eventとして再設定された場合は、新しいevent identityまたは明示的なnew versionとして扱う。
+
+### 誤開示・撤回・訂正
+
+- 元の開示とevidenceを削除・上書きしない。
+- 撤回状態は `verified_status: retracted` または同等のconceptual statusとして記録する。`retracted`を正式enumへ追加するかはschema decisionまで未確定とする。
+- 訂正版を元evidenceとのrelationが追跡できるappend-only correctionとして登録する。
+- locked baselineは変更しない。
+- 元開示、撤回、訂正版の関係と有効なsourceがHuman確認されるまでscoringを確定しない。
+
 ## 最小登録source
 
 1. 発表前の最新company forecastまたは直近決算資料
@@ -131,6 +158,8 @@ event official disclosureとactual KPIはannouncement以後に登録する。pre
 9. price reference sourceとcorporate action確認
 10. post-event scoring/reviewを作成
 11. evidence登録時間、欠落、重複入力、逆引き性能をPilot Logへ記録
+
+延期、中止、誤開示、撤回、訂正が発生した場合は通常系の次stepへ進まず、`Lifecycle exception handling` のHuman reviewと停止条件を適用する。
 
 ## Minimum pilot measurements
 

@@ -81,7 +81,9 @@ after-close、intraday、before-openの全caseで、候補時刻をconfirmedへ�
 - `status`
 - `knowledge_version`
 - current `created_at`, `updated_at`, `reconstructed_at`
-- empty `source_evidence_ids`
+- empty `source_evidence_ids` は `historical_reconstruction` に限り自動生成可能
+
+prospectiveでは `source_evidence_ids` はHuman requiredであり、generatorが空配列を自動確定しない。`baseline_draft`でHumanが明示した空配列を許容する条件と、`baseline_lock`で1件以上を必須とする条件は [Obsidian Frontmatter Generator Specification](./OBSIDIAN_FRONTMATTER_GENERATOR_SPEC.md) に従う。
 
 3社18noteで共通fieldは270 occurrencesとなった。固定fieldだけを生成するpreview-first generatorには十分な導入根拠がある。
 

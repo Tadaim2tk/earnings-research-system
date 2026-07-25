@@ -24,6 +24,7 @@
 | TSO snapshotなしで成立 | company/event/evidence captureにTSOを必須としない |
 | Human review時間を確保 | baseline、evidence、event後reviewの担当時間がある |
 | provider terms確認済み | raw/metadata/hash/derived valueの許容範囲を記録済み |
+| postponement contingency準備済み | 延期・中止・訂正・撤回時にbaselineを保持して安全に停止・再reviewできる |
 
 ## 除外条件
 
@@ -87,7 +88,20 @@ exclusion_flags
 selection_score
 decision
 decision_reason
+postponement_contingency
 ```
+
+### Postponement contingency
+
+`postponement_contingency` は最低限、次を事前確認して記録する。
+
+- 発表延期時にHuman reviewを再実施できる。
+- locked baselineを上書きせず、元のlock情報とlineageを保持できる。
+- baselineが有効性を失った場合に、旧baselineを残したnew versionを作成できる。
+- event中止時にscoring、calibration、通常のpost-event reviewから除外できる。
+- 誤開示、撤回、訂正時に元evidenceを保持したappend-only correctionを扱える。
+
+これらは選定時点の運用準備確認であり、`event_cancelled`、`retracted`等のimplementation enumが現行schemaへ実装済みであることを意味しない。正式な状態名とversion/correction relationは別のschema decisionを必要とする。
 
 ## Pilot success measures
 
