@@ -56,10 +56,10 @@
 - paid consensus dataをどのlicense条件で利用できるか。
 - trade decisionとresearch evaluationをどう分離するか。
 - score calibrationをcredibleとするreview済みhistorical case数はいくつか。
-- correctionされた新baseline versionにhuman approvalを必須とするか。
+- correctionされた新baseline versionはHuman approvalを必須とする。review再実施条件の詳細は未決。
 - SNS overheatとmisinformation riskのformal definitionは何か。
 - hypothesisをverifiedにするminimum evidenceは何か。
-- `baseline_record_hash` の計算・独立検証方法。
+- `baseline_record_hash` のV1計算方法は固定field順、型別正規化、compact UTF-8 JSON、SHA-256として定義済み。Git以外のimmutable recordとの独立照合方法は未決。
 - TSO `source_row_hash` のsource rowからの計算方法。
 - loss-makingまたはnear-zero denominatorでsurprise percentageの範囲を +/-100超まで許容するか。
 - `unknown` return policyやexpired score version向けwarning tierを追加するか。

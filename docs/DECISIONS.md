@@ -240,7 +240,7 @@ Context: 3社historical pilotはURLとSource IndexでHuman-readable reuseに成�
 
 Decision: `PROSPECTIVE_EVIDENCE_PILOT_POLICY.md` に従い、`FIRST_PROSPECTIVE_EVENT_SELECTION.md` の条件を満たすHuman承認後の最初のprospective eventからformal evidence運用を開始する。pre-event company forecast/直近決算、official event disclosure、time-bearing primary metadata、price source、hypothesis-supporting primary sourceを最小対象とする。baseline draftはevidence登録前でも許容するが、formal evidence、Human review、timing gateを満たすまでlockせず、未登録claimをprospective scoreへ使わない。
 
-Consequences: look-ahead防止とsource reverse lookupが強化される。hash/raw storage/license statusの表現は `ERS-ADR-0019` のProposed patchで追加するが、Human承認とprospective運用開始は別gateのままとする。
+Consequences: look-ahead防止とsource reverse lookupが強化される。hash/raw storage/license statusの表現はAcceptedの `ERS-ADR-0019` で追加済みだが、prospective運用開始は別gateのままとする。
 
 Alternatives Considered: Source Indexだけでprospective scoringする案はtimingとlineageの機械検証が弱い。すべてのsourceをraw保存する案はlicense/storage条件未確認のため採用しない。
 
@@ -287,3 +287,17 @@ Decision: `PROSPECTIVE_EVIDENCE_METADATA.md` に従い、既存 `evidence` row�
 Consequences: identity、timing、storage/license、lineageを同じ `evidence_id` で検証できる。新metadataを採用しない既存rowは変更不要だが、prospective rowではstatus bundleとcross-field rulesが必要になる。schema追加だけではscoring、baseline lock、historical evidence昇格を有効化しない。
 
 Alternatives Considered: sidecar metadata schemaはjoinとlineageの二重管理が増えるため採用しない。全field必須化と既存CSV migrationは初回prospective前の互換性costが高い。event lifecycleとbaseline parent/version/lock relationはownershipが異なるため別PRへ分離する。
+
+## ERS-ADR-0020
+
+Date: 2026-07-25
+
+Status: Proposed
+
+Context: prospective formal evidence metadataはAcceptedとなったが、baseline自体はdraftとlockedの明示的な区別、Human review gate、再計算可能なlock hash、延期時のappend-only versioningを機械保証していない。evidenceだけを固定してもbaseline本文とscoreを発表後に上書きできればfuture leakageを防げない。
+
+Decision: [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) に従い、既存baseline rowへbackward-compatible optional columnsを追加する。prospective rowは `draft` または `locked` を明示し、lockedにはHuman approval、`locked_at`、canonical SHA-256 hash、formal evidence、score利用承認済みevidenceを要求する。versionはeventごとに単調増加し、locked `v2` 以降は同一eventの先行rowを `supersedes_baseline_id` で参照する。旧rowは上書き・削除しない。event cancellation enumは本ADRの対象外とする。
+
+Consequences: 発表後情報のscore混入、draftの誤利用、self/missing/forward/cross-event supersession、hash不一致をvalidatorで停止できる。旧42列CSVは維持できる一方、prospective 49列rowには厳格なstatus bundleが必要になる。snapshot内でcontentとhashを同時に改変する行為の独立検出、cross-file lineage、event cancellationは未実装である。本ADRがAcceptedになるまでprospective event選定・運用開始を承認しない。
+
+Alternatives Considered: 既存 `is_locked` と自由形式hashだけを継続する案はHuman reviewとhash再計算を検証できない。`superseded` statusで旧rowを書き換える案はappend-onlyを壊す。event cancellationをbaseline statusへ追加する案はevent lifecycleとbaseline lifecycleの責務を混同するため採用しない。

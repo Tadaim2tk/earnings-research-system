@@ -41,6 +41,8 @@ Primary key: `baseline_id`. Foreign key: `earnings_event_id`. Unique key: `earni
 
 Important fields include consensus values, company guidance, factor scores, evidence timing fields, `pre_event_score`, `pre_event_grade`, `pre_event_decision`, `pre_event_reason`, `scoring_version`, `is_locked`, `baseline_record_hash`, and `recorded_at`.
 
+Prospective rows may add `baseline_status`, `supersedes_baseline_id`, `supersession_reason`, `lock_hash_algorithm`, `human_review_status`, `reviewed_by`, and `reviewed_at`. Their full status, hash, version, Human review, and evidence gate is defined in [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md).
+
 Timing fields:
 
 - `as_of_datetime`: timestamp the baseline claims to represent
@@ -50,6 +52,10 @@ Timing fields:
 - `recorded_at`: row recording timestamp
 
 The validator requires pre-event timestamps to be before the earnings announcement.
+
+For a prospective `locked` row, the validator additionally requires `is_locked=true`, Human approval, a matching canonical SHA-256 record hash, append-only version lineage, related formal evidence, at least one `used_for_score=true` evidence row, and no baseline/evidence/review timestamp after `locked_at`. A `draft` row cannot carry lock fields, supersede another baseline, provide score-approved evidence, or be referenced by a post-event review.
+
+Legacy 42-column CSV files remain valid without the seven prospective headers. New prospective samples use the 49-column contract.
 
 ## post_earnings_review
 

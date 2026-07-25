@@ -2,7 +2,7 @@
 
 ## Status
 
-`Proposed`. 本書は `ERS-ADR-0019` のreview対象であり、Human承認前にprospective evidence登録やscoringを開始しない。
+`Accepted`. `ERS-ADR-0019` でHuman承認済み。ただしprospective evidence実データ登録やscoringの開始は別のHuman approval gateとする。
 
 ## Scope
 
