@@ -240,7 +240,7 @@ Context: 3社historical pilotはURLとSource IndexでHuman-readable reuseに成�
 
 Decision: `PROSPECTIVE_EVIDENCE_PILOT_POLICY.md` に従い、`FIRST_PROSPECTIVE_EVENT_SELECTION.md` の条件を満たすHuman承認後の最初のprospective eventからformal evidence運用を開始する。pre-event company forecast/直近決算、official event disclosure、time-bearing primary metadata、price source、hypothesis-supporting primary sourceを最小対象とする。baseline draftはevidence登録前でも許容するが、formal evidence、Human review、timing gateを満たすまでlockせず、未登録claimをprospective scoreへ使わない。
 
-Consequences: look-ahead防止とsource reverse lookupが強化される。現行evidence schemaにはhash/raw storage/license statusの専用列がないため、prospective開始前に保存mappingを別実装taskで承認する必要がある。
+Consequences: look-ahead防止とsource reverse lookupが強化される。hash/raw storage/license statusの表現は `ERS-ADR-0019` のProposed patchで追加するが、Human承認とprospective運用開始は別gateのままとする。
 
 Alternatives Considered: Source Indexだけでprospective scoringする案はtimingとlineageの機械検証が弱い。すべてのsourceをraw保存する案はlicense/storage条件未確認のため採用しない。
 
@@ -271,3 +271,19 @@ Decision: `TSO_SNAPSHOT_DEFER_DECISION.md` に従い、TSO snapshot importとada
 Consequences: ERS/TSOの結合度と誤mapping riskを抑えられる。TSO contextを使ったscore/event correlationは延期されるが、現在の決算知識再利用には影響しない。
 
 Alternatives Considered: historical 3社へ後付けsnapshotを作る案はprospective lockがなく価値が低い。TSO_LOGを直接共有・同期する案はownershipとrollback境界を壊すため採用しない。
+
+## ERS-ADR-0019
+
+Date: 2026-07-25
+
+Status: Accepted
+
+Approval: Human承認。schema、validator、docs、testsの整合と旧20列CSV互換性を維持し、optional fieldによるvalidation bypassがないことを独立監査で確認した。`raw_storage_status=stored` は `license_status=permitted` を必須とし、hash mismatchをblocking errorとする。correction lineageはself、missing、forward、entity mismatchを拒否する。既存64 testsに加えて独立監査の一時境界case 36件で誤受理がないことを確認した。本schema承認はprospective evidence実データ登録、baseline lock、scoring、prospective運用開始の自動承認ではない。
+
+Context: prospective formal evidenceにはcontent hash、raw storage、license判断、source correction lineageが必要だが、既存 `evidence` schemaには専用fieldがない。sidecarは既存headerを維持できる一方、`evidence_id` join欠落、孤立metadata、重複lineageのriskがある。
+
+Decision: `PROSPECTIVE_EVIDENCE_METADATA.md` に従い、既存 `evidence` rowへoptional direct columnsを追加する。追加8fieldのいずれかを使用した場合にhash/storage/licenseの3statusすべてを要求し、`license_status=permitted`以外のraw保存、verified hash欠落、hash mismatchをerrorにする。correction/retractionは `evidence_status` と `supersedes_evidence_id` を持つ新rowとしてappendし、元rowを変更しない。旧CSVはoptional headerなしでもvalidatorが受理する。
+
+Consequences: identity、timing、storage/license、lineageを同じ `evidence_id` で検証できる。新metadataを採用しない既存rowは変更不要だが、prospective rowではstatus bundleとcross-field rulesが必要になる。schema追加だけではscoring、baseline lock、historical evidence昇格を有効化しない。
+
+Alternatives Considered: sidecar metadata schemaはjoinとlineageの二重管理が増えるため採用しない。全field必須化と既存CSV migrationは初回prospective前の互換性costが高い。event lifecycleとbaseline parent/version/lock relationはownershipが異なるため別PRへ分離する。

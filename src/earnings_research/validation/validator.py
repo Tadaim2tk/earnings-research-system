@@ -138,6 +138,8 @@ def validate_file(path: Path) -> ValidationReport:
         issues.extend(_validate_append_only_constraints({spec.table: rows}))
     if spec.table == "hypothesis_log":
         issues.extend(_validate_hypothesis_constraints({spec.table: rows}))
+    if spec.table == "evidence":
+        issues.extend(_validate_evidence_metadata_constraints(rows))
     return ValidationReport(issues)
 
 
@@ -337,8 +339,11 @@ def _validate_evidence_constraints(specs: Dict[str, TableSpec], rows_by_table: D
     issues = []
     id_sets = _build_primary_id_sets(specs, rows_by_table)
     context = _build_evidence_context(rows_by_table)
+    evidence_rows = rows_by_table.get("evidence", [])
 
-    for row_number, row in enumerate(rows_by_table.get("evidence", []), start=2):
+    issues.extend(_validate_evidence_metadata_constraints(evidence_rows))
+
+    for row_number, row in enumerate(evidence_rows, start=2):
         related_type = _clean(row.get("related_entity_type", ""))
         related_id = _clean(row.get("related_entity_id", ""))
         if related_type in id_sets and related_id not in id_sets[related_type]:
@@ -378,6 +383,169 @@ def _validate_evidence_constraints(specs: Dict[str, TableSpec], rows_by_table: D
             issues.append(ValidationIssue("evidence", row_number, "source_type", "post-event review evidence cannot be used for a pre-event score"))
         if _clean(row.get("score_component", "")).startswith("post_event"):
             issues.append(ValidationIssue("evidence", row_number, "score_component", "post-event score component cannot support a pre-event baseline"))
+    return issues
+
+
+def _validate_evidence_metadata_constraints(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    issues = []
+    row_number_by_id = {
+        _clean(row.get("evidence_id", "")): row_number
+        for row_number, row in enumerate(rows, start=2)
+        if _clean(row.get("evidence_id", ""))
+    }
+    row_by_id = {
+        _clean(row.get("evidence_id", "")): row
+        for row in rows
+        if _clean(row.get("evidence_id", ""))
+    }
+
+    for row_number, row in enumerate(rows, start=2):
+        evidence_id = _clean(row.get("evidence_id", ""))
+        evidence_status = _clean(row.get("evidence_status", ""))
+        supersedes_id = _clean(row.get("supersedes_evidence_id", ""))
+        hash_status = _clean(row.get("content_hash_status", ""))
+        content_hash = _clean(row.get("content_hash", ""))
+        hash_algorithm = _clean(row.get("content_hash_algorithm", ""))
+        raw_status = _clean(row.get("raw_storage_status", ""))
+        raw_location = _clean(row.get("raw_location", ""))
+        license_status = _clean(row.get("license_status", ""))
+
+        metadata_fields = {
+            "evidence_status": evidence_status,
+            "supersedes_evidence_id": supersedes_id,
+            "content_hash_status": hash_status,
+            "content_hash": content_hash,
+            "content_hash_algorithm": hash_algorithm,
+            "raw_storage_status": raw_status,
+            "raw_location": raw_location,
+            "license_status": license_status,
+        }
+        metadata_statuses = {
+            "content_hash_status": hash_status,
+            "raw_storage_status": raw_status,
+            "license_status": license_status,
+        }
+        if any(metadata_fields.values()):
+            for column, value in metadata_statuses.items():
+                if not value:
+                    issues.append(
+                        ValidationIssue("evidence", row_number, column, "evidence metadata status bundle is incomplete")
+                    )
+
+        if raw_status == "stored":
+            if license_status != "permitted":
+                issues.append(
+                    ValidationIssue(
+                        "evidence",
+                        row_number,
+                        "license_status",
+                        "raw storage requires license_status permitted",
+                    )
+                )
+            if not raw_location:
+                issues.append(ValidationIssue("evidence", row_number, "raw_location", "stored raw evidence requires raw_location"))
+        elif raw_location:
+            issues.append(
+                ValidationIssue("evidence", row_number, "raw_location", "raw_location is only allowed when raw_storage_status is stored")
+            )
+
+        if hash_status in {"verified", "recorded_unverified", "mismatch"}:
+            if not content_hash or not hash_algorithm:
+                issues.append(
+                    ValidationIssue(
+                        "evidence",
+                        row_number,
+                        "content_hash",
+                        "%s content hash requires content_hash and content_hash_algorithm" % hash_status,
+                    )
+                )
+            elif hash_algorithm == "sha256" and (
+                len(content_hash) != 64 or any(character not in "0123456789abcdefABCDEF" for character in content_hash)
+            ):
+                issues.append(
+                    ValidationIssue("evidence", row_number, "content_hash", "sha256 content_hash must be 64 hexadecimal characters")
+                )
+        elif hash_status in {"not_recorded", "not_applicable"} and (content_hash or hash_algorithm):
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "content_hash",
+                    "content hash value must be blank when content_hash_status is %s" % hash_status,
+                )
+            )
+
+        if hash_status == "mismatch":
+            issues.append(
+                ValidationIssue("evidence", row_number, "content_hash_status", "content hash mismatch blocks evidence validation")
+            )
+
+        if evidence_status in {"correction", "retraction_notice"} and not supersedes_id:
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "supersedes_evidence_id",
+                    "evidence_status correction or retraction_notice requires supersedes_evidence_id",
+                )
+            )
+        if evidence_status == "original" and supersedes_id:
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "supersedes_evidence_id",
+                    "original evidence cannot supersede another evidence row",
+                )
+            )
+        if supersedes_id and evidence_status not in {"correction", "retraction_notice"}:
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "evidence_status",
+                    "supersedes_evidence_id requires evidence_status correction or retraction_notice",
+                )
+            )
+        if not supersedes_id:
+            continue
+        if supersedes_id == evidence_id:
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "supersedes_evidence_id",
+                    "supersedes_evidence_id cannot reference the same evidence_id",
+                )
+            )
+            continue
+        parent = row_by_id.get(supersedes_id)
+        if parent is None:
+            issues.append(
+                ValidationIssue("evidence", row_number, "supersedes_evidence_id", "superseded evidence_id not found")
+            )
+            continue
+        if row_number_by_id[supersedes_id] >= row_number:
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "supersedes_evidence_id",
+                    "supersedes_evidence_id must reference an earlier evidence row",
+                )
+            )
+        if (
+            _clean(parent.get("related_entity_type", "")) != _clean(row.get("related_entity_type", ""))
+            or _clean(parent.get("related_entity_id", "")) != _clean(row.get("related_entity_id", ""))
+        ):
+            issues.append(
+                ValidationIssue(
+                    "evidence",
+                    row_number,
+                    "supersedes_evidence_id",
+                    "correction lineage must keep related entity unchanged",
+                )
+            )
     return issues
 
 

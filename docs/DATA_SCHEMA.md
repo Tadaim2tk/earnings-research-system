@@ -107,8 +107,18 @@ The relation is polymorphic through `related_entity_type` and `related_entity_id
 | verified_status | enum | no | verified, partially_verified, unverified, terms_unreviewed, retracted |
 | used_for_score | boolean | no | Whether evidence influenced a score |
 | score_component | string | yes | Score component supported by this evidence |
+| evidence_status | enum | yes | original, correction, or retraction_notice append-only row role |
+| supersedes_evidence_id | string | yes | Earlier evidence row corrected or retracted by this row |
+| content_hash_status | enum | yes | Hash verification/recording state; mismatch blocks validation |
+| content_hash | string | yes | Recorded content hash when applicable |
+| content_hash_algorithm | enum | yes | Hash algorithm; initially sha256 |
+| raw_storage_status | enum | yes | stored, metadata_only, storage_prohibited, storage_pending_review, unavailable |
+| raw_location | string | yes | Approved raw storage identifier; required only when stored |
+| license_status | enum | yes | permitted, restricted, unknown, not_applicable, review_required |
 | created_by | string | no | Agent or human entering the evidence |
 | notes | string | yes | Additional restrictions or review notes |
+
+The prospective metadata fields are backward-compatible optional columns. When any of the eight fields is populated, `content_hash_status`, `raw_storage_status`, and `license_status` must all be present. Raw storage requires `license_status=permitted`. Correction lineage is append-only and keeps the original evidence row unchanged.
 
 ## kpi_observation
 

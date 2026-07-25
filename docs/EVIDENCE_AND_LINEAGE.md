@@ -22,6 +22,10 @@ Evidence records explain what the research system knew, when it knew it, and whe
 
 `verified_status` must remain conservative. SNS, message board, and unreviewed source data should not be treated as verified factual evidence.
 
+Optional prospective metadata is stored on the same evidence row. `content_hash_status`, `raw_storage_status`, and `license_status` form a complete status bundle when any of the eight metadata fields is present. Hash values use an explicit algorithm. Raw storage requires `license_status=permitted` and a `raw_location`; a source URL is not a raw storage location.
+
+Corrections are append-only. A row with `evidence_status=correction` or `retraction_notice` points to an earlier row through `supersedes_evidence_id`. The original row remains unchanged, and lineage cannot change the related entity.
+
 ## Current Validation
 
 The initial validator checks:
@@ -33,7 +37,10 @@ The initial validator checks:
 - Evidence used for pre-event scoring was not recorded after the baseline timestamp or at/after the earnings announcement, depending on the resolvable context.
 - Post-event review evidence is not used for pre-event score components.
 - Event-level and KPI-linked evidence with `score_component` beginning with `pre_` is checked against the relevant earnings announcement.
+- Hash, storage, and license status combinations are complete and internally consistent.
+- Hash mismatch blocks validation.
+- Correction and retraction rows reference an existing earlier evidence row and preserve the related entity.
 
 ## Future Validation
 
-SQLite or PostgreSQL should eventually replace polymorphic CSV references with explicit link tables, such as `baseline_evidence`, `review_evidence`, and `tso_snapshot_evidence`. A richer lineage model should also track source file hashes, extraction method, license status, and whether a raw excerpt is allowed to be stored.
+SQLite or PostgreSQL should eventually replace polymorphic CSV references with explicit link tables, such as `baseline_evidence`, `review_evidence`, and `tso_snapshot_evidence`. Extraction method and provider-specific retention terms remain future metadata decisions.
