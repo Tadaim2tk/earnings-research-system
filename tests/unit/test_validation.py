@@ -8,6 +8,7 @@ from earnings_research.cli.__main__ import main as cli_main
 from earnings_research.validation.validator import (
     BASELINE_LOCK_HASH_FIELDS_V1,
     _calculate_baseline_record_hash,
+    _validate_event_lifecycle_constraints,
     load_spec,
     validate_dataset,
     validate_file,
@@ -18,6 +19,7 @@ SAMPLES = PROJECT_ROOT / "data" / "samples"
 PROSPECTIVE_EVIDENCE_SAMPLE = SAMPLES / "prospective_evidence" / "evidence_sample.csv"
 INVALID_EVIDENCE_SAMPLES = SAMPLES / "invalid_evidence"
 PROSPECTIVE_BASELINE_SAMPLES = SAMPLES / "prospective_baseline"
+PROSPECTIVE_EVENT_LIFECYCLE_SAMPLES = SAMPLES / "prospective_event_lifecycle"
 EVIDENCE_METADATA_FIELDS = [
     "evidence_status",
     "supersedes_evidence_id",
@@ -104,6 +106,10 @@ def copy_prospective_baseline_dataset(tmp_path):
 
 def prospective_baseline_fixture():
     return read_rows(PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv")
+
+
+def event_lifecycle_fixture():
+    return read_rows(PROSPECTIVE_EVENT_LIFECYCLE_SAMPLES / "event_status_history_sample.csv")
 
 
 def rehash_baseline(row):
@@ -343,6 +349,425 @@ def test_cli_baseline_crash_regressions_exit_one(
     assert exit_code == 1
     assert expected_issue in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_legacy_earnings_event_sample_still_passes():
+    report = validate_file(SAMPLES / "earnings_event_sample.csv")
+    assert report.ok, issue_text(report)
+
+
+def test_event_lifecycle_positive_fixture_passes():
+    report = validate_file(PROSPECTIVE_EVENT_LIFECYCLE_SAMPLES / "event_status_history_sample.csv")
+    assert report.ok, issue_text(report)
+
+
+def test_event_lifecycle_enum_is_validated(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows[0]["event_status"] = "rescheduled"
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "is not in allowed set" in issue_text(report)
+
+
+@pytest.mark.parametrize("first_status", ["postponed", "cancelled", "occurred"])
+def test_first_event_status_must_be_scheduled(tmp_path, first_status):
+    fieldnames, rows = event_lifecycle_fixture()
+    first = rows[0]
+    first["event_status"] = first_status
+    first["status_reason"] = "Initial state bypass" if first_status in {"postponed", "cancelled"} else ""
+    first["previous_scheduled_at"] = "2026-09-25T15:30:00+09:00" if first_status == "postponed" else ""
+    first["occurred_at"] = "2026-09-01T08:55:00+09:00" if first_status == "occurred" else ""
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "initial event status must be scheduled" in issue_text(report)
+
+
+def test_first_scheduled_status_cannot_have_supersession_reference(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows[0]["supersedes_status_record_id"] = rows[1]["event_status_record_id"]
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "status supersession must reference an earlier row" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_issue"),
+    [
+        ("self", "status record cannot supersede itself"),
+        ("missing", "superseded status record not found"),
+        ("event_mismatch", "status lineage must keep earnings_event_id unchanged"),
+        ("timestamp_regression", "status_recorded_at must increase monotonically"),
+    ],
+)
+def test_event_status_lineage_failures(tmp_path, mutation, expected_issue):
+    fieldnames, rows = event_lifecycle_fixture()
+    target = rows[1]
+    if mutation == "self":
+        target["supersedes_status_record_id"] = target["event_status_record_id"]
+    elif mutation == "missing":
+        target["supersedes_status_record_id"] = "EVST-NOT-FOUND"
+    elif mutation == "event_mismatch":
+        target["earnings_event_id"] = "EVT-PILOT-B"
+    else:
+        target["status_recorded_at"] = "2026-08-31T09:00:00+09:00"
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert expected_issue in issue_text(report)
+
+
+def test_event_status_forward_reference_fails(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    first = rows.pop(0)
+    rows.insert(1, first)
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "status supersession must reference an earlier row" in issue_text(report)
+
+
+def test_event_status_duplicate_id_fails(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows.append(dict(rows[-1]))
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "duplicate unique key" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    ("row_index", "field_name", "value", "expected_issue"),
+    [
+        (3, "occurred_at", "", "occurred status requires occurred_at"),
+        (1, "occurred_at", "2026-09-28T10:00:00+09:00", "non-occurred status must not contain occurred_at"),
+        (1, "previous_scheduled_at", "", "postponed status must preserve the previous scheduled_at"),
+        (5, "status_reason", "", "cancelled status requires status_reason"),
+    ],
+)
+def test_event_status_cross_field_failures(tmp_path, row_index, field_name, value, expected_issue):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows[row_index][field_name] = value
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert expected_issue in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    ("terminal_status", "next_status"),
+    [
+        ("occurred", "scheduled"), ("occurred", "postponed"), ("occurred", "cancelled"), ("occurred", "occurred"),
+        ("cancelled", "scheduled"), ("cancelled", "postponed"), ("cancelled", "cancelled"), ("cancelled", "occurred"),
+    ],
+)
+def test_terminal_event_status_transitions_fail(tmp_path, terminal_status, next_status):
+    fieldnames, rows = event_lifecycle_fixture()
+    terminal = rows[3] if terminal_status == "occurred" else rows[5]
+    next_row = dict(terminal)
+    next_row["event_status_record_id"] += "-INVALID"
+    next_row["event_status"] = next_status
+    next_row["supersedes_status_record_id"] = terminal["event_status_record_id"]
+    next_row["status_recorded_at"] = "2026-10-16T10:00:00+09:00"
+    next_row["occurred_at"] = "2026-10-16T09:00:00+09:00" if next_status == "occurred" else ""
+    next_row["status_reason"] = "Invalid transition test" if next_status in {"postponed", "cancelled"} else ""
+    if next_status == "postponed":
+        next_row["previous_scheduled_at"] = terminal["scheduled_at"]
+        next_row["scheduled_at"] = "2026-10-20T15:30:00+09:00"
+    rows.append(next_row)
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "invalid event status transition" in issue_text(report)
+
+
+def test_event_status_branching_fails(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    branch = dict(rows[2])
+    branch["event_status_record_id"] = "EVST-PILOT-A-BRANCH"
+    branch["event_status"] = "cancelled"
+    branch["scheduled_at"] = rows[1]["scheduled_at"]
+    branch["previous_scheduled_at"] = ""
+    branch["status_recorded_at"] = "2026-10-07T10:00:00+09:00"
+    branch["occurred_at"] = ""
+    branch["status_reason"] = "Invalid branch"
+    branch["supersedes_status_record_id"] = rows[1]["event_status_record_id"]
+    rows.append(branch)
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "status lineage cannot branch from a non-current record" in issue_text(report)
+    assert "multiple active status tails" in issue_text(report)
+
+
+def test_cancelled_event_rejects_post_event_review(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "event_status_history_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[1].update(
+        {
+            "event_status": "cancelled",
+            "occurred_at": "",
+            "status_reason": "Company cancelled disclosure",
+        }
+    )
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "cancelled event cannot have post-event review or scoring" in issue_text(report)
+
+
+def test_replacement_event_requires_same_company(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "event_status_history_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[1].update(
+        {
+            "event_status": "cancelled",
+            "occurred_at": "",
+            "status_reason": "Replaced by another event",
+            "replacement_event_id": "EVT-HOKUTO-2026Q1",
+        }
+    )
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "replacement event must belong to the same company" in issue_text(report)
+
+
+def test_missing_replacement_event_fails(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "event_status_history_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[1].update(
+        {
+            "event_status": "cancelled",
+            "occurred_at": "",
+            "status_reason": "Replacement not registered",
+            "replacement_event_id": "EVT-NOT-FOUND",
+        }
+    )
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "foreign key not found" in issue_text(report)
+
+
+def test_replacement_event_same_company_is_allowed():
+    event_rows = [
+        {"earnings_event_id": "E1", "company_id": "C1", "announcement_date": "2026-10-01", "announcement_time": "15:30"},
+        {"earnings_event_id": "E2", "company_id": "C1", "announcement_date": "2026-11-01", "announcement_time": "15:30"},
+    ]
+    statuses = [
+        {"event_status_record_id": "S1", "earnings_event_id": "E1", "event_status": "scheduled", "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00"},
+        {"event_status_record_id": "S2", "earnings_event_id": "E1", "event_status": "cancelled", "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-20T09:00:00+09:00", "status_reason": "Replaced", "supersedes_status_record_id": "S1", "replacement_event_id": "E2"},
+        {"event_status_record_id": "S3", "earnings_event_id": "E2", "event_status": "scheduled", "scheduled_at": "2026-11-01T15:30:00+09:00", "status_recorded_at": "2026-09-20T09:05:00+09:00"},
+    ]
+    issues = _validate_event_lifecycle_constraints(
+        {"earnings_event": event_rows, "event_status_history": statuses}
+    )
+    assert not issues, "\n".join(issue.format() for issue in issues)
+
+
+def test_replacement_event_is_rejected_for_non_cancelled_status(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows[3]["replacement_event_id"] = "EVT-PILOT-B"
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "replacement_event_id is only allowed for cancelled status" in issue_text(report)
+
+
+def test_early_occurrence_is_allowed(tmp_path):
+    fieldnames, rows = event_lifecycle_fixture()
+    rows[3]["occurred_at"] = "2026-10-15T15:00:00+09:00"
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert report.ok, issue_text(report)
+
+
+def test_scheduled_event_rejects_return_and_review(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "event_status_history_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows = [row for row in rows if row["event_status_record_id"] != "EVST-ASTER-002"]
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "post-event review requires current event status occurred" in issue_text(report)
+    assert "event return requires occurred status" in issue_text(report)
+
+
+def test_postponed_event_requires_revalidated_baseline_before_occurred():
+    statuses = [
+        {
+            "event_status_record_id": "S1", "earnings_event_id": "E1", "event_status": "scheduled",
+            "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00",
+        },
+        {
+            "event_status_record_id": "S2", "earnings_event_id": "E1", "event_status": "postponed",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "previous_scheduled_at": "2026-10-01T15:30:00+09:00",
+            "status_recorded_at": "2026-09-28T10:00:00+09:00", "status_reason": "Delay",
+            "supersedes_status_record_id": "S1",
+        },
+        {
+            "event_status_record_id": "S3", "earnings_event_id": "E1", "event_status": "occurred",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "status_recorded_at": "2026-10-08T15:35:00+09:00",
+            "occurred_at": "2026-10-08T15:30:00+09:00", "supersedes_status_record_id": "S2",
+        },
+    ]
+    stale_baseline = {
+        "earnings_event_id": "E1", "baseline_status": "locked", "reviewed_at": "2026-09-20T10:00:00+09:00",
+        "locked_at": "2026-09-20T10:05:00+09:00",
+    }
+    report = _validate_event_lifecycle_constraints(
+        {"event_status_history": statuses, "pre_earnings_baseline": [stale_baseline]}
+    )
+    messages = "\n".join(issue.format() for issue in report)
+    assert "occurred event after postponement requires a revalidated locked baseline" in messages
+
+
+def test_postponed_event_accepts_revalidated_locked_baseline():
+    statuses = [
+        {
+            "event_status_record_id": "S1", "earnings_event_id": "E1", "event_status": "scheduled",
+            "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00",
+        },
+        {
+            "event_status_record_id": "S2", "earnings_event_id": "E1", "event_status": "postponed",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "previous_scheduled_at": "2026-10-01T15:30:00+09:00",
+            "status_recorded_at": "2026-09-28T10:00:00+09:00", "status_reason": "Delay",
+            "supersedes_status_record_id": "S1",
+        },
+        {
+            "event_status_record_id": "S3", "earnings_event_id": "E1", "event_status": "occurred",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "status_recorded_at": "2026-10-08T15:35:00+09:00",
+            "occurred_at": "2026-10-08T15:30:00+09:00", "supersedes_status_record_id": "S2",
+        },
+    ]
+    revalidated_baseline = {
+        "earnings_event_id": "E1", "baseline_status": "locked", "reviewed_at": "2026-09-29T10:00:00+09:00",
+        "locked_at": "2026-09-29T10:05:00+09:00",
+    }
+    issues = _validate_event_lifecycle_constraints(
+        {"event_status_history": statuses, "pre_earnings_baseline": [revalidated_baseline]}
+    )
+    assert not issues, "\n".join(issue.format() for issue in issues)
+
+
+def test_legacy_dataset_without_lifecycle_file_still_passes(tmp_path):
+    samples = copy_samples(tmp_path)
+    (samples / "event_status_history_sample.csv").unlink()
+
+    report = validate_dataset(samples)
+    assert report.ok, issue_text(report)
+
+
+def test_prospective_baseline_activates_lifecycle_requirement(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    (samples / "event_status_history_sample.csv").unlink()
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "has no unique current lifecycle status" in issue_text(report)
+
+
+def test_occurred_review_requires_locked_baseline(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "pre_earnings_baseline_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["is_locked"] = "false"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "post-event review requires a matching locked baseline" in issue_text(report)
+
+
+def test_cli_event_lifecycle_validation(capsys):
+    path = PROSPECTIVE_EVENT_LIFECYCLE_SAMPLES / "event_status_history_sample.csv"
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Validation passed." in captured.out
+
+
+@pytest.mark.parametrize("failure_mode", ["invalid_transition", "missing_target", "malformed_datetime", "multiple_tails"])
+def test_cli_event_lifecycle_failures_exit_one(tmp_path, capsys, failure_mode):
+    fieldnames, rows = event_lifecycle_fixture()
+    if failure_mode == "invalid_transition":
+        invalid = dict(rows[3])
+        invalid["event_status_record_id"] = "EVST-INVALID-TRANSITION"
+        invalid["event_status"] = "scheduled"
+        invalid["occurred_at"] = ""
+        invalid["status_recorded_at"] = "2026-10-16T10:00:00+09:00"
+        invalid["supersedes_status_record_id"] = rows[3]["event_status_record_id"]
+        rows.append(invalid)
+    elif failure_mode == "missing_target":
+        rows[1]["supersedes_status_record_id"] = "EVST-NOT-FOUND"
+    elif failure_mode == "malformed_datetime":
+        rows[1]["status_recorded_at"] = "not-a-date"
+    else:
+        branch = dict(rows[5])
+        branch["event_status_record_id"] = "EVST-PILOT-B-BRANCH"
+        branch["status_recorded_at"] = "2026-09-30T11:00:00+09:00"
+        branch["supersedes_status_record_id"] = rows[4]["event_status_record_id"]
+        rows.append(branch)
+    path = tmp_path / "event_status_history_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Validation failed:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_cancelled_event_with_review_exits_one(tmp_path, capsys):
+    samples = copy_samples(tmp_path)
+    path = samples / "event_status_history_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[1].update(
+        {"event_status": "cancelled", "occurred_at": "", "status_reason": "Cancelled"}
+    )
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate", str(samples)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "cancelled event cannot have post-event review or scoring" in captured.err
+    assert "event return requires occurred status" in captured.err
 
 
 @pytest.mark.parametrize(
