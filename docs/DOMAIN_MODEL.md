@@ -6,7 +6,7 @@
 
 `earnings_event` represents one earnings announcement for one company and fiscal period.
 
-`pre_earnings_baseline` is the locked pre-announcement expectation snapshot. It stores consensus, guidance, factor scores, evidence timing, scoring version, and the pre-event decision.
+`pre_earnings_baseline` is a draft or locked pre-announcement expectation snapshot. It stores consensus, guidance, factor scores, evidence timing, scoring version, Human review state, and the pre-event decision.
 
 `post_earnings_review` records announced results, surprise metrics, market reaction, decision outcome, and later review windows.
 
@@ -31,7 +31,9 @@ The lifecycle is registration, pre-event research, baseline lock, announcement, 
 
 ## Baseline Lock
 
-After `locked_at`, a baseline should not be modified in place. Corrections should create a new baseline version or a new hypothesis/correction record that points to the prior record. The validator detects duplicate locked baseline keys and conflicting hashes as an initial protection.
+After `locked_at`, a baseline must not be modified in place. A replacement is a later locked version with `supersedes_baseline_id` and a reason; the prior row remains visible. Draft rows cannot be used for scoring or post-event review. The validator checks Human approval, canonical hash, monotonic versioning, same-event backward lineage, evidence completeness, and pre-lock timing as defined in [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md).
+
+Event cancellation is not a baseline status. It remains a separate event lifecycle concern and does not mutate or delete the preserved baseline.
 
 ## Hypothesis Management
 

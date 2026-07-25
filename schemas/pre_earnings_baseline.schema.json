@@ -11,7 +11,7 @@
     {"name": "earnings_event_id", "type": "string", "required": true},
     {"name": "baseline_version", "type": "string", "required": true},
     {"name": "as_of_datetime", "type": "datetime", "required": true},
-    {"name": "locked_at", "type": "datetime", "required": true},
+    {"name": "locked_at", "type": "datetime", "required": false},
     {"name": "analyst", "type": "string", "required": true},
     {"name": "market_consensus_revenue", "type": "decimal", "required": false, "min": 0},
     {"name": "market_consensus_operating_income", "type": "decimal", "required": false},
@@ -47,7 +47,14 @@
     {"name": "source_data_max_observed_at", "type": "datetime", "required": true},
     {"name": "uses_post_event_data", "type": "boolean", "required": true},
     {"name": "is_locked", "type": "boolean", "required": true},
-    {"name": "baseline_record_hash", "type": "string", "required": true},
+    {"name": "baseline_record_hash", "type": "string", "required": false},
+    {"name": "baseline_status", "type": "enum", "required": false, "header_required": false, "allowed": ["draft", "locked"]},
+    {"name": "supersedes_baseline_id", "type": "string", "required": false, "header_required": false},
+    {"name": "supersession_reason", "type": "string", "required": false, "header_required": false},
+    {"name": "lock_hash_algorithm", "type": "enum", "required": false, "header_required": false, "allowed": ["sha256"]},
+    {"name": "human_review_status", "type": "enum", "required": false, "header_required": false, "allowed": ["pending", "approved", "rejected"]},
+    {"name": "reviewed_by", "type": "string", "required": false, "header_required": false},
+    {"name": "reviewed_at", "type": "datetime", "required": false, "header_required": false},
     {"name": "recorded_at", "type": "datetime", "required": true}
   ]
 }

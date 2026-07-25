@@ -4,12 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from earnings_research.validation.validator import validate_dataset, validate_file
+from earnings_research.cli.__main__ import main as cli_main
+from earnings_research.validation.validator import (
+    BASELINE_LOCK_HASH_FIELDS_V1,
+    _calculate_baseline_record_hash,
+    load_spec,
+    validate_dataset,
+    validate_file,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = PROJECT_ROOT / "data" / "samples"
 PROSPECTIVE_EVIDENCE_SAMPLE = SAMPLES / "prospective_evidence" / "evidence_sample.csv"
 INVALID_EVIDENCE_SAMPLES = SAMPLES / "invalid_evidence"
+PROSPECTIVE_BASELINE_SAMPLES = SAMPLES / "prospective_baseline"
 EVIDENCE_METADATA_FIELDS = [
     "evidence_status",
     "supersedes_evidence_id",
@@ -43,6 +51,63 @@ def write_rows(path, fieldnames, rows):
 
 def issue_text(report):
     return "\n".join(issue.format() for issue in report.issues)
+
+
+def copy_prospective_baseline_dataset(tmp_path):
+    samples = copy_samples(tmp_path)
+    baseline_path = samples / "pre_earnings_baseline_sample.csv"
+    baseline_fieldnames, baseline_rows = read_rows(baseline_path)
+    fixture_fieldnames, fixture_rows = read_rows(PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv")
+    fixture_by_id = {row["baseline_id"]: row for row in fixture_rows}
+    existing_baseline_ids = {row["baseline_id"] for row in baseline_rows}
+    normalized_baselines = []
+    spec = load_spec("pre_earnings_baseline")
+    for source_row in baseline_rows:
+        if source_row["baseline_id"] in fixture_by_id:
+            normalized_baselines.append(dict(fixture_by_id[source_row["baseline_id"]]))
+            continue
+        row = {field: source_row.get(field, "") for field in fixture_fieldnames}
+        row.update(
+            {
+                "baseline_status": "locked",
+                "lock_hash_algorithm": "sha256",
+                "human_review_status": "approved",
+                "reviewed_by": "test-reviewer",
+                "reviewed_at": row["locked_at"],
+                "recorded_at": row["locked_at"],
+            }
+        )
+        row["baseline_record_hash"] = _calculate_baseline_record_hash(row, spec)
+        normalized_baselines.append(row)
+    normalized_baselines.extend(row for row in fixture_rows if row["baseline_id"] not in existing_baseline_ids)
+    write_rows(baseline_path, fixture_fieldnames, normalized_baselines)
+
+    evidence_path = samples / "evidence_sample.csv"
+    _, evidence_rows = read_rows(evidence_path)
+    evidence_fieldnames, fixture_evidence = read_rows(PROSPECTIVE_BASELINE_SAMPLES / "evidence_sample.csv")
+    normalized_evidence = []
+    for source_row in evidence_rows:
+        row = {field: source_row.get(field, "") for field in evidence_fieldnames}
+        row.update(
+            {
+                "evidence_status": "original",
+                "content_hash_status": "not_recorded",
+                "raw_storage_status": "metadata_only",
+                "license_status": "not_applicable",
+            }
+        )
+        normalized_evidence.append(row)
+    normalized_evidence.extend(fixture_evidence)
+    write_rows(evidence_path, evidence_fieldnames, normalized_evidence)
+    return samples
+
+
+def prospective_baseline_fixture():
+    return read_rows(PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv")
+
+
+def rehash_baseline(row):
+    row["baseline_record_hash"] = _calculate_baseline_record_hash(row, load_spec("pre_earnings_baseline"))
 
 
 def test_valid_samples_pass():
@@ -125,6 +190,533 @@ def test_locked_baseline_modification_is_detected(tmp_path):
     report = validate_file(path)
     assert not report.ok
     assert "locked baseline appears modified instead of appended" in issue_text(report)
+
+
+def test_legacy_baseline_sample_without_prospective_headers_passes():
+    fieldnames, _ = read_rows(SAMPLES / "pre_earnings_baseline_sample.csv")
+    assert "baseline_status" not in fieldnames
+    report = validate_file(SAMPLES / "pre_earnings_baseline_sample.csv")
+    assert report.ok, issue_text(report)
+
+
+def test_prospective_baseline_fixture_passes():
+    path = PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv"
+    report = validate_file(path)
+    assert report.ok, issue_text(report)
+
+
+def test_baseline_hash_field_list_covers_schema_except_hash():
+    spec = load_spec("pre_earnings_baseline")
+    expected = [column.name for column in spec.columns if column.name != "baseline_record_hash"]
+    assert list(BASELINE_LOCK_HASH_FIELDS_V1) == expected
+
+
+def test_baseline_hash_normalizes_equivalent_timezone_offsets():
+    _, rows = prospective_baseline_fixture()
+    original = dict(rows[1])
+    equivalent = dict(original)
+    equivalent["locked_at"] = "2026-08-07T11:00:00+00:00"
+    spec = load_spec("pre_earnings_baseline")
+
+    assert _calculate_baseline_record_hash(original, spec) == _calculate_baseline_record_hash(equivalent, spec)
+
+
+def test_baseline_hash_normalizes_equivalent_decimal_values():
+    _, rows = prospective_baseline_fixture()
+    original = dict(rows[1])
+    equivalent = dict(original)
+    equivalent["company_guidance_revenue"] = "11300.00"
+    spec = load_spec("pre_earnings_baseline")
+
+    assert _calculate_baseline_record_hash(original, spec) == _calculate_baseline_record_hash(equivalent, spec)
+
+
+def test_baseline_hash_ignores_input_mapping_order():
+    _, rows = prospective_baseline_fixture()
+    original = dict(rows[1])
+    reversed_mapping = dict(reversed(list(original.items())))
+    spec = load_spec("pre_earnings_baseline")
+
+    assert _calculate_baseline_record_hash(original, spec) == _calculate_baseline_record_hash(reversed_mapping, spec)
+
+
+def test_prospective_baseline_dataset_with_formal_evidence_passes(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    report = validate_dataset(samples)
+    assert report.ok, issue_text(report)
+
+
+def test_baseline_status_enum_is_validated(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[-1]["baseline_status"] = "almost_locked"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "value 'almost_locked' is not in allowed set" in issue_text(report)
+
+
+@pytest.mark.parametrize("invalid_version", ["v0", "v01", "V1", "v1.0", "v²", "v١٢", "v"])
+def test_prospective_baseline_version_format_is_validated(tmp_path, invalid_version):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[-1]["baseline_version"] = invalid_version
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "prospective baseline_version must use v followed by an integer of at least 1" in issue_text(report)
+
+
+def test_prospective_header_rejects_locked_legacy_escape(tmp_path):
+    legacy_fieldnames, legacy_rows = read_rows(SAMPLES / "pre_earnings_baseline_sample.csv")
+    prospective_fieldnames, _ = prospective_baseline_fixture()
+    escaped_row = {field: legacy_rows[0].get(field, "") for field in prospective_fieldnames}
+    escaped_row["baseline_record_hash"] = "fake-placeholder-hash"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, prospective_fieldnames, [escaped_row])
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "locked row in a prospective-capable file cannot use the legacy baseline contract" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    "invalid_datetime",
+    ["not-a-date", "2026-08-07T20:00:00+25:00", "2026-08-07T11:00:00Z"],
+)
+def test_invalid_prospective_datetime_does_not_crash(tmp_path, invalid_datetime):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["reviewed_at"] = invalid_datetime
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "invalid datetime value" in issue_text(report)
+
+
+def test_cli_valid_dataset_exits_zero(capsys):
+    exit_code = cli_main(["validate", str(SAMPLES)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Validation passed." in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_cli_invalid_dataset_exits_one_without_traceback(tmp_path, capsys):
+    samples = copy_samples(tmp_path)
+    path = samples / "company_master_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["market_cap_category"] = "invalid-category"
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate", str(samples)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Validation failed:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value", "expected_issue"),
+    [
+        ("baseline_version", "v²", "prospective baseline_version must use v followed by an integer"),
+        ("reviewed_at", "not-a-date", "invalid datetime value"),
+        ("reviewed_at", "2026-08-07T11:00:00Z", "invalid datetime value"),
+    ],
+)
+def test_cli_baseline_crash_regressions_exit_one(
+    tmp_path, capsys, field_name, invalid_value, expected_issue
+):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1][field_name] = invalid_value
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert expected_issue in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("field_name", "expected_issue"),
+    [
+        ("locked_at", "locked baseline requires locked_at"),
+        ("baseline_record_hash", "locked baseline requires baseline_record_hash"),
+    ],
+)
+def test_locked_baseline_requires_lock_fields(tmp_path, field_name, expected_issue):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1][field_name] = ""
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert expected_issue in issue_text(report)
+
+
+def test_locked_baseline_requires_sha256_algorithm(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["lock_hash_algorithm"] = ""
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "locked baseline requires sha256 lock_hash_algorithm" in issue_text(report)
+
+
+@pytest.mark.parametrize("field_name", ["locked_at", "baseline_record_hash", "lock_hash_algorithm"])
+def test_draft_baseline_rejects_lock_fields(tmp_path, field_name):
+    fieldnames, rows = prospective_baseline_fixture()
+    draft = rows[-1]
+    values = {
+        "locked_at": "2026-08-04T18:40:00+09:00",
+        "baseline_record_hash": "a" * 64,
+        "lock_hash_algorithm": "sha256",
+    }
+    draft[field_name] = values[field_name]
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "draft baseline must not contain lock state timestamp hash or algorithm" in issue_text(report)
+
+
+@pytest.mark.parametrize("review_status", ["approved", "rejected"])
+def test_draft_baseline_allows_completed_review_without_lock(tmp_path, review_status):
+    fieldnames, rows = prospective_baseline_fixture()
+    draft = rows[-1]
+    draft["human_review_status"] = review_status
+    draft["reviewed_by"] = "reviewer-team-alpha"
+    draft["reviewed_at"] = "2026-08-04T18:36:00+09:00"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert report.ok, issue_text(report)
+
+
+def test_pending_draft_rejects_reviewer_metadata(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    draft = rows[-1]
+    draft["reviewed_by"] = "reviewer-team-alpha"
+    draft["reviewed_at"] = "2026-08-04T18:36:00+09:00"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "pending Human review must not have reviewer identity or reviewed_at" in issue_text(report)
+
+
+def test_baseline_self_supersession_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["supersedes_baseline_id"] = rows[1]["baseline_id"]
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersedes_baseline_id cannot reference the same baseline_id" in issue_text(report)
+
+
+def test_missing_superseded_baseline_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["supersedes_baseline_id"] = "BASE-NOT-FOUND"
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "superseded baseline_id not found" in issue_text(report)
+
+
+def test_forward_baseline_supersession_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    v3 = rows.pop(2)
+    rows.insert(1, v3)
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersedes_baseline_id must reference an earlier baseline row" in issue_text(report)
+
+
+def test_baseline_version_regression_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[2]["baseline_version"] = "v1"
+    rehash_baseline(rows[2])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "baseline_version must increase monotonically" in issue_text(report)
+    assert "superseding baseline_version must be greater" in issue_text(report)
+
+
+def test_baseline_versions_are_compared_numerically(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[2]["baseline_version"] = "v10"
+    rehash_baseline(rows[2])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert report.ok, issue_text(report)
+
+
+def test_supersedes_baseline_requires_reason(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["supersession_reason"] = ""
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersedes_baseline_id requires supersession_reason" in issue_text(report)
+
+
+def test_supersession_reason_requires_baseline_reference(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["supersedes_baseline_id"] = ""
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersession_reason requires supersedes_baseline_id" in issue_text(report)
+
+
+def test_baseline_supersession_event_mismatch_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[2]["earnings_event_id"] = "EVT-HOKUTO-2026Q1"
+    rehash_baseline(rows[2])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersession lineage must keep earnings_event_id unchanged" in issue_text(report)
+
+
+def test_locked_baseline_requires_human_approval(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["human_review_status"] = "pending"
+    rows[1]["reviewed_by"] = ""
+    rows[1]["reviewed_at"] = ""
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "locked baseline requires approved Human review" in issue_text(report)
+
+
+def test_locked_baseline_recorded_after_lock_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["recorded_at"] = "2026-08-07T20:05:00+09:00"
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "prospective baseline must be recorded no later than locked_at" in issue_text(report)
+
+
+def test_locked_baseline_reviewed_after_lock_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["reviewed_at"] = "2026-08-07T20:05:00+09:00"
+    rehash_baseline(rows[1])
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "reviewed_at must be no later than locked_at" in issue_text(report)
+
+
+def test_baseline_hash_mismatch_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["company_guidance_revenue"] = "99999"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "baseline_record_hash does not match canonical locked content" in issue_text(report)
+
+
+def test_baseline_hash_format_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["baseline_record_hash"] = "not-a-sha256-hash"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "sha256 baseline_record_hash must be 64 hexadecimal characters" in issue_text(report)
+
+
+def test_duplicate_prospective_baseline_id_fails(tmp_path):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows.append(dict(rows[1]))
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "duplicate unique key" in issue_text(report)
+
+
+def test_locked_prospective_baseline_requires_formal_evidence(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    rows = [row for row in rows if row["related_entity_id"] not in {"BASE-ASTER-002", "BASE-ASTER-003"}]
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "locked prospective baseline requires related formal evidence" in issue_text(report)
+
+
+def test_locked_prospective_baseline_requires_score_approved_evidence(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    for row in rows:
+        if row["evidence_id"] == "EVD-BASE-ASTER-002":
+            row["used_for_score"] = "false"
+            row["score_component"] = ""
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "locked prospective baseline requires evidence approved for score use" in issue_text(report)
+
+
+def test_locked_prospective_baseline_requires_complete_evidence_metadata(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    for row in rows:
+        if row["evidence_id"] == "EVD-BASE-ASTER-002":
+            row["content_hash_status"] = ""
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "evidence metadata status bundle is incomplete" in issue_text(report)
+
+
+def test_related_evidence_after_baseline_lock_fails(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    for row in rows:
+        if row["evidence_id"] == "EVD-BASE-ASTER-002":
+            row["recorded_at"] = "2026-08-07T20:05:00+09:00"
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "related evidence recorded_at must be no later than locked_at" in issue_text(report)
+
+
+def test_unrelated_evidence_is_not_compared_to_baseline_lock(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    unrelated = dict([row for row in rows if row["evidence_id"] == "EVD-BASE-ASTER-003"][0])
+    unrelated.update(
+        {
+            "evidence_id": "EVD-COMPANY-ASTER-UNRELATED",
+            "related_entity_type": "company_master",
+            "related_entity_id": "CMP-ASTER",
+            "published_at": "2026-08-07T21:30:00+09:00",
+            "observed_at": "2026-08-07T21:35:00+09:00",
+            "recorded_at": "2026-08-07T21:40:00+09:00",
+            "as_of_datetime": "2026-08-07T21:40:00+09:00",
+            "used_for_score": "false",
+            "score_component": "",
+        }
+    )
+    rows.append(unrelated)
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert report.ok, issue_text(report)
+
+
+def test_draft_baseline_evidence_cannot_be_used_for_score(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    evidence_path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(evidence_path)
+    draft_evidence = dict([row for row in rows if row["evidence_id"] == "EVD-BASE-ASTER-002"][0])
+    draft_evidence["evidence_id"] = "EVD-BASE-HOKUTO-DRAFT"
+    draft_evidence["related_entity_id"] = "BASE-HOKUTO-002-DRAFT"
+    rows.append(draft_evidence)
+    write_rows(evidence_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "draft baseline evidence cannot be approved for score use" in issue_text(report)
+
+
+def test_post_event_review_cannot_reference_draft_baseline(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    review_path = samples / "post_earnings_review_sample.csv"
+    fieldnames, rows = read_rows(review_path)
+    rows[0]["baseline_id"] = "BASE-HOKUTO-002-DRAFT"
+    write_rows(review_path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "post-event review cannot reference a draft baseline" in issue_text(report)
+
+
+def test_evidence_published_after_observation_fails(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["published_at"] = "2026-08-07T14:05:00+09:00"
+    rows[0]["observed_at"] = "2026-08-07T14:00:00+09:00"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "evidence was published after it was observed" in issue_text(report)
+
+
+def test_evidence_observed_after_recording_fails(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "evidence_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["observed_at"] = "2026-08-07T14:05:00+09:00"
+    rows[0]["recorded_at"] = "2026-08-07T14:00:00+09:00"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "evidence was observed after it was recorded" in issue_text(report)
 
 
 def test_no_trade_rows_are_preserved_with_blank_prices():

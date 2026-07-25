@@ -1,7 +1,9 @@
 """CSV validation for the Earnings Research System foundation."""
 
 import csv
+import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -22,6 +24,68 @@ TABLE_ORDER = [
     "evidence",
     "kpi_observation",
 ]
+
+BASELINE_LOCK_HASH_FIELDS_V1 = (
+    "baseline_id",
+    "earnings_event_id",
+    "baseline_version",
+    "as_of_datetime",
+    "locked_at",
+    "analyst",
+    "market_consensus_revenue",
+    "market_consensus_operating_income",
+    "market_consensus_eps",
+    "company_guidance_revenue",
+    "company_guidance_operating_income",
+    "company_guidance_eps",
+    "guidance_style",
+    "guidance_reliability_score",
+    "earnings_quality_score",
+    "peer_trend_score",
+    "customer_industry_score",
+    "nearby_sector_score",
+    "external_environment_score",
+    "sentiment_balance_score",
+    "meme_overheat_penalty",
+    "expectation_overheat_penalty",
+    "credit_supply_score",
+    "short_interest_score",
+    "valuation_score",
+    "value_trap_penalty",
+    "governance_score",
+    "capital_allocation_score",
+    "historical_reaction_score",
+    "analyst_coverage_score",
+    "liquidity_score",
+    "pre_event_score",
+    "pre_event_grade",
+    "pre_event_decision",
+    "pre_event_reason",
+    "scoring_version",
+    "evidence_published_at",
+    "source_data_max_observed_at",
+    "uses_post_event_data",
+    "is_locked",
+    "baseline_status",
+    "supersedes_baseline_id",
+    "supersession_reason",
+    "lock_hash_algorithm",
+    "human_review_status",
+    "reviewed_by",
+    "reviewed_at",
+    "recorded_at",
+)
+
+PROSPECTIVE_BASELINE_FIELDS = {
+    "baseline_status",
+    "supersedes_baseline_id",
+    "supersession_reason",
+    "lock_hash_algorithm",
+    "human_review_status",
+    "reviewed_by",
+    "reviewed_at",
+}
+BASELINE_VERSION_PATTERN = re.compile(r"^v([1-9][0-9]*)$", re.ASCII)
 
 
 @dataclass
@@ -94,6 +158,7 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     dataset_dir = Path(dataset_dir)
     specs = load_specs()
     rows_by_table = {}
+    fieldnames_by_table = {}
     issues = []
 
     for table in TABLE_ORDER:
@@ -103,8 +168,9 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
             issues.append(ValidationIssue(table, None, None, "missing expected file %s" % spec.file))
             rows_by_table[table] = []
             continue
-        rows, table_issues = _read_and_validate_table(path, spec)
+        rows, fieldnames, table_issues = _read_and_validate_table(path, spec)
         rows_by_table[table] = rows
+        fieldnames_by_table[table] = fieldnames
         issues.extend(table_issues)
 
     if issues:
@@ -114,6 +180,14 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     issues.extend(_validate_scoring_versions(rows_by_table))
     issues.extend(_validate_score_effective_dates(rows_by_table))
     issues.extend(_validate_temporal_constraints(rows_by_table))
+    issues.extend(
+        _validate_baseline_lock_constraints(
+            specs["pre_earnings_baseline"],
+            rows_by_table,
+            True,
+            PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames_by_table["pre_earnings_baseline"])),
+        )
+    )
     issues.extend(_validate_relationship_consistency(rows_by_table))
     issues.extend(_validate_kpi_constraints(rows_by_table))
     issues.extend(_validate_evidence_constraints(specs, rows_by_table))
@@ -129,13 +203,21 @@ def validate_file(path: Path) -> ValidationReport:
     path = Path(path)
     specs = load_specs()
     spec = _match_spec_for_file(path, specs.values())
-    rows, issues = _read_and_validate_table(path, spec)
+    rows, fieldnames, issues = _read_and_validate_table(path, spec)
 
     if spec.table == "post_earnings_review":
         issues.extend(_validate_trade_constraints({spec.table: rows}))
         issues.extend(_validate_return_reference_constraints({spec.table: rows}))
     if spec.table == "pre_earnings_baseline":
         issues.extend(_validate_append_only_constraints({spec.table: rows}))
+        issues.extend(
+            _validate_baseline_lock_constraints(
+                spec,
+                {spec.table: rows},
+                False,
+                PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames)),
+            )
+        )
     if spec.table == "hypothesis_log":
         issues.extend(_validate_hypothesis_constraints({spec.table: rows}))
     if spec.table == "evidence":
@@ -151,7 +233,9 @@ def _match_spec_for_file(path: Path, specs: Iterable[TableSpec]) -> TableSpec:
     raise ValueError("Could not infer schema for %s" % path)
 
 
-def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str, str]], List[ValidationIssue]]:
+def _read_and_validate_table(
+    path: Path, spec: TableSpec
+) -> Tuple[List[Dict[str, str]], List[str], List[ValidationIssue]]:
     issues = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -160,7 +244,7 @@ def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str
         for column in missing:
             issues.append(ValidationIssue(spec.table, None, column, "missing required column"))
         if missing:
-            return [], issues
+            return [], fieldnames, issues
 
         rows = list(reader)
 
@@ -178,7 +262,7 @@ def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str
     for key_columns in key_sets:
         issues.extend(_validate_unique_key(spec.table, rows, key_columns))
 
-    return rows, issues
+    return rows, fieldnames, issues
 
 
 def _validate_value(table: str, row_number: int, column: ColumnSpec, value: str) -> List[ValidationIssue]:
@@ -196,6 +280,8 @@ def _validate_value(table: str, row_number: int, column: ColumnSpec, value: str)
         elif column.type == "time":
             parsed = time.fromisoformat(value)
         elif column.type == "datetime":
+            if value.endswith(("Z", "z")):
+                raise ValueError("UTC Z suffix is not supported in CSV input")
             parsed = datetime.fromisoformat(value)
         elif column.type == "boolean":
             if value.lower() not in {"true", "false"}:
@@ -349,6 +435,14 @@ def _validate_evidence_constraints(specs: Dict[str, TableSpec], rows_by_table: D
         if related_type in id_sets and related_id not in id_sets[related_type]:
             issues.append(ValidationIssue("evidence", row_number, "related_entity_id", "related entity not found"))
 
+        published_at = _parse_datetime(_clean(row.get("published_at", "")))
+        observed_at = _parse_datetime(_clean(row.get("observed_at", "")))
+        recorded_at = _parse_datetime(_clean(row.get("recorded_at", "")))
+        if published_at and observed_at and published_at > observed_at:
+            issues.append(ValidationIssue("evidence", row_number, "published_at", "evidence was published after it was observed"))
+        if observed_at and recorded_at and observed_at > recorded_at:
+            issues.append(ValidationIssue("evidence", row_number, "observed_at", "evidence was observed after it was recorded"))
+
         used_for_score = _clean(row.get("used_for_score", "")).lower() == "true"
         if not used_for_score:
             continue
@@ -364,9 +458,6 @@ def _validate_evidence_constraints(specs: Dict[str, TableSpec], rows_by_table: D
 
         cutoff = baseline_as_of or event_time
         cutoff_label = "baseline as_of_datetime" if baseline_as_of else "announcement timestamp"
-        published_at = _parse_datetime(_clean(row.get("published_at", "")))
-        observed_at = _parse_datetime(_clean(row.get("observed_at", "")))
-        recorded_at = _parse_datetime(_clean(row.get("recorded_at", "")))
         evidence_as_of = _parse_datetime(_clean(row.get("as_of_datetime", "")))
 
         if cutoff and published_at and published_at > cutoff:
@@ -605,6 +696,8 @@ def _validate_relationship_consistency(rows_by_table: Dict[str, List[Dict[str, s
         baseline = baselines.get(_clean(row.get("baseline_id", "")))
         if baseline and _clean(baseline.get("earnings_event_id", "")) != _clean(row.get("earnings_event_id", "")):
             issues.append(ValidationIssue("post_earnings_review", row_number, "baseline_id", "baseline earnings_event_id does not match review earnings_event_id"))
+        if baseline and _clean(baseline.get("baseline_status", "")) == "draft":
+            issues.append(ValidationIssue("post_earnings_review", row_number, "baseline_id", "post-event review cannot reference a draft baseline"))
 
     for row_number, row in enumerate(rows_by_table.get("kpi_observation", []), start=2):
         expected_company = event_company.get(_clean(row.get("earnings_event_id", "")))
@@ -699,6 +792,410 @@ def _validate_append_only_constraints(rows_by_table: Dict[str, List[Dict[str, st
     return issues
 
 
+def _validate_baseline_lock_constraints(
+    spec: TableSpec,
+    rows_by_table: Dict[str, List[Dict[str, str]]],
+    require_evidence: bool,
+    prospective_headers_present: bool,
+) -> List[ValidationIssue]:
+    issues = []
+    rows = rows_by_table.get("pre_earnings_baseline", [])
+    evidence_rows = rows_by_table.get("evidence", [])
+    row_by_id = {
+        _clean(row.get("baseline_id", "")): row
+        for row in rows
+        if _clean(row.get("baseline_id", ""))
+    }
+    row_number_by_id = {
+        _clean(row.get("baseline_id", "")): row_number
+        for row_number, row in enumerate(rows, start=2)
+        if _clean(row.get("baseline_id", ""))
+    }
+    prior_versions_by_event: Dict[str, List[int]] = {}
+
+    for row_number, row in enumerate(rows, start=2):
+        baseline_id = _clean(row.get("baseline_id", ""))
+        event_id = _clean(row.get("earnings_event_id", ""))
+        baseline_status = _clean(row.get("baseline_status", ""))
+        supersedes_id = _clean(row.get("supersedes_baseline_id", ""))
+        supersession_reason = _clean(row.get("supersession_reason", ""))
+        hash_algorithm = _clean(row.get("lock_hash_algorithm", ""))
+        review_status = _clean(row.get("human_review_status", ""))
+        reviewed_by = _clean(row.get("reviewed_by", ""))
+        reviewed_at = _parse_datetime(_clean(row.get("reviewed_at", "")))
+        locked_at = _parse_datetime(_clean(row.get("locked_at", "")))
+        recorded_at = _parse_datetime(_clean(row.get("recorded_at", "")))
+        as_of_datetime = _parse_datetime(_clean(row.get("as_of_datetime", "")))
+        record_hash = _clean(row.get("baseline_record_hash", ""))
+        is_locked = _clean(row.get("is_locked", "")).lower() == "true"
+        prospective_fields = (
+            baseline_status,
+            supersedes_id,
+            supersession_reason,
+            hash_algorithm,
+            review_status,
+            reviewed_by,
+            _clean(row.get("reviewed_at", "")),
+        )
+        version = _parse_baseline_version(_clean(row.get("baseline_version", "")))
+
+        if prospective_headers_present and is_locked and not any(prospective_fields):
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "baseline_status",
+                    "locked row in a prospective-capable file cannot use the legacy baseline contract",
+                )
+            )
+
+        if not any(prospective_fields) and not (prospective_headers_present and is_locked):
+            if is_locked and (not locked_at or not record_hash):
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "locked_at,baseline_record_hash",
+                        "legacy locked baseline requires locked_at and baseline_record_hash",
+                    )
+                )
+            if version is not None:
+                prior_versions_by_event.setdefault(event_id, []).append(version)
+            continue
+
+        if not baseline_status:
+            issues.append(
+                ValidationIssue("pre_earnings_baseline", row_number, "baseline_status", "prospective baseline metadata requires baseline_status")
+            )
+        if not review_status:
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "human_review_status",
+                    "prospective baseline metadata requires human_review_status",
+                )
+            )
+        if version is None:
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "baseline_version",
+                    "prospective baseline_version must use v followed by an integer of at least 1",
+                )
+            )
+        else:
+            prior_versions = prior_versions_by_event.setdefault(event_id, [])
+            if prior_versions and version <= max(prior_versions):
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_version",
+                        "baseline_version must increase monotonically for the earnings event",
+                    )
+                )
+            prior_versions.append(version)
+
+        if review_status == "pending" and (reviewed_by or reviewed_at):
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "human_review_status",
+                    "pending Human review must not have reviewer identity or reviewed_at",
+                )
+            )
+        if review_status in {"approved", "rejected"} and (not reviewed_by or not reviewed_at):
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "reviewed_by,reviewed_at",
+                    "completed Human review requires reviewed_by and reviewed_at",
+                )
+            )
+
+        if baseline_status == "draft":
+            if is_locked or locked_at or record_hash or hash_algorithm:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_status",
+                        "draft baseline must not contain lock state timestamp hash or algorithm",
+                    )
+                )
+            if supersedes_id or supersession_reason:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "supersedes_baseline_id",
+                        "draft baseline must not supersede a locked baseline",
+                    )
+                )
+
+        if baseline_status == "locked":
+            if not is_locked:
+                issues.append(
+                    ValidationIssue("pre_earnings_baseline", row_number, "is_locked", "locked baseline requires is_locked=true")
+                )
+            if not locked_at:
+                issues.append(
+                    ValidationIssue("pre_earnings_baseline", row_number, "locked_at", "locked baseline requires locked_at")
+                )
+            if not record_hash:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline", row_number, "baseline_record_hash", "locked baseline requires baseline_record_hash"
+                    )
+                )
+            if hash_algorithm != "sha256":
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline", row_number, "lock_hash_algorithm", "locked baseline requires sha256 lock_hash_algorithm"
+                    )
+                )
+            if review_status != "approved":
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline", row_number, "human_review_status", "locked baseline requires approved Human review"
+                    )
+                )
+            if recorded_at and locked_at and recorded_at > locked_at:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline", row_number, "recorded_at", "prospective baseline must be recorded no later than locked_at"
+                    )
+                )
+            for column, value in (
+                ("as_of_datetime", as_of_datetime),
+                ("reviewed_at", reviewed_at),
+                ("evidence_published_at", _parse_datetime(_clean(row.get("evidence_published_at", "")))),
+                ("source_data_max_observed_at", _parse_datetime(_clean(row.get("source_data_max_observed_at", "")))),
+            ):
+                if value and locked_at and value > locked_at:
+                    issues.append(
+                        ValidationIssue(
+                            "pre_earnings_baseline", row_number, column, "%s must be no later than locked_at" % column
+                        )
+                    )
+            if record_hash and hash_algorithm == "sha256":
+                if len(record_hash) != 64 or any(character not in "0123456789abcdefABCDEF" for character in record_hash):
+                    issues.append(
+                        ValidationIssue(
+                            "pre_earnings_baseline",
+                            row_number,
+                            "baseline_record_hash",
+                            "sha256 baseline_record_hash must be 64 hexadecimal characters",
+                        )
+                    )
+                else:
+                    expected_hash = _calculate_baseline_record_hash(row, spec)
+                    if record_hash.lower() != expected_hash:
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "baseline_record_hash",
+                                "baseline_record_hash does not match canonical locked content",
+                            )
+                        )
+
+        if supersession_reason and not supersedes_id:
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "supersedes_baseline_id",
+                    "supersession_reason requires supersedes_baseline_id",
+                )
+            )
+        if supersedes_id:
+            if baseline_status != "locked":
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_status",
+                        "supersession is effective only from a locked baseline",
+                    )
+                )
+            if not supersession_reason:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "supersession_reason",
+                        "supersedes_baseline_id requires supersession_reason",
+                    )
+                )
+            if supersedes_id == baseline_id:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "supersedes_baseline_id",
+                        "supersedes_baseline_id cannot reference the same baseline_id",
+                    )
+                )
+            else:
+                parent = row_by_id.get(supersedes_id)
+                if parent is None:
+                    issues.append(
+                        ValidationIssue(
+                            "pre_earnings_baseline",
+                            row_number,
+                            "supersedes_baseline_id",
+                            "superseded baseline_id not found",
+                        )
+                    )
+                else:
+                    if row_number_by_id[supersedes_id] >= row_number:
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "supersedes_baseline_id",
+                                "supersedes_baseline_id must reference an earlier baseline row",
+                            )
+                        )
+                    if _clean(parent.get("earnings_event_id", "")) != event_id:
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "supersedes_baseline_id",
+                                "supersession lineage must keep earnings_event_id unchanged",
+                            )
+                        )
+                    parent_version = _parse_baseline_version(_clean(parent.get("baseline_version", "")))
+                    if version is not None and parent_version is not None and version <= parent_version:
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "baseline_version",
+                                "superseding baseline_version must be greater than superseded version",
+                            )
+                        )
+        elif baseline_status == "locked" and version is not None and version > 1:
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "supersedes_baseline_id",
+                    "locked baseline version greater than 1 requires supersedes_baseline_id",
+                )
+            )
+
+        if require_evidence and baseline_status == "draft":
+            draft_score_evidence = [
+                evidence
+                for evidence in evidence_rows
+                if _clean(evidence.get("related_entity_type", "")) == "pre_earnings_baseline"
+                and _clean(evidence.get("related_entity_id", "")) == baseline_id
+                and _clean(evidence.get("used_for_score", "")).lower() == "true"
+            ]
+            if draft_score_evidence:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_status",
+                        "draft baseline evidence cannot be approved for score use",
+                    )
+                )
+
+        if require_evidence and baseline_status == "locked":
+            related_evidence = [
+                evidence
+                for evidence in evidence_rows
+                if _clean(evidence.get("related_entity_type", "")) == "pre_earnings_baseline"
+                and _clean(evidence.get("related_entity_id", "")) == baseline_id
+            ]
+            if not related_evidence:
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_id",
+                        "locked prospective baseline requires related formal evidence",
+                    )
+                )
+            if related_evidence and not any(
+                _clean(evidence.get("used_for_score", "")).lower() == "true" for evidence in related_evidence
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "pre_earnings_baseline",
+                        row_number,
+                        "baseline_id",
+                        "locked prospective baseline requires evidence approved for score use",
+                    )
+                )
+            for evidence in related_evidence:
+                for column in ("content_hash_status", "raw_storage_status", "license_status"):
+                    if not _clean(evidence.get(column, "")):
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "baseline_id",
+                                "locked prospective baseline evidence requires %s" % column,
+                            )
+                        )
+                for column in ("published_at", "observed_at", "recorded_at", "as_of_datetime"):
+                    evidence_time = _parse_datetime(_clean(evidence.get(column, "")))
+                    if evidence_time and locked_at and evidence_time > locked_at:
+                        issues.append(
+                            ValidationIssue(
+                                "pre_earnings_baseline",
+                                row_number,
+                                "baseline_id",
+                                "related evidence %s must be no later than locked_at" % column,
+                            )
+                        )
+    return issues
+
+
+def _parse_baseline_version(value: str) -> Optional[int]:
+    match = BASELINE_VERSION_PATTERN.fullmatch(value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _calculate_baseline_record_hash(row: Dict[str, str], spec: TableSpec) -> str:
+    columns = {column.name: column for column in spec.columns}
+    canonical_values = [
+        [field, _canonicalize_baseline_value(columns[field], _clean(row.get(field, "")))]
+        for field in BASELINE_LOCK_HASH_FIELDS_V1
+    ]
+    payload = json.dumps(canonical_values, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _canonicalize_baseline_value(column: ColumnSpec, value: str) -> str:
+    if not value:
+        return ""
+    if column.type == "datetime":
+        parsed = _parse_datetime(value)
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if parsed else ""
+    if column.type == "decimal":
+        parsed_decimal = Decimal(value)
+        if parsed_decimal == 0:
+            return "0"
+        return format(parsed_decimal.normalize(), "f")
+    if column.type == "integer":
+        return str(int(value))
+    if column.type == "boolean":
+        return value.lower()
+    return value
+
+
 def _validate_hypothesis_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
     issues = []
     rows = rows_by_table.get("hypothesis_log", [])
@@ -722,7 +1219,12 @@ def _event_announcement_datetime(row: Dict[str, str]) -> datetime:
 def _parse_datetime(value: str) -> Optional[datetime]:
     if not value:
         return None
-    parsed = datetime.fromisoformat(value)
+    if value.endswith(("Z", "z")):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=JST)
     return parsed

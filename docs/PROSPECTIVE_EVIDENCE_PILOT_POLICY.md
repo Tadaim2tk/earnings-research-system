@@ -27,11 +27,15 @@ baseline_draft
   -> post_event_review
 ```
 
+baseline status、Human review、hash、version、supersessionの機械契約は [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) を参照する。
+
 ### Gate rules
 
 - pre-event evidence未登録でも `baseline_draft` は作成できる。
 - `baseline_draft` はscore確定、calibration cohort、発表前lock済み記録として扱わない。
+- `baseline_draft` に紐づくevidenceを `used_for_score=true` にせず、post-event reviewから参照しない。
 - `baseline_locked` へ進む前に、最低限のpre-event formal evidence登録とHuman reviewを必須とする。
+- `baseline_locked` はHuman approval、canonical SHA-256 hash、関連formal evidence、score利用承認済みevidenceを必須とする。
 - lock後のbaseline本文・score・evidence relationを上書きしない。訂正はnew version/correction recordで行う。
 - event後の資料、actual KPI、price reactionをlocked pre-event baselineへ混入させない。
 - official event evidence未登録のままpost-event scoring/reviewを確定しない。
@@ -39,7 +43,7 @@ baseline_draft
 
 ## Lifecycle exception handling
 
-event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageは `ERS-ADR-0019` のProposed schema patchで表現する。baseline version relationとevent statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
+event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で表現する。event statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
 
 ### Event延期
 
@@ -59,7 +63,7 @@ event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり�
 ### 誤開示・撤回・訂正
 
 - 元の開示とevidenceを削除・上書きしない。
-- source verificationには既存の `verified_status: retracted` を使用できる。append-onlyの撤回通知rowは `ERS-ADR-0019` のProposed `evidence_status: retraction_notice` と `supersedes_evidence_id` で元evidenceへ接続する。
+- source verificationには既存の `verified_status: retracted` を使用できる。append-onlyの撤回通知rowはAcceptedの `ERS-ADR-0019` にある `evidence_status: retraction_notice` と `supersedes_evidence_id` で元evidenceへ接続する。
 - 訂正版を元evidenceとのrelationが追跡できるappend-only correctionとして登録する。
 - locked baselineは変更しない。
 - 元開示、撤回、訂正版の関係と有効なsourceがHuman確認されるまでscoringを確定しない。
@@ -104,7 +108,7 @@ event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり�
 
 `PROSPECTIVE_EVIDENCE_METADATA.md` と `ERS-ADR-0019` に従い、sidecarではなく既存 `evidence` rowへoptional metadata columnsを追加する。identity、timing、score利用可否、storage/license、correction lineageを同じ `evidence_id` で検証する。
 
-旧CSVは新headerなしでもvalidation可能とする。新metadataを使うrowではhash/storage/license status bundleを必須とし、組合せvalidationを行う。schema patchがHuman承認されるまでprospective scoringを開始しない。
+旧CSVは新headerなしでもvalidation可能とする。新metadataを使うrowではhash/storage/license status bundleを必須とし、組合せvalidationを行う。Accepted schemaであっても、baseline lock契約とprospective運用は別のHuman approval gateとする。
 
 ## Timing gate
 
