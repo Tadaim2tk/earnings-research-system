@@ -276,7 +276,9 @@ Alternatives Considered: historical 3社へ後付けsnapshotを作る案はprosp
 
 Date: 2026-07-25
 
-Status: Proposed
+Status: Accepted
+
+Approval: Human承認。schema、validator、docs、testsの整合と旧20列CSV互換性を維持し、optional fieldによるvalidation bypassがないことを独立監査で確認した。`raw_storage_status=stored` は `license_status=permitted` を必須とし、hash mismatchをblocking errorとする。correction lineageはself、missing、forward、entity mismatchを拒否する。既存64 testsに加えて独立監査の一時境界case 36件で誤受理がないことを確認した。本schema承認はprospective evidence実データ登録、baseline lock、scoring、prospective運用開始の自動承認ではない。
 
 Context: prospective formal evidenceにはcontent hash、raw storage、license判断、source correction lineageが必要だが、既存 `evidence` schemaには専用fieldがない。sidecarは既存headerを維持できる一方、`evidence_id` join欠落、孤立metadata、重複lineageのriskがある。
 
