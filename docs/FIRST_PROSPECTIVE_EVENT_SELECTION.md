@@ -101,7 +101,7 @@ postponement_contingency
 - event中止時にscoring、calibration、通常のpost-event reviewから除外できる。
 - 誤開示、撤回、訂正時に元evidenceを保持したappend-only correctionを扱える。
 
-これらは選定時点の運用準備確認であり、`event_cancelled`、`retracted`等のimplementation enumが現行schemaへ実装済みであることを意味しない。正式な状態名とversion/correction relationは別のschema decisionを必要とする。
+これらは選定時点の運用準備確認である。`event_cancelled`相当のevent enumとbaseline version relationは別のschema decisionを必要とする。source撤回は既存 `verified_status: retracted` と `ERS-ADR-0019` のProposed correction lineageを使うが、ADRのHuman承認前に運用開始しない。
 
 ## Pilot success measures
 

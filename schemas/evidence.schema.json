@@ -23,6 +23,14 @@
     {"name": "verified_status", "type": "enum", "required": true, "allowed": ["verified", "partially_verified", "unverified", "terms_unreviewed", "retracted"]},
     {"name": "used_for_score", "type": "boolean", "required": true},
     {"name": "score_component", "type": "string", "required": false},
+    {"name": "evidence_status", "type": "enum", "required": false, "header_required": false, "allowed": ["original", "correction", "retraction_notice"]},
+    {"name": "supersedes_evidence_id", "type": "string", "required": false, "header_required": false},
+    {"name": "content_hash_status", "type": "enum", "required": false, "header_required": false, "allowed": ["verified", "recorded_unverified", "not_recorded", "not_applicable", "mismatch"]},
+    {"name": "content_hash", "type": "string", "required": false, "header_required": false},
+    {"name": "content_hash_algorithm", "type": "enum", "required": false, "header_required": false, "allowed": ["sha256"]},
+    {"name": "raw_storage_status", "type": "enum", "required": false, "header_required": false, "allowed": ["stored", "metadata_only", "storage_prohibited", "storage_pending_review", "unavailable"]},
+    {"name": "raw_location", "type": "string", "required": false, "header_required": false},
+    {"name": "license_status", "type": "enum", "required": false, "header_required": false, "allowed": ["permitted", "restricted", "unknown", "not_applicable", "review_required"]},
     {"name": "created_by", "type": "string", "required": true},
     {"name": "notes", "type": "string", "required": false}
   ]

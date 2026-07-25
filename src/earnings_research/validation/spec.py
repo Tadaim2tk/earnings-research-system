@@ -11,6 +11,7 @@ class ColumnSpec(BaseModel):
     name: str
     type: str
     required: bool = False
+    header_required: bool = True
     allowed: Optional[List[str]] = None
     min: Optional[float] = None
     max: Optional[float] = None
@@ -37,5 +38,5 @@ class TableSpec(BaseModel):
 
     @property
     def required_columns(self):
-        """Return all declared column names."""
-        return [column.name for column in self.columns]
+        """Return column names that must exist in backward-compatible CSV files."""
+        return [column.name for column in self.columns if column.header_required]

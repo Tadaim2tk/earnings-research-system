@@ -2,10 +2,24 @@ import csv
 import shutil
 from pathlib import Path
 
+import pytest
+
 from earnings_research.validation.validator import validate_dataset, validate_file
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = PROJECT_ROOT / "data" / "samples"
+PROSPECTIVE_EVIDENCE_SAMPLE = SAMPLES / "prospective_evidence" / "evidence_sample.csv"
+INVALID_EVIDENCE_SAMPLES = SAMPLES / "invalid_evidence"
+EVIDENCE_METADATA_FIELDS = [
+    "evidence_status",
+    "supersedes_evidence_id",
+    "content_hash_status",
+    "content_hash",
+    "content_hash_algorithm",
+    "raw_storage_status",
+    "raw_location",
+    "license_status",
+]
 
 
 def copy_samples(tmp_path):
@@ -135,6 +149,231 @@ def test_hypothesis_invalidation_appends_without_deleting_parent():
 def test_evidence_sample_file_passes():
     report = validate_file(SAMPLES / "evidence_sample.csv")
     assert report.ok, issue_text(report)
+
+
+def test_legacy_evidence_sample_without_optional_metadata_headers_passes():
+    fieldnames, _ = read_rows(SAMPLES / "evidence_sample.csv")
+    assert "content_hash_status" not in fieldnames
+    report = validate_file(SAMPLES / "evidence_sample.csv")
+    assert report.ok, issue_text(report)
+
+
+def test_existing_optional_evidence_header_remains_required(tmp_path):
+    fieldnames, rows = read_rows(SAMPLES / "evidence_sample.csv")
+    fieldnames.remove("source_url")
+    for row in rows:
+        row.pop("source_url")
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "column source_url: missing required column" in issue_text(report)
+
+
+def test_prospective_evidence_metadata_sample_passes():
+    report = validate_file(PROSPECTIVE_EVIDENCE_SAMPLE)
+    assert report.ok, issue_text(report)
+    _, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    correction = [row for row in rows if row["evidence_status"] == "correction"][0]
+    assert correction["supersedes_evidence_id"] == "EVD-PROSPECT-META-001"
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_issue"),
+    [
+        ("license_unknown_raw_stored", "raw storage requires license_status permitted"),
+        ("verified_hash_missing", "verified content hash requires content_hash and content_hash_algorithm"),
+        ("self_supersession", "supersedes_evidence_id cannot reference the same evidence_id"),
+    ],
+)
+def test_invalid_prospective_evidence_samples_fail(fixture_name, expected_issue):
+    path = INVALID_EVIDENCE_SAMPLES / fixture_name / "evidence_sample.csv"
+    report = validate_file(path)
+    assert not report.ok
+    assert expected_issue in issue_text(report)
+
+
+def test_evidence_metadata_enum_is_validated(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[0]["license_status"] = "probably_allowed"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "value 'probably_allowed' is not in allowed set" in issue_text(report)
+
+
+def test_evidence_metadata_status_bundle_must_be_complete(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[0]["license_status"] = ""
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "evidence metadata status bundle is incomplete" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    [
+        ("evidence_status", "original"),
+        ("supersedes_evidence_id", "EVD-PROSPECT-META-001"),
+        ("content_hash_status", "not_recorded"),
+        ("content_hash", "a" * 64),
+        ("content_hash_algorithm", "sha256"),
+        ("raw_storage_status", "metadata_only"),
+        ("raw_location", "external://partial-metadata"),
+        ("license_status", "permitted"),
+    ],
+)
+def test_each_partial_metadata_field_activates_bundle_validation(tmp_path, field_name, field_value):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    row = dict(rows[0])
+    for metadata_field in EVIDENCE_METADATA_FIELDS:
+        row[metadata_field] = ""
+    row[field_name] = field_value
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, [row])
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "evidence metadata status bundle is incomplete" in issue_text(report)
+
+
+def test_missing_superseded_evidence_fails(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[-1]["supersedes_evidence_id"] = "EVD-NOT-FOUND"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "superseded evidence_id not found" in issue_text(report)
+
+
+def test_supersession_requires_lineage_status(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[-1]["evidence_status"] = ""
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersedes_evidence_id requires evidence_status correction or retraction_notice" in issue_text(report)
+
+
+def test_correction_status_requires_superseded_evidence_id(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[-1]["supersedes_evidence_id"] = ""
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "evidence_status correction or retraction_notice requires supersedes_evidence_id" in issue_text(report)
+
+
+def test_original_evidence_cannot_have_superseded_evidence_id(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[0]["supersedes_evidence_id"] = "EVD-PROSPECT-RAW-001"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "original evidence cannot supersede another evidence row" in issue_text(report)
+
+
+def test_correction_must_reference_earlier_evidence_row(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    correction = rows.pop()
+    rows.insert(0, correction)
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "supersedes_evidence_id must reference an earlier evidence row" in issue_text(report)
+
+
+def test_duplicate_evidence_id_fails(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    duplicate = dict(rows[0])
+    rows.append(duplicate)
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "duplicate unique key" in issue_text(report)
+
+
+def test_content_hash_mismatch_blocks_validation(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[1]["content_hash_status"] = "mismatch"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "content hash mismatch blocks evidence validation" in issue_text(report)
+
+
+def test_sha256_hash_format_is_validated(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[1]["content_hash"] = "not-a-sha256-hash"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "sha256 content_hash must be 64 hexadecimal characters" in issue_text(report)
+
+
+def test_uppercase_sha256_hash_is_accepted(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[1]["content_hash"] = "A" * 64
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert report.ok, issue_text(report)
+
+
+def test_stored_raw_evidence_requires_location(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[1]["raw_location"] = ""
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "stored raw evidence requires raw_location" in issue_text(report)
+
+
+def test_stored_raw_evidence_rejects_not_applicable_license(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[1]["license_status"] = "not_applicable"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "raw storage requires license_status permitted" in issue_text(report)
+
+
+def test_correction_lineage_cannot_change_related_entity(tmp_path):
+    fieldnames, rows = read_rows(PROSPECTIVE_EVIDENCE_SAMPLE)
+    rows[-1]["related_entity_id"] = "EVT-DIFFERENT-001"
+    path = tmp_path / "evidence_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "correction lineage must keep related entity unchanged" in issue_text(report)
 
 
 def test_used_evidence_published_after_baseline_fails(tmp_path):

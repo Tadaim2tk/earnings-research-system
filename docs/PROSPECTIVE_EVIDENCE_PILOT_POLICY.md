@@ -39,7 +39,7 @@ baseline_draft
 
 ## Lifecycle exception handling
 
-以下はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのenumではない。正式なevent/evidence status名、baseline version relation、correction relationはimplementation前のschema decisionで確定する。それまでは既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
+event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageは `ERS-ADR-0019` のProposed schema patchで表現する。baseline version relationとevent statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
 
 ### Event延期
 
@@ -59,7 +59,7 @@ baseline_draft
 ### 誤開示・撤回・訂正
 
 - 元の開示とevidenceを削除・上書きしない。
-- 撤回状態は `verified_status: retracted` または同等のconceptual statusとして記録する。`retracted`を正式enumへ追加するかはschema decisionまで未確定とする。
+- source verificationには既存の `verified_status: retracted` を使用できる。append-onlyの撤回通知rowは `ERS-ADR-0019` のProposed `evidence_status: retraction_notice` と `supersedes_evidence_id` で元evidenceへ接続する。
 - 訂正版を元evidenceとのrelationが追跡できるappend-only correctionとして登録する。
 - locked baselineは変更しない。
 - 元開示、撤回、訂正版の関係と有効なsourceがHuman確認されるまでscoringを確定しない。
@@ -92,17 +92,19 @@ baseline_draft
 | `verified_status` | `verified_status` | conservative enum |
 | `used_for_score` | `used_for_score` | baseline lock前に確定 |
 | `score_component` | `score_component` | score不使用なら空欄 |
-| `content_hash_status` | current schemaに専用列なし | implementation前のschema/sidecar decisionが必要 |
-| `raw_storage_status` | current schemaに専用列なし | implementation前のschema/sidecar decisionが必要 |
-| `license_status` | current schemaに専用列なし | implementation前のschema/sidecar decisionが必要 |
+| `evidence_status` | `evidence_status` | original/correction/retraction noticeのappend-only row role |
+| `supersedes_evidence_id` | `supersedes_evidence_id` | correction target。self、missing、forward referenceを禁止 |
+| `content_hash_status` | `content_hash_status` | hash取得・検証状態。`mismatch`はblocking error |
+| `raw_storage_status` | `raw_storage_status` | raw未保存理由をsource不存在と分離 |
+| `license_status` | `license_status` | `unknown`はraw保存許可ではない |
 
 `source_name`、`evidence_summary`、`reliability_score`、`created_by`など現行schema required fieldも満たす。
 
-## Current schema gap
+## Evidence metadata representation
 
-現行 `evidence.schema.json` には `content_hash_status`、`raw_storage_status`、`license_status` の専用列がない。今回はschemaを変更しないため、次のprospective実装taskで保存場所をHuman承認する。
+`PROSPECTIVE_EVIDENCE_METADATA.md` と `ERS-ADR-0019` に従い、sidecarではなく既存 `evidence` rowへoptional metadata columnsを追加する。identity、timing、score利用可否、storage/license、correction lineageを同じ `evidence_id` で検証する。
 
-専用列を追加する案を第一候補とする。暫定的にfree-text `notes`へ埋め込む方法は検索・validationが弱く、正式運用のdefaultにしない。保存mappingが未承認のままprospective scoringを開始しない。
+旧CSVは新headerなしでもvalidation可能とする。新metadataを使うrowではhash/storage/license status bundleを必須とし、組合せvalidationを行う。schema patchがHuman承認されるまでprospective scoringを開始しない。
 
 ## Timing gate
 
