@@ -2,7 +2,7 @@
 
 ## Status
 
-`Proposed`. This contract is the subject of `ERS-ADR-0020`. It does not authorize selection or operation of the first prospective event.
+`Accepted` under `ERS-ADR-0020`. Acceptance of this contract does not authorize selection or operation of the first prospective event.
 
 ## Purpose
 
@@ -93,7 +93,7 @@ The hash field itself is excluded to avoid recursion. A mismatch is a blocking v
 
 ## Versioning And Supersession
 
-- Prospective `baseline_version` uses `v<positive integer>`.
+- Prospective `baseline_version` uses ASCII `v<positive integer>` matching `^v[1-9][0-9]*$`, such as `v1`, `v2`, and `v10`. Leading zeros, Unicode digits, superscript digits, uppercase `V`, and decimal notation are rejected.
 - Versions increase monotonically for each `earnings_event_id` in append order.
 - A locked version greater than `v1` requires `supersedes_baseline_id` and `supersession_reason`.
 - The target must exist earlier in the same dataset, must not be the current row, must belong to the same event, and must have a lower version number.
@@ -101,6 +101,8 @@ The hash field itself is excluded to avoid recursion. A mismatch is a blocking v
 - Duplicate baseline IDs and duplicate event/version keys remain invalid.
 
 The current validator checks lineage within one loaded CSV dataset. Global or cross-file lineage needs a later registry/graph design.
+
+Branching lineage is currently allowed: two later baselines may independently supersede the same earlier baseline (`A -> B` and `A -> C`). Preventing or resolving branches requires a separate active-version policy and is not inferred by this patch.
 
 Evidence is joined only where `related_entity_type=pre_earnings_baseline` and `related_entity_id` equals the current `baseline_id`. Unrelated company, event, KPI, review, hypothesis, or other baseline evidence is not compared with that lock time. A locked prospective baseline with no matching evidence fails validation. References outside the loaded dataset are not resolved by this patch.
 
@@ -127,4 +129,12 @@ The validator rejects evidence observed before publication, evidence recorded be
 
 ## Backward Compatibility
 
-The original 42-column baseline CSV remains accepted when none of the new optional headers is present. Legacy locked rows still require existing `locked_at` and `baseline_record_hash`, but their historical placeholder hash is not reinterpreted through V1 canonicalization. New prospective rows use the full 49-column contract and strict lock validation.
+Legacy compatibility is defined at the file/dataset header boundary. The original 42-column baseline CSV remains accepted when none of the seven prospective headers is present. Legacy locked rows still require existing `locked_at` and `baseline_record_hash`, but their historical placeholder hash is not reinterpreted through V1 canonicalization.
+
+A 49-column prospective-capable file cannot treat an `is_locked=true` row with all prospective metadata blank as legacy. Every locked row in that file must satisfy the prospective contract. In a mixed file, an unlocked row with all prospective metadata blank remains legacy-compatible, but it is not a valid prospective locked baseline. Adding new locked rows in legacy form is prohibited.
+
+## Datetime Input Contract
+
+CSV datetime input uses offset-bearing ISO 8601, for example `2026-07-23T10:00:00+09:00`. Invalid dates, invalid timezone offsets, and a `Z` suffix are reported as validation errors rather than parser crashes. The CSV parser intentionally does not accept the `Z` suffix so behavior remains consistent with the supported compatibility contract.
+
+Canonical hash output is a separate representation. Valid input datetimes are normalized internally to UTC with a `Z` suffix, for example `2026-07-23T01:00:00Z`, before hashing.

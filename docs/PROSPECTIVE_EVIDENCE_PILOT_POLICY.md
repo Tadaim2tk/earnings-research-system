@@ -43,7 +43,7 @@ baseline status、Human review、hash、version、supersessionの機械契約は
 
 ## Lifecycle exception handling
 
-event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageはAcceptedの `ERS-ADR-0019` で表現する。baseline version relationはProposedの `ERS-ADR-0020`、event statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
+event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で表現する。event statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
 
 ### Event延期
 

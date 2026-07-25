@@ -292,12 +292,14 @@ Alternatives Considered: sidecar metadata schemaはjoinとlineageの二重管理
 
 Date: 2026-07-25
 
-Status: Proposed
+Status: Accepted
+
+Approval: Human承認。Human approvalなしのlockを拒否し、明示的field manifestからcanonical SHA-256を再計算して不一致をblocking errorとする。baselineと関連evidenceの時刻gate、数値version比較、append-only supersessionをvalidatorで確認した。49列prospective-capable fileのlocked rowがmetadata全空でlegacy contractへ逃げる経路を閉じ、旧42列CSV互換性は維持する。不正version／datetimeをvalidation errorへ縮退し、CLI public経路のsuccess、validation failure、crash regression testsを追加した。本ADR承認はprospective event選定・実運用開始の自動承認ではない。
 
 Context: prospective formal evidence metadataはAcceptedとなったが、baseline自体はdraftとlockedの明示的な区別、Human review gate、再計算可能なlock hash、延期時のappend-only versioningを機械保証していない。evidenceだけを固定してもbaseline本文とscoreを発表後に上書きできればfuture leakageを防げない。
 
 Decision: [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) に従い、既存baseline rowへbackward-compatible optional columnsを追加する。prospective rowは `draft` または `locked` を明示し、lockedにはHuman approval、`locked_at`、canonical SHA-256 hash、formal evidence、score利用承認済みevidenceを要求する。versionはeventごとに単調増加し、locked `v2` 以降は同一eventの先行rowを `supersedes_baseline_id` で参照する。旧rowは上書き・削除しない。event cancellation enumは本ADRの対象外とする。
 
-Consequences: 発表後情報のscore混入、draftの誤利用、self/missing/forward/cross-event supersession、hash不一致をvalidatorで停止できる。旧42列CSVは維持できる一方、prospective 49列rowには厳格なstatus bundleが必要になる。snapshot内でcontentとhashを同時に改変する行為の独立検出、cross-file lineage、event cancellationは未実装である。本ADRがAcceptedになるまでprospective event選定・運用開始を承認しない。
+Consequences: 発表後情報のscore混入、draftの誤利用、self/missing/forward/cross-event supersession、hash不一致をvalidatorで停止できる。旧42列CSVは維持できる一方、prospective 49列rowには厳格なstatus bundleが必要になる。snapshot内でcontentとhashを同時に改変する行為の独立検出、cross-file lineage、event cancellationは未実装である。本ADRのAccepted statusだけではprospective event選定・運用開始を承認しない。
 
 Alternatives Considered: 既存 `is_locked` と自由形式hashだけを継続する案はHuman reviewとhash再計算を検証できない。`superseded` statusで旧rowを書き換える案はappend-onlyを壊す。event cancellationをbaseline statusへ追加する案はevent lifecycleとbaseline lifecycleの責務を混同するため採用しない。

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from earnings_research.cli.__main__ import main as cli_main
 from earnings_research.validation.validator import (
     BASELINE_LOCK_HASH_FIELDS_V1,
     _calculate_baseline_record_hash,
@@ -57,15 +58,45 @@ def copy_prospective_baseline_dataset(tmp_path):
     baseline_path = samples / "pre_earnings_baseline_sample.csv"
     baseline_fieldnames, baseline_rows = read_rows(baseline_path)
     fixture_fieldnames, fixture_rows = read_rows(PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv")
+    fixture_by_id = {row["baseline_id"]: row for row in fixture_rows}
     existing_baseline_ids = {row["baseline_id"] for row in baseline_rows}
-    normalized_baselines = [{field: row.get(field, "") for field in fixture_fieldnames} for row in baseline_rows]
+    normalized_baselines = []
+    spec = load_spec("pre_earnings_baseline")
+    for source_row in baseline_rows:
+        if source_row["baseline_id"] in fixture_by_id:
+            normalized_baselines.append(dict(fixture_by_id[source_row["baseline_id"]]))
+            continue
+        row = {field: source_row.get(field, "") for field in fixture_fieldnames}
+        row.update(
+            {
+                "baseline_status": "locked",
+                "lock_hash_algorithm": "sha256",
+                "human_review_status": "approved",
+                "reviewed_by": "test-reviewer",
+                "reviewed_at": row["locked_at"],
+                "recorded_at": row["locked_at"],
+            }
+        )
+        row["baseline_record_hash"] = _calculate_baseline_record_hash(row, spec)
+        normalized_baselines.append(row)
     normalized_baselines.extend(row for row in fixture_rows if row["baseline_id"] not in existing_baseline_ids)
     write_rows(baseline_path, fixture_fieldnames, normalized_baselines)
 
     evidence_path = samples / "evidence_sample.csv"
     _, evidence_rows = read_rows(evidence_path)
     evidence_fieldnames, fixture_evidence = read_rows(PROSPECTIVE_BASELINE_SAMPLES / "evidence_sample.csv")
-    normalized_evidence = [{field: row.get(field, "") for field in evidence_fieldnames} for row in evidence_rows]
+    normalized_evidence = []
+    for source_row in evidence_rows:
+        row = {field: source_row.get(field, "") for field in evidence_fieldnames}
+        row.update(
+            {
+                "evidence_status": "original",
+                "content_hash_status": "not_recorded",
+                "raw_storage_status": "metadata_only",
+                "license_status": "not_applicable",
+            }
+        )
+        normalized_evidence.append(row)
     normalized_evidence.extend(fixture_evidence)
     write_rows(evidence_path, evidence_fieldnames, normalized_evidence)
     return samples
@@ -226,15 +257,92 @@ def test_baseline_status_enum_is_validated(tmp_path):
     assert "value 'almost_locked' is not in allowed set" in issue_text(report)
 
 
-def test_prospective_baseline_version_format_is_validated(tmp_path):
+@pytest.mark.parametrize("invalid_version", ["v0", "v01", "V1", "v1.0", "v²", "v١٢", "v"])
+def test_prospective_baseline_version_format_is_validated(tmp_path, invalid_version):
     fieldnames, rows = prospective_baseline_fixture()
-    rows[-1]["baseline_version"] = "v0"
+    rows[-1]["baseline_version"] = invalid_version
     path = tmp_path / "pre_earnings_baseline_sample.csv"
     write_rows(path, fieldnames, rows)
 
     report = validate_file(path)
     assert not report.ok
     assert "prospective baseline_version must use v followed by an integer of at least 1" in issue_text(report)
+
+
+def test_prospective_header_rejects_locked_legacy_escape(tmp_path):
+    legacy_fieldnames, legacy_rows = read_rows(SAMPLES / "pre_earnings_baseline_sample.csv")
+    prospective_fieldnames, _ = prospective_baseline_fixture()
+    escaped_row = {field: legacy_rows[0].get(field, "") for field in prospective_fieldnames}
+    escaped_row["baseline_record_hash"] = "fake-placeholder-hash"
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, prospective_fieldnames, [escaped_row])
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "locked row in a prospective-capable file cannot use the legacy baseline contract" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    "invalid_datetime",
+    ["not-a-date", "2026-08-07T20:00:00+25:00", "2026-08-07T11:00:00Z"],
+)
+def test_invalid_prospective_datetime_does_not_crash(tmp_path, invalid_datetime):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1]["reviewed_at"] = invalid_datetime
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    report = validate_file(path)
+    assert not report.ok
+    assert "invalid datetime value" in issue_text(report)
+
+
+def test_cli_valid_dataset_exits_zero(capsys):
+    exit_code = cli_main(["validate", str(SAMPLES)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Validation passed." in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_cli_invalid_dataset_exits_one_without_traceback(tmp_path, capsys):
+    samples = copy_samples(tmp_path)
+    path = samples / "company_master_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["market_cap_category"] = "invalid-category"
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate", str(samples)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Validation failed:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value", "expected_issue"),
+    [
+        ("baseline_version", "v²", "prospective baseline_version must use v followed by an integer"),
+        ("reviewed_at", "not-a-date", "invalid datetime value"),
+        ("reviewed_at", "2026-08-07T11:00:00Z", "invalid datetime value"),
+    ],
+)
+def test_cli_baseline_crash_regressions_exit_one(
+    tmp_path, capsys, field_name, invalid_value, expected_issue
+):
+    fieldnames, rows = prospective_baseline_fixture()
+    rows[1][field_name] = invalid_value
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+    write_rows(path, fieldnames, rows)
+
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert expected_issue in captured.err
+    assert "Traceback" not in captured.err
 
 
 @pytest.mark.parametrize(

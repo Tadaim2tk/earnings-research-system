@@ -3,6 +3,7 @@
 import csv
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -75,6 +76,17 @@ BASELINE_LOCK_HASH_FIELDS_V1 = (
     "recorded_at",
 )
 
+PROSPECTIVE_BASELINE_FIELDS = {
+    "baseline_status",
+    "supersedes_baseline_id",
+    "supersession_reason",
+    "lock_hash_algorithm",
+    "human_review_status",
+    "reviewed_by",
+    "reviewed_at",
+}
+BASELINE_VERSION_PATTERN = re.compile(r"^v([1-9][0-9]*)$", re.ASCII)
+
 
 @dataclass
 class ValidationIssue:
@@ -146,6 +158,7 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     dataset_dir = Path(dataset_dir)
     specs = load_specs()
     rows_by_table = {}
+    fieldnames_by_table = {}
     issues = []
 
     for table in TABLE_ORDER:
@@ -155,8 +168,9 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
             issues.append(ValidationIssue(table, None, None, "missing expected file %s" % spec.file))
             rows_by_table[table] = []
             continue
-        rows, table_issues = _read_and_validate_table(path, spec)
+        rows, fieldnames, table_issues = _read_and_validate_table(path, spec)
         rows_by_table[table] = rows
+        fieldnames_by_table[table] = fieldnames
         issues.extend(table_issues)
 
     if issues:
@@ -166,7 +180,14 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     issues.extend(_validate_scoring_versions(rows_by_table))
     issues.extend(_validate_score_effective_dates(rows_by_table))
     issues.extend(_validate_temporal_constraints(rows_by_table))
-    issues.extend(_validate_baseline_lock_constraints(specs["pre_earnings_baseline"], rows_by_table, True))
+    issues.extend(
+        _validate_baseline_lock_constraints(
+            specs["pre_earnings_baseline"],
+            rows_by_table,
+            True,
+            PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames_by_table["pre_earnings_baseline"])),
+        )
+    )
     issues.extend(_validate_relationship_consistency(rows_by_table))
     issues.extend(_validate_kpi_constraints(rows_by_table))
     issues.extend(_validate_evidence_constraints(specs, rows_by_table))
@@ -182,14 +203,21 @@ def validate_file(path: Path) -> ValidationReport:
     path = Path(path)
     specs = load_specs()
     spec = _match_spec_for_file(path, specs.values())
-    rows, issues = _read_and_validate_table(path, spec)
+    rows, fieldnames, issues = _read_and_validate_table(path, spec)
 
     if spec.table == "post_earnings_review":
         issues.extend(_validate_trade_constraints({spec.table: rows}))
         issues.extend(_validate_return_reference_constraints({spec.table: rows}))
     if spec.table == "pre_earnings_baseline":
         issues.extend(_validate_append_only_constraints({spec.table: rows}))
-        issues.extend(_validate_baseline_lock_constraints(spec, {spec.table: rows}, False))
+        issues.extend(
+            _validate_baseline_lock_constraints(
+                spec,
+                {spec.table: rows},
+                False,
+                PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames)),
+            )
+        )
     if spec.table == "hypothesis_log":
         issues.extend(_validate_hypothesis_constraints({spec.table: rows}))
     if spec.table == "evidence":
@@ -205,7 +233,9 @@ def _match_spec_for_file(path: Path, specs: Iterable[TableSpec]) -> TableSpec:
     raise ValueError("Could not infer schema for %s" % path)
 
 
-def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str, str]], List[ValidationIssue]]:
+def _read_and_validate_table(
+    path: Path, spec: TableSpec
+) -> Tuple[List[Dict[str, str]], List[str], List[ValidationIssue]]:
     issues = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -214,7 +244,7 @@ def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str
         for column in missing:
             issues.append(ValidationIssue(spec.table, None, column, "missing required column"))
         if missing:
-            return [], issues
+            return [], fieldnames, issues
 
         rows = list(reader)
 
@@ -232,7 +262,7 @@ def _read_and_validate_table(path: Path, spec: TableSpec) -> Tuple[List[Dict[str
     for key_columns in key_sets:
         issues.extend(_validate_unique_key(spec.table, rows, key_columns))
 
-    return rows, issues
+    return rows, fieldnames, issues
 
 
 def _validate_value(table: str, row_number: int, column: ColumnSpec, value: str) -> List[ValidationIssue]:
@@ -250,6 +280,8 @@ def _validate_value(table: str, row_number: int, column: ColumnSpec, value: str)
         elif column.type == "time":
             parsed = time.fromisoformat(value)
         elif column.type == "datetime":
+            if value.endswith(("Z", "z")):
+                raise ValueError("UTC Z suffix is not supported in CSV input")
             parsed = datetime.fromisoformat(value)
         elif column.type == "boolean":
             if value.lower() not in {"true", "false"}:
@@ -764,6 +796,7 @@ def _validate_baseline_lock_constraints(
     spec: TableSpec,
     rows_by_table: Dict[str, List[Dict[str, str]]],
     require_evidence: bool,
+    prospective_headers_present: bool,
 ) -> List[ValidationIssue]:
     issues = []
     rows = rows_by_table.get("pre_earnings_baseline", [])
@@ -806,7 +839,17 @@ def _validate_baseline_lock_constraints(
         )
         version = _parse_baseline_version(_clean(row.get("baseline_version", "")))
 
-        if not any(prospective_fields):
+        if prospective_headers_present and is_locked and not any(prospective_fields):
+            issues.append(
+                ValidationIssue(
+                    "pre_earnings_baseline",
+                    row_number,
+                    "baseline_status",
+                    "locked row in a prospective-capable file cannot use the legacy baseline contract",
+                )
+            )
+
+        if not any(prospective_fields) and not (prospective_headers_present and is_locked):
             if is_locked and (not locked_at or not record_hash):
                 issues.append(
                     ValidationIssue(
@@ -1119,10 +1162,10 @@ def _validate_baseline_lock_constraints(
 
 
 def _parse_baseline_version(value: str) -> Optional[int]:
-    if not value.startswith("v") or not value[1:].isdigit():
+    match = BASELINE_VERSION_PATTERN.fullmatch(value)
+    if match is None:
         return None
-    version = int(value[1:])
-    return version if version >= 1 else None
+    return int(match.group(1))
 
 
 def _calculate_baseline_record_hash(row: Dict[str, str], spec: TableSpec) -> str:
@@ -1176,7 +1219,12 @@ def _event_announcement_datetime(row: Dict[str, str]) -> datetime:
 def _parse_datetime(value: str) -> Optional[datetime]:
     if not value:
         return None
-    parsed = datetime.fromisoformat(value)
+    if value.endswith(("Z", "z")):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=JST)
     return parsed

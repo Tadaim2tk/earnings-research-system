@@ -14,7 +14,7 @@
 | --- | --- |
 | 発表予定日を事前確認可能 | company IR calendarまたはexchange一次情報 |
 | baseline lock時間を確保 | 発表予定より十分前のHuman review slot |
-| baseline lock契約を利用可能 | `ERS-ADR-0020`の承認後にschema、validator、sample、testsが利用可能 |
+| baseline lock契約を利用可能 | Acceptedの`ERS-ADR-0020`に基づくschema、validator、sample、testsが利用可能 |
 | 公式資料へアクセス可能 | current company forecast/直近決算資料のURL |
 | formal evidence登録可能 | source timing、entity relation、publisher/titleを記録可能 |
 | event時刻を監査可能 | time-bearing primary metadataまたはunconfirmed時の安全な延期手順 |
@@ -103,7 +103,7 @@ postponement_contingency
 - event中止時にscoring、calibration、通常のpost-event reviewから除外できる。
 - 誤開示、撤回、訂正時に元evidenceを保持したappend-only correctionを扱える。
 
-これらは選定時点の運用準備確認である。baseline version relationは [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) とProposedの `ERS-ADR-0020` に従う。`event_cancelled`相当のevent enumは別のschema decisionを必要とする。source撤回は既存 `verified_status: retracted` とAcceptedの `ERS-ADR-0019` correction lineageを使う。baseline ADRのHuman承認前にprospective運用を開始しない。
+これらは選定時点の運用準備確認である。baseline version relationは [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) とAcceptedの `ERS-ADR-0020` に従う。`event_cancelled`相当のevent enumは別のschema decisionを必要とする。source撤回は既存 `verified_status: retracted` とAcceptedの `ERS-ADR-0019` correction lineageを使う。baseline contractの承認はprospective運用開始の自動承認ではない。
 
 ## Pilot success measures
 
