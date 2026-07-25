@@ -16,6 +16,7 @@ JST = timezone(timedelta(hours=9))
 TABLE_ORDER = [
     "company_master",
     "earnings_event",
+    "event_status_history",
     "score_definition",
     "pre_earnings_baseline",
     "post_earnings_review",
@@ -165,6 +166,10 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
         spec = specs[table]
         path = dataset_dir / spec.file
         if not path.exists():
+            if table == "event_status_history":
+                rows_by_table[table] = []
+                fieldnames_by_table[table] = []
+                continue
             issues.append(ValidationIssue(table, None, None, "missing expected file %s" % spec.file))
             rows_by_table[table] = []
             continue
@@ -180,6 +185,7 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     issues.extend(_validate_scoring_versions(rows_by_table))
     issues.extend(_validate_score_effective_dates(rows_by_table))
     issues.extend(_validate_temporal_constraints(rows_by_table))
+    issues.extend(_validate_event_lifecycle_constraints(rows_by_table))
     issues.extend(
         _validate_baseline_lock_constraints(
             specs["pre_earnings_baseline"],
@@ -222,6 +228,8 @@ def validate_file(path: Path) -> ValidationReport:
         issues.extend(_validate_hypothesis_constraints({spec.table: rows}))
     if spec.table == "evidence":
         issues.extend(_validate_evidence_metadata_constraints(rows))
+    if spec.table == "event_status_history":
+        issues.extend(_validate_event_lifecycle_constraints({spec.table: rows}, False))
     return ValidationReport(issues)
 
 
@@ -395,12 +403,47 @@ def _validate_score_effective_dates(rows_by_table: Dict[str, List[Dict[str, str]
     return issues
 
 
-def _validate_temporal_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
-    issues = []
-    events = {
+def _current_event_status_records(
+    rows_by_table: Dict[str, List[Dict[str, str]]]
+) -> Dict[str, Dict[str, str]]:
+    rows = rows_by_table.get("event_status_history", [])
+    referenced_ids = {
+        _clean(row.get("supersedes_status_record_id", ""))
+        for row in rows
+        if _clean(row.get("supersedes_status_record_id", ""))
+    }
+    tails_by_event = {}
+    for row in rows:
+        record_id = _clean(row.get("event_status_record_id", ""))
+        if not record_id or record_id in referenced_ids:
+            continue
+        tails_by_event.setdefault(_clean(row.get("earnings_event_id", "")), []).append(row)
+    return {
+        event_id: tail_rows[0]
+        for event_id, tail_rows in tails_by_event.items()
+        if len(tail_rows) == 1
+    }
+
+
+def _effective_event_datetimes(
+    rows_by_table: Dict[str, List[Dict[str, str]]]
+) -> Dict[str, datetime]:
+    event_times = {
         row["earnings_event_id"]: _event_announcement_datetime(row)
         for row in rows_by_table.get("earnings_event", [])
     }
+    for event_id, status_row in _current_event_status_records(rows_by_table).items():
+        status = _clean(status_row.get("event_status", ""))
+        field = "occurred_at" if status == "occurred" else "scheduled_at"
+        lifecycle_time = _parse_datetime(_clean(status_row.get(field, "")))
+        if lifecycle_time:
+            event_times[event_id] = lifecycle_time
+    return event_times
+
+
+def _validate_temporal_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
+    issues = []
+    events = _effective_event_datetimes(rows_by_table)
 
     for row_number, row in enumerate(rows_by_table.get("pre_earnings_baseline", []), start=2):
         event_time = events.get(row.get("earnings_event_id"))
@@ -419,6 +462,308 @@ def _validate_temporal_constraints(rows_by_table: Dict[str, List[Dict[str, str]]
         if event_time and recorded_at and recorded_at <= event_time:
             issues.append(ValidationIssue("post_earnings_review", row_number, "recorded_at", "review timestamp is not after announcement"))
     return issues
+
+
+def _validate_event_lifecycle_constraints(
+    rows_by_table: Dict[str, List[Dict[str, str]]],
+    require_dataset_relations: bool = True,
+) -> List[ValidationIssue]:
+    issues = []
+    rows = rows_by_table.get("event_status_history", [])
+    rows_by_id = {
+        _clean(row.get("event_status_record_id", "")): row
+        for row in rows
+        if _clean(row.get("event_status_record_id", ""))
+    }
+    row_number_by_id = {
+        _clean(row.get("event_status_record_id", "")): row_number
+        for row_number, row in enumerate(rows, start=2)
+        if _clean(row.get("event_status_record_id", ""))
+    }
+    current_tail_by_event = {}
+    referenced_ids = set()
+    allowed_transitions = {
+        "scheduled": {"postponed", "cancelled", "occurred"},
+        "postponed": {"postponed", "cancelled", "occurred"},
+        "cancelled": set(),
+        "occurred": set(),
+    }
+
+    for row_number, row in enumerate(rows, start=2):
+        record_id = _clean(row.get("event_status_record_id", ""))
+        event_id = _clean(row.get("earnings_event_id", ""))
+        status = _clean(row.get("event_status", ""))
+        supersedes_id = _clean(row.get("supersedes_status_record_id", ""))
+        replacement_event_id = _clean(row.get("replacement_event_id", ""))
+        reason = _clean(row.get("status_reason", ""))
+        scheduled_at = _parse_datetime(_clean(row.get("scheduled_at", "")))
+        previous_scheduled_at = _parse_datetime(_clean(row.get("previous_scheduled_at", "")))
+        status_recorded_at = _parse_datetime(_clean(row.get("status_recorded_at", "")))
+        occurred_at = _parse_datetime(_clean(row.get("occurred_at", "")))
+
+        if status == "occurred":
+            if not occurred_at:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "occurred_at", "occurred status requires occurred_at")
+                )
+            elif status_recorded_at and occurred_at > status_recorded_at:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "occurred_at", "occurred_at must not be after status_recorded_at")
+                )
+        elif occurred_at:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "occurred_at", "non-occurred status must not contain occurred_at")
+            )
+
+        if status in {"postponed", "cancelled"} and not reason:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "status_reason", "%s status requires status_reason" % status)
+            )
+        if replacement_event_id:
+            if status != "cancelled":
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "replacement_event_id", "replacement_event_id is only allowed for cancelled status")
+                )
+            if replacement_event_id == event_id:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "replacement_event_id", "replacement_event_id must differ from earnings_event_id")
+                )
+
+        if not supersedes_id:
+            if event_id in current_tail_by_event:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "non-initial status record must supersede the current status")
+                )
+            if status != "scheduled":
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "event_status", "initial event status must be scheduled")
+                )
+            if previous_scheduled_at:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "previous_scheduled_at", "initial scheduled status must not contain previous_scheduled_at")
+                )
+            current_tail_by_event[event_id] = record_id
+            continue
+
+        referenced_ids.add(supersedes_id)
+        if supersedes_id == record_id:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "status record cannot supersede itself")
+            )
+            continue
+        parent = rows_by_id.get(supersedes_id)
+        if parent is None:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "superseded status record not found")
+            )
+            continue
+        if row_number_by_id[supersedes_id] >= row_number:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "status supersession must reference an earlier row")
+            )
+        if _clean(parent.get("earnings_event_id", "")) != event_id:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "status lineage must keep earnings_event_id unchanged")
+            )
+        if current_tail_by_event.get(event_id) != supersedes_id:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "supersedes_status_record_id", "status lineage cannot branch from a non-current record")
+            )
+
+        parent_status = _clean(parent.get("event_status", ""))
+        if status not in allowed_transitions.get(parent_status, set()):
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "event_status", "invalid event status transition %s -> %s" % (parent_status, status))
+            )
+        parent_recorded_at = _parse_datetime(_clean(parent.get("status_recorded_at", "")))
+        if parent_recorded_at and status_recorded_at and status_recorded_at <= parent_recorded_at:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "status_recorded_at", "status_recorded_at must increase monotonically")
+            )
+
+        parent_scheduled_at = _parse_datetime(_clean(parent.get("scheduled_at", "")))
+        if status == "postponed":
+            if previous_scheduled_at != parent_scheduled_at:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "previous_scheduled_at", "postponed status must preserve the previous scheduled_at")
+                )
+            if scheduled_at and parent_scheduled_at and scheduled_at <= parent_scheduled_at:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number, "scheduled_at", "postponed scheduled_at must be later than the previous schedule")
+                )
+        elif previous_scheduled_at:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "previous_scheduled_at", "previous_scheduled_at is only allowed for postponed status")
+            )
+        if status in {"cancelled", "occurred"} and scheduled_at != parent_scheduled_at:
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "scheduled_at", "%s status must preserve the current scheduled_at" % status)
+            )
+        current_tail_by_event[event_id] = record_id
+
+    tails_by_event = {}
+    for record_id, row in rows_by_id.items():
+        if record_id not in referenced_ids:
+            tails_by_event.setdefault(_clean(row.get("earnings_event_id", "")), []).append(record_id)
+    for event_id, tail_ids in tails_by_event.items():
+        if len(tail_ids) != 1:
+            issues.append(
+                ValidationIssue("event_status_history", None, "supersedes_status_record_id", "event %s has multiple active status tails" % event_id)
+            )
+
+    if not require_dataset_relations:
+        return issues
+
+    current = _current_event_status_records(rows_by_table)
+    required_event_ids = _lifecycle_required_event_ids(rows_by_table)
+    event_rows = {
+        _clean(row.get("earnings_event_id", "")): row
+        for row in rows_by_table.get("earnings_event", [])
+    }
+    for event_id in required_event_ids:
+        event_row = event_rows.get(event_id)
+        if event_row is None:
+            continue
+        if event_id not in current:
+            issues.append(
+                ValidationIssue("earnings_event", None, "earnings_event_id", "event %s has no unique current lifecycle status" % event_id)
+            )
+        initial_rows = [
+            row
+            for row in rows
+            if _clean(row.get("earnings_event_id", "")) == event_id
+            and not _clean(row.get("supersedes_status_record_id", ""))
+        ]
+        original_schedule = _event_announcement_datetime(event_row)
+        for initial_row in initial_rows:
+            initial_schedule = _parse_datetime(_clean(initial_row.get("scheduled_at", "")))
+            if initial_schedule and initial_schedule != original_schedule:
+                issues.append(
+                    ValidationIssue("event_status_history", row_number_by_id.get(_clean(initial_row.get("event_status_record_id", ""))), "scheduled_at", "initial scheduled_at must match earnings_event announcement date and time")
+                )
+    for row_number, row in enumerate(rows, start=2):
+        replacement_event_id = _clean(row.get("replacement_event_id", ""))
+        if not replacement_event_id:
+            continue
+        source_event = event_rows.get(_clean(row.get("earnings_event_id", "")))
+        replacement_event = event_rows.get(replacement_event_id)
+        if source_event and replacement_event and _clean(source_event.get("company_id", "")) != _clean(replacement_event.get("company_id", "")):
+            issues.append(
+                ValidationIssue("event_status_history", row_number, "replacement_event_id", "replacement event must belong to the same company")
+            )
+    reviews = rows_by_table.get("post_earnings_review", [])
+    baseline_by_id = {
+        _clean(row.get("baseline_id", "")): row
+        for row in rows_by_table.get("pre_earnings_baseline", [])
+    }
+    return_columns = (
+        "open_gap_pct",
+        "day0_return_pct",
+        "day1_return_pct",
+        "day5_return_pct",
+        "day20_return_pct",
+        "max_favorable_excursion_pct",
+        "max_adverse_excursion_pct",
+    )
+    for row_number, review in enumerate(reviews, start=2):
+        event_id = _clean(review.get("earnings_event_id", ""))
+        if event_id not in required_event_ids:
+            continue
+        status_row = current.get(event_id)
+        current_status = _clean(status_row.get("event_status", "")) if status_row else ""
+        has_return = any(_clean(review.get(column, "")) for column in return_columns)
+        if current_status != "occurred":
+            message = "cancelled event cannot have post-event review or scoring" if current_status == "cancelled" else "post-event review requires current event status occurred"
+            issues.append(ValidationIssue("post_earnings_review", row_number, "earnings_event_id", message))
+            if has_return:
+                issues.append(ValidationIssue("post_earnings_review", row_number, "earnings_event_id", "event return requires occurred status"))
+            continue
+        baseline = baseline_by_id.get(_clean(review.get("baseline_id", "")))
+        if baseline and _clean(baseline.get("is_locked", "")).lower() != "true":
+            issues.append(
+                ValidationIssue("post_earnings_review", row_number, "baseline_id", "post-event review requires a matching locked baseline")
+            )
+        review_recorded_at = _parse_datetime(_clean(review.get("recorded_at", "")))
+        occurrence_confirmed_at = _parse_datetime(_clean(status_row.get("status_recorded_at", "")))
+        if review_recorded_at and occurrence_confirmed_at and review_recorded_at < occurrence_confirmed_at:
+            issues.append(
+                ValidationIssue("post_earnings_review", row_number, "recorded_at", "post-event review was recorded before occurrence confirmation")
+            )
+    baselines_by_event = {}
+    for baseline in rows_by_table.get("pre_earnings_baseline", []):
+        baselines_by_event.setdefault(_clean(baseline.get("earnings_event_id", "")), []).append(baseline)
+    for event_id, status_row in current.items():
+        if _clean(status_row.get("event_status", "")) != "occurred":
+            continue
+        parent_id = _clean(status_row.get("supersedes_status_record_id", ""))
+        parent = rows_by_id.get(parent_id, {})
+        if _clean(parent.get("event_status", "")) != "postponed":
+            continue
+        postponed_at = _parse_datetime(_clean(parent.get("status_recorded_at", "")))
+        scheduled_at = _parse_datetime(_clean(status_row.get("scheduled_at", "")))
+        revalidated = False
+        for baseline in baselines_by_event.get(event_id, []):
+            reviewed_at = _parse_datetime(_clean(baseline.get("reviewed_at", "")))
+            locked_at = _parse_datetime(_clean(baseline.get("locked_at", "")))
+            if (
+                _clean(baseline.get("baseline_status", "")) == "locked"
+                and reviewed_at
+                and postponed_at
+                and reviewed_at >= postponed_at
+                and locked_at
+                and scheduled_at
+                and locked_at < scheduled_at
+            ):
+                revalidated = True
+        if not revalidated:
+            issues.append(
+                ValidationIssue("event_status_history", row_number_by_id.get(_clean(status_row.get("event_status_record_id", ""))), "earnings_event_id", "occurred event after postponement requires a revalidated locked baseline")
+            )
+    return issues
+
+
+def _lifecycle_required_event_ids(
+    rows_by_table: Dict[str, List[Dict[str, str]]]
+) -> set:
+    required = {
+        _clean(row.get("earnings_event_id", ""))
+        for row in rows_by_table.get("event_status_history", [])
+        if _clean(row.get("earnings_event_id", ""))
+    }
+    baselines = {
+        _clean(row.get("baseline_id", "")): row
+        for row in rows_by_table.get("pre_earnings_baseline", [])
+    }
+    reviews = {
+        _clean(row.get("review_id", "")): row
+        for row in rows_by_table.get("post_earnings_review", [])
+    }
+    for baseline in baselines.values():
+        if _clean(baseline.get("baseline_status", "")):
+            required.add(_clean(baseline.get("earnings_event_id", "")))
+    prospective_evidence_fields = (
+        "evidence_status",
+        "content_hash_status",
+        "raw_storage_status",
+        "license_status",
+    )
+    for evidence in rows_by_table.get("evidence", []):
+        if not any(_clean(evidence.get(field, "")) for field in prospective_evidence_fields):
+            continue
+        related_type = _clean(evidence.get("related_entity_type", ""))
+        related_id = _clean(evidence.get("related_entity_id", ""))
+        if related_type == "earnings_event":
+            required.add(related_id)
+        elif related_type == "pre_earnings_baseline" and related_id in baselines:
+            required.add(_clean(baselines[related_id].get("earnings_event_id", "")))
+        elif related_type == "post_earnings_review" and related_id in reviews:
+            required.add(_clean(reviews[related_id].get("earnings_event_id", "")))
+    for review in reviews.values():
+        baseline = baselines.get(_clean(review.get("baseline_id", "")))
+        if baseline and _clean(baseline.get("baseline_status", "")):
+            required.add(_clean(review.get("earnings_event_id", "")))
+    required.discard("")
+    return required
 
 
 def _validate_evidence_constraints(specs: Dict[str, TableSpec], rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
@@ -647,10 +992,7 @@ def _is_pre_event_score_evidence(row: Dict[str, str]) -> bool:
 
 
 def _build_evidence_context(rows_by_table: Dict[str, List[Dict[str, str]]]) -> Dict[Tuple[str, str], Tuple[str, Optional[datetime], Optional[datetime]]]:
-    events = {
-        row["earnings_event_id"]: _event_announcement_datetime(row)
-        for row in rows_by_table.get("earnings_event", [])
-    }
+    events = _effective_event_datetimes(rows_by_table)
     baselines = {row["baseline_id"]: row for row in rows_by_table.get("pre_earnings_baseline", [])}
     reviews = {row["review_id"]: row for row in rows_by_table.get("post_earnings_review", [])}
     kpis = {row["kpi_id"]: row for row in rows_by_table.get("kpi_observation", [])}
@@ -708,10 +1050,7 @@ def _validate_relationship_consistency(rows_by_table: Dict[str, List[Dict[str, s
 
 def _validate_kpi_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
     issues = []
-    events = {
-        row["earnings_event_id"]: _event_announcement_datetime(row)
-        for row in rows_by_table.get("earnings_event", [])
-    }
+    events = _effective_event_datetimes(rows_by_table)
     for row_number, row in enumerate(rows_by_table.get("kpi_observation", []), start=2):
         value_type = _clean(row.get("value_type", ""))
         used_for_score = _clean(row.get("used_for_score", "")).lower() == "true"

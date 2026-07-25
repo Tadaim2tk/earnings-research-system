@@ -1,0 +1,7 @@
+event_status_record_id,earnings_event_id,event_status,scheduled_at,previous_scheduled_at,status_recorded_at,occurred_at,status_reason,supersedes_status_record_id,replacement_event_id
+EVST-PILOT-A-001,EVT-PILOT-A,scheduled,2026-10-01T15:30:00+09:00,,2026-09-01T09:00:00+09:00,,,,
+EVST-PILOT-A-002,EVT-PILOT-A,postponed,2026-10-08T15:30:00+09:00,2026-10-01T15:30:00+09:00,2026-09-28T10:00:00+09:00,,Company changed the reporting date,EVST-PILOT-A-001,
+EVST-PILOT-A-003,EVT-PILOT-A,postponed,2026-10-15T15:30:00+09:00,2026-10-08T15:30:00+09:00,2026-10-06T10:00:00+09:00,,Second reporting delay,EVST-PILOT-A-002,
+EVST-PILOT-A-004,EVT-PILOT-A,occurred,2026-10-15T15:30:00+09:00,,2026-10-15T15:35:00+09:00,2026-10-15T15:30:00+09:00,Official disclosure confirmed,EVST-PILOT-A-003,
+EVST-PILOT-B-001,EVT-PILOT-B,scheduled,2026-10-02T15:30:00+09:00,,2026-09-01T09:05:00+09:00,,,,
+EVST-PILOT-B-002,EVT-PILOT-B,cancelled,2026-10-02T15:30:00+09:00,,2026-09-29T11:00:00+09:00,,Event cancelled by company,EVST-PILOT-B-001,

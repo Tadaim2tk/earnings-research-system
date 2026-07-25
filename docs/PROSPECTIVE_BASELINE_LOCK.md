@@ -112,7 +112,7 @@ When an event is postponed, the locked baseline remains unchanged with its origi
 
 ## Cancellation Boundary
 
-Cancellation is an event lifecycle concern, not a baseline status. This patch does not add `event_cancelled` or another event enum. Until a separate event lifecycle schema is approved, a cancelled event must be excluded from scoring, calibration, and normal post-event review by policy while its baseline and evidence remain preserved.
+Cancellation is an event lifecycle concern, not a baseline status. Proposed `ERS-ADR-0021` and [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) define an append-only status table that excludes cancelled events from scoring, calibration, and normal post-event review while preserving baseline and evidence rows.
 
 ## Future Leakage Controls
 

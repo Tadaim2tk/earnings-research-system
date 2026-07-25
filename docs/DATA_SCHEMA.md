@@ -57,6 +57,12 @@ For a prospective `locked` row, the validator additionally requires `is_locked=t
 
 Legacy 42-column CSV files remain valid without the seven prospective headers. New prospective samples use the 49-column contract.
 
+## event_status_history
+
+Primary key: `event_status_record_id`. Foreign keys: `earnings_event_id` and optional `replacement_event_id`.
+
+Stores append-only `scheduled`, `postponed`, `cancelled`, and `occurred` status records. `supersedes_status_record_id` forms a single non-branching chain per event; the unsuperseded tail is current. Full dataset validation requires history for events activated by lifecycle rows, prospective baseline metadata, or related prospective evidence/reviews, then gates baseline revalidation and post-event review using [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md).
+
 ## post_earnings_review
 
 Primary key: `review_id`. Foreign keys: `earnings_event_id`, `baseline_id`.

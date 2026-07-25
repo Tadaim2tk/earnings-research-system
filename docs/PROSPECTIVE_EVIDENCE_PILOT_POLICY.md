@@ -28,6 +28,7 @@ baseline_draft
 ```
 
 baseline status、Human review、hash、version、supersessionの機械契約は [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) を参照する。
+event延期・中止・発生確認のappend-only契約は [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) を参照する。
 
 ### Gate rules
 
@@ -43,7 +44,7 @@ baseline status、Human review、hash、version、supersessionの機械契約は
 
 ## Lifecycle exception handling
 
-event延期・中止の分岐はpolicy上のconceptual lifecycle stateであり、現行schemaに実装済みのevent enumではない。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で表現する。event statusは別のschema decisionで確定する。それまではevent例外を既存enumへ無理に変換せず、scoringとcalibrationを停止してHuman判断を記録する。
+event延期・中止・発生確認はProposedの `ERS-ADR-0021` と独立 `event_status_history` schemaで表現する。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で扱い、event lifecycleと混同しない。ADR-0021のHuman承認前にprospective運用を開始しない。
 
 ### Event延期
 

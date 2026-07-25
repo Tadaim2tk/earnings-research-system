@@ -6,6 +6,8 @@
 
 `earnings_event` represents one earnings announcement for one company and fiscal period.
 
+`event_status_history` records the append-only schedule, postponement, cancellation, and confirmed occurrence lifecycle for an earnings event.
+
 `pre_earnings_baseline` is a draft or locked pre-announcement expectation snapshot. It stores consensus, guidance, factor scores, evidence timing, scoring version, Human review state, and the pre-event decision.
 
 `post_earnings_review` records announced results, surprise metrics, market reaction, decision outcome, and later review windows.
@@ -20,6 +22,7 @@
 
 - One company has many earnings events.
 - One earnings event can have multiple baseline versions, but only one locked version should be active for the same version key.
+- One earnings event has one non-branching status chain and one current lifecycle tail.
 - One post-earnings review references one earnings event and optionally one baseline.
 - One earnings event can have zero or more TSO snapshots.
 - One hypothesis can reference a parent hypothesis when it corrects, invalidates, or refines earlier thinking.

@@ -45,6 +45,8 @@
 
 ## プロジェクト全体
 
+- terminal event statusを誤記録した場合のappend-only correction／retraction schema。
+- event lifecycleを複数CSVやDBへ移行した後のglobal current-status計算方法。
 - historical reconstructionを `pre_earnings_baseline` と分離する専用tableまたは `baseline_mode` が必要か。
 - 正式rubricで未採点のbaselineについて、required score componentを `unknown` として保存できるようにするか。
 - 最初のreal research universeは何社にするか。

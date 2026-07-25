@@ -1,0 +1,22 @@
+{
+  "table": "event_status_history",
+  "file": "event_status_history_sample.csv",
+  "primary_key": ["event_status_record_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["earnings_event_id"], "ref_table": "earnings_event", "ref_columns": ["earnings_event_id"]},
+    {"columns": ["replacement_event_id"], "ref_table": "earnings_event", "ref_columns": ["earnings_event_id"], "nullable": true}
+  ],
+  "columns": [
+    {"name": "event_status_record_id", "type": "string", "required": true},
+    {"name": "earnings_event_id", "type": "string", "required": true},
+    {"name": "event_status", "type": "enum", "required": true, "allowed": ["scheduled", "postponed", "cancelled", "occurred"]},
+    {"name": "scheduled_at", "type": "datetime", "required": true},
+    {"name": "previous_scheduled_at", "type": "datetime", "required": false},
+    {"name": "status_recorded_at", "type": "datetime", "required": true},
+    {"name": "occurred_at", "type": "datetime", "required": false},
+    {"name": "status_reason", "type": "string", "required": false},
+    {"name": "supersedes_status_record_id", "type": "string", "required": false},
+    {"name": "replacement_event_id", "type": "string", "required": false}
+  ]
+}

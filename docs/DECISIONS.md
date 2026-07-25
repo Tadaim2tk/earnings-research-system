@@ -303,3 +303,19 @@ Decision: [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) に従い
 Consequences: 発表後情報のscore混入、draftの誤利用、self/missing/forward/cross-event supersession、hash不一致をvalidatorで停止できる。旧42列CSVは維持できる一方、prospective 49列rowには厳格なstatus bundleが必要になる。snapshot内でcontentとhashを同時に改変する行為の独立検出、cross-file lineage、event cancellationは未実装である。本ADRのAccepted statusだけではprospective event選定・運用開始を承認しない。
 
 Alternatives Considered: 既存 `is_locked` と自由形式hashだけを継続する案はHuman reviewとhash再計算を検証できない。`superseded` statusで旧rowを書き換える案はappend-onlyを壊す。event cancellationをbaseline statusへ追加する案はevent lifecycleとbaseline lifecycleの責務を混同するため採用しない。
+
+## ERS-ADR-0021
+
+Date: 2026-07-25
+
+Status: Accepted
+
+Approval: Human承認。lifecycle activation bypassがなく、first statusを `scheduled` のみに限定し、append-onlyの非分岐status chainとcurrent tail一意性を逐次・大域検査で保証することを独立監査で確認した。`cancelled` と `occurred` はterminalであり、延期時刻と直前予定時刻のchain、延期後baselineのHuman reviewとlock時刻gate、cancelledまたは未発生eventのreview・return遮断、occurred確認後のみのpost-event処理を検証する。既存164 testsに加え、実CLI経由の独立境界case 48件で予期しない受理がないことを確認した。本ADR承認はprospective event選定・実運用開始の自動承認ではない。
+
+Context: baseline lockとformal evidence metadataは機械検証可能になったが、event延期・中止・発生確認はpolicy上の概念に留まる。既存 `earnings_event.announcement_status` を上書きすると履歴と認識時刻を失い、cancelled eventをpost-event scoringへ入れるriskがある。
+
+Decision: [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) に従い、独立 `event_status_history` tableへ `scheduled`、`postponed`、`cancelled`、`occurred` をappend-onlyで記録する。各eventは非分岐lineageと一意なcurrent tailを持つ。lifecycle row、prospective baseline metadata、または関連prospective evidence/reviewでactivatedされたeventにstatus historyを要求する。postponement後のoccurredには再review済みlocked baselineを要求し、cancelledまたは未occurred eventのpost-event reviewを拒否する。source訂正はevidence lineageの責務として分離する。
+
+Consequences: event rowとbaselineを上書きせず、延期履歴、cancelled除外、occurred gateをdataset-levelで検証できる。activated prospective eventを含むcomplete datasetにはstatus history fileが必要になる。terminal statusの誤記録訂正、cross-file lineage、return計算、自動calibrationは未実装であり、本ADRのAccepted statusだけではprospective運用開始を承認しない。
+
+Alternatives Considered: event rowへcurrent statusを追加する方式Aは単純だが履歴を上書きしやすい。event全体をversion化する方式Cはbaseline versionとidentity semanticsが衝突する。独立history tableがappend-onlyとlegacy event互換性を最も明確に保つため方式Bを選ぶ。
