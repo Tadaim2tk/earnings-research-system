@@ -185,13 +185,17 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     issues.extend(_validate_scoring_versions(rows_by_table))
     issues.extend(_validate_score_effective_dates(rows_by_table))
     issues.extend(_validate_temporal_constraints(rows_by_table))
-    issues.extend(_validate_event_lifecycle_constraints(rows_by_table))
+    baseline_issues = _validate_baseline_lock_constraints(
+        specs["pre_earnings_baseline"],
+        rows_by_table,
+        True,
+        PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames_by_table["pre_earnings_baseline"])),
+    )
+    issues.extend(baseline_issues)
     issues.extend(
-        _validate_baseline_lock_constraints(
-            specs["pre_earnings_baseline"],
+        _validate_event_lifecycle_constraints(
             rows_by_table,
-            True,
-            PROSPECTIVE_BASELINE_FIELDS.issubset(set(fieldnames_by_table["pre_earnings_baseline"])),
+            validate_postponement_baseline_gate=not baseline_issues,
         )
     )
     issues.extend(_validate_relationship_consistency(rows_by_table))
@@ -425,6 +429,29 @@ def _current_event_status_records(
     }
 
 
+def _current_baseline_tail_rows(
+    rows_by_table: Dict[str, List[Dict[str, str]]]
+) -> Dict[str, List[Dict[str, str]]]:
+    rows = [
+        row
+        for row in rows_by_table.get("pre_earnings_baseline", [])
+        if _clean(row.get("baseline_status", ""))
+    ]
+    referenced_ids = {
+        _clean(row.get("supersedes_baseline_id", ""))
+        for row in rows
+        if _clean(row.get("supersedes_baseline_id", ""))
+    }
+    tails_by_event = {}
+    for row in rows:
+        baseline_id = _clean(row.get("baseline_id", ""))
+        event_id = _clean(row.get("earnings_event_id", ""))
+        if not baseline_id or not event_id or baseline_id in referenced_ids:
+            continue
+        tails_by_event.setdefault(event_id, []).append(row)
+    return tails_by_event
+
+
 def _effective_event_datetimes(
     rows_by_table: Dict[str, List[Dict[str, str]]]
 ) -> Dict[str, datetime]:
@@ -467,6 +494,7 @@ def _validate_temporal_constraints(rows_by_table: Dict[str, List[Dict[str, str]]
 def _validate_event_lifecycle_constraints(
     rows_by_table: Dict[str, List[Dict[str, str]]],
     require_dataset_relations: bool = True,
+    validate_postponement_baseline_gate: bool = True,
 ) -> List[ValidationIssue]:
     issues = []
     rows = rows_by_table.get("event_status_history", [])
@@ -689,9 +717,10 @@ def _validate_event_lifecycle_constraints(
             issues.append(
                 ValidationIssue("post_earnings_review", row_number, "recorded_at", "post-event review was recorded before occurrence confirmation")
             )
-    baselines_by_event = {}
-    for baseline in rows_by_table.get("pre_earnings_baseline", []):
-        baselines_by_event.setdefault(_clean(baseline.get("earnings_event_id", "")), []).append(baseline)
+    if not validate_postponement_baseline_gate:
+        return issues
+
+    baseline_tails_by_event = _current_baseline_tail_rows(rows_by_table)
     for event_id, status_row in current.items():
         if _clean(status_row.get("event_status", "")) != "occurred":
             continue
@@ -701,23 +730,71 @@ def _validate_event_lifecycle_constraints(
             continue
         postponed_at = _parse_datetime(_clean(parent.get("status_recorded_at", "")))
         scheduled_at = _parse_datetime(_clean(status_row.get("scheduled_at", "")))
-        revalidated = False
-        for baseline in baselines_by_event.get(event_id, []):
-            reviewed_at = _parse_datetime(_clean(baseline.get("reviewed_at", "")))
-            locked_at = _parse_datetime(_clean(baseline.get("locked_at", "")))
-            if (
-                _clean(baseline.get("baseline_status", "")) == "locked"
-                and reviewed_at
-                and postponed_at
-                and reviewed_at >= postponed_at
-                and locked_at
-                and scheduled_at
-                and locked_at < scheduled_at
-            ):
-                revalidated = True
-        if not revalidated:
+        current_tails = baseline_tails_by_event.get(event_id, [])
+        status_row_number = row_number_by_id.get(_clean(status_row.get("event_status_record_id", "")))
+        if not current_tails:
             issues.append(
-                ValidationIssue("event_status_history", row_number_by_id.get(_clean(status_row.get("event_status_record_id", ""))), "earnings_event_id", "occurred event after postponement requires a revalidated locked baseline")
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "occurred event after postponement has no current prospective baseline tail",
+                )
+            )
+            continue
+        if len(current_tails) > 1:
+            issues.append(
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "occurred event after postponement has multiple current prospective baseline tails; found %s"
+                    % len(current_tails),
+                )
+            )
+            continue
+        current_baseline = current_tails[0]
+        if (
+            _clean(current_baseline.get("baseline_status", "")) != "locked"
+            or _clean(current_baseline.get("is_locked", "")).lower() != "true"
+        ):
+            issues.append(
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "current prospective baseline is not locked after postponement",
+                )
+            )
+            continue
+        reviewed_at = _parse_datetime(_clean(current_baseline.get("reviewed_at", "")))
+        locked_at = _parse_datetime(_clean(current_baseline.get("locked_at", "")))
+        if _clean(current_baseline.get("human_review_status", "")) != "approved":
+            issues.append(
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "current locked baseline does not have approved Human review after postponement",
+                )
+            )
+        if not reviewed_at or not postponed_at or reviewed_at < postponed_at:
+            issues.append(
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "current locked baseline was not reviewed at or after latest postponement",
+                )
+            )
+        if not locked_at or not scheduled_at or locked_at >= scheduled_at:
+            issues.append(
+                ValidationIssue(
+                    "event_status_history",
+                    status_row_number,
+                    "earnings_event_id",
+                    "current locked baseline must be locked before postponed scheduled_at",
+                )
             )
     return issues
 

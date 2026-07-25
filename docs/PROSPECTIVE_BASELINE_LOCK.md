@@ -102,7 +102,7 @@ The hash field itself is excluded to avoid recursion. A mismatch is a blocking v
 
 The current validator checks lineage within one loaded CSV dataset. Global or cross-file lineage needs a later registry/graph design.
 
-Branching lineage is currently allowed: two later baselines may independently supersede the same earlier baseline (`A -> B` and `A -> C`). Preventing or resolving branches requires a separate active-version policy and is not inferred by this patch.
+Baseline lineage validation still reports its existing self, missing, forward, cross-event, version, and duplicate errors independently. Two later baselines may structurally reference the same earlier baseline (`A -> B` and `A -> C`), but an event that reaches `occurred` after postponement fails closed because it has multiple unsuperseded current tails.
 
 Evidence is joined only where `related_entity_type=pre_earnings_baseline` and `related_entity_id` equals the current `baseline_id`. Unrelated company, event, KPI, review, hypothesis, or other baseline evidence is not compared with that lock time. A locked prospective baseline with no matching evidence fails validation. References outside the loaded dataset are not resolved by this patch.
 
@@ -110,9 +110,11 @@ Evidence is joined only where `related_entity_type=pre_earnings_baseline` and `r
 
 When an event is postponed, the locked baseline remains unchanged with its original lock time, hash, and evidence lineage. Human review determines whether it remains valid for the new date. If validity is lost, create a new version that supersedes the previous baseline and records the reason. Evidence published after the old lock must not be attached as pre-event score evidence for the old baseline.
 
+For the postponement-to-`occurred` gate, baseline validation runs first. The validator does not infer a tail when the loaded baseline dataset has a contract, hash, evidence, or lineage error. Among valid prospective rows with non-empty `baseline_status`, the current baseline is the only row for that event that is not referenced by another prospective row's `supersedes_baseline_id` in the same loaded dataset. Legacy placeholder rows are excluded from gate candidates. The gate requires exactly one current tail and requires that tail itself to be locked and approved, reviewed at or after the latest postponement record, and locked before the new schedule. Superseded locked rows are excluded. Zero tails, multiple tails, or a current draft tail fail closed; the validator does not fall back to an older locked version. Cross-file current-tail resolution remains unimplemented.
+
 ## Cancellation Boundary
 
-Cancellation is an event lifecycle concern, not a baseline status. Proposed `ERS-ADR-0021` and [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) define an append-only status table that excludes cancelled events from scoring, calibration, and normal post-event review while preserving baseline and evidence rows.
+Cancellation is an event lifecycle concern, not a baseline status. Accepted `ERS-ADR-0021` and [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) define an append-only status table that excludes cancelled events from scoring, calibration, and normal post-event review while preserving baseline and evidence rows.
 
 ## Future Leakage Controls
 

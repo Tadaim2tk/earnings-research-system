@@ -112,6 +112,56 @@ def event_lifecycle_fixture():
     return read_rows(PROSPECTIVE_EVENT_LIFECYCLE_SAMPLES / "event_status_history_sample.csv")
 
 
+def postponed_occurred_statuses(event_id="E1"):
+    return [
+        {
+            "event_status_record_id": "S1", "earnings_event_id": event_id, "event_status": "scheduled",
+            "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00",
+        },
+        {
+            "event_status_record_id": "S2", "earnings_event_id": event_id, "event_status": "postponed",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "previous_scheduled_at": "2026-10-01T15:30:00+09:00",
+            "status_recorded_at": "2026-09-28T10:00:00+09:00", "status_reason": "Delay",
+            "supersedes_status_record_id": "S1",
+        },
+        {
+            "event_status_record_id": "S3", "earnings_event_id": event_id, "event_status": "occurred",
+            "scheduled_at": "2026-10-08T15:30:00+09:00", "status_recorded_at": "2026-10-08T15:35:00+09:00",
+            "occurred_at": "2026-10-08T15:30:00+09:00", "supersedes_status_record_id": "S2",
+        },
+    ]
+
+
+def lifecycle_baseline(
+    baseline_id,
+    event_id="E1",
+    reviewed_at="2026-09-28T10:00:00+09:00",
+    locked_at="2026-09-28T10:05:00+09:00",
+    supersedes_baseline_id="",
+    baseline_status="locked",
+    is_locked="true",
+):
+    return {
+        "baseline_id": baseline_id,
+        "earnings_event_id": event_id,
+        "baseline_status": baseline_status,
+        "is_locked": is_locked,
+        "human_review_status": "approved" if baseline_status == "locked" else "pending",
+        "reviewed_at": reviewed_at if baseline_status == "locked" else "",
+        "locked_at": locked_at if baseline_status == "locked" else "",
+        "supersedes_baseline_id": supersedes_baseline_id,
+    }
+
+
+def postponed_lifecycle_issues(baselines):
+    return _validate_event_lifecycle_constraints(
+        {
+            "event_status_history": postponed_occurred_statuses(),
+            "pre_earnings_baseline": baselines,
+        }
+    )
+
+
 def rehash_baseline(row):
     row["baseline_record_hash"] = _calculate_baseline_record_hash(row, load_spec("pre_earnings_baseline"))
 
@@ -348,6 +398,31 @@ def test_cli_baseline_crash_regressions_exit_one(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert expected_issue in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_validate_file_missing_path_exits_one_without_traceback(tmp_path, capsys):
+    path = tmp_path / "pre_earnings_baseline_sample.csv"
+
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Validation failed:" in captured.err
+    assert "No such file or directory" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_validate_file_unknown_schema_exits_one_without_traceback(tmp_path, capsys):
+    path = tmp_path / "unknown.csv"
+    path.write_text("value\n1\n", encoding="utf-8")
+
+    exit_code = cli_main(["validate-file", str(path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Validation failed:" in captured.err
+    assert "Could not infer schema" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -627,59 +702,120 @@ def test_scheduled_event_rejects_return_and_review(tmp_path):
 
 
 def test_postponed_event_requires_revalidated_baseline_before_occurred():
-    statuses = [
-        {
-            "event_status_record_id": "S1", "earnings_event_id": "E1", "event_status": "scheduled",
-            "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00",
-        },
-        {
-            "event_status_record_id": "S2", "earnings_event_id": "E1", "event_status": "postponed",
-            "scheduled_at": "2026-10-08T15:30:00+09:00", "previous_scheduled_at": "2026-10-01T15:30:00+09:00",
-            "status_recorded_at": "2026-09-28T10:00:00+09:00", "status_reason": "Delay",
-            "supersedes_status_record_id": "S1",
-        },
-        {
-            "event_status_record_id": "S3", "earnings_event_id": "E1", "event_status": "occurred",
-            "scheduled_at": "2026-10-08T15:30:00+09:00", "status_recorded_at": "2026-10-08T15:35:00+09:00",
-            "occurred_at": "2026-10-08T15:30:00+09:00", "supersedes_status_record_id": "S2",
-        },
-    ]
-    stale_baseline = {
-        "earnings_event_id": "E1", "baseline_status": "locked", "reviewed_at": "2026-09-20T10:00:00+09:00",
-        "locked_at": "2026-09-20T10:05:00+09:00",
-    }
-    report = _validate_event_lifecycle_constraints(
-        {"event_status_history": statuses, "pre_earnings_baseline": [stale_baseline]}
+    stale_baseline = lifecycle_baseline(
+        "B1", reviewed_at="2026-09-20T10:00:00+09:00", locked_at="2026-09-20T10:05:00+09:00"
     )
-    messages = "\n".join(issue.format() for issue in report)
-    assert "occurred event after postponement requires a revalidated locked baseline" in messages
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues([stale_baseline]))
+    assert "current locked baseline was not reviewed at or after latest postponement" in messages
 
 
 def test_postponed_event_accepts_revalidated_locked_baseline():
-    statuses = [
-        {
-            "event_status_record_id": "S1", "earnings_event_id": "E1", "event_status": "scheduled",
-            "scheduled_at": "2026-10-01T15:30:00+09:00", "status_recorded_at": "2026-09-01T09:00:00+09:00",
-        },
-        {
-            "event_status_record_id": "S2", "earnings_event_id": "E1", "event_status": "postponed",
-            "scheduled_at": "2026-10-08T15:30:00+09:00", "previous_scheduled_at": "2026-10-01T15:30:00+09:00",
-            "status_recorded_at": "2026-09-28T10:00:00+09:00", "status_reason": "Delay",
-            "supersedes_status_record_id": "S1",
-        },
-        {
-            "event_status_record_id": "S3", "earnings_event_id": "E1", "event_status": "occurred",
-            "scheduled_at": "2026-10-08T15:30:00+09:00", "status_recorded_at": "2026-10-08T15:35:00+09:00",
-            "occurred_at": "2026-10-08T15:30:00+09:00", "supersedes_status_record_id": "S2",
-        },
+    issues = postponed_lifecycle_issues([lifecycle_baseline("B1")])
+    assert not issues, "\n".join(issue.format() for issue in issues)
+
+
+@pytest.mark.parametrize("version_count", [2, 3])
+def test_postponed_event_uses_revalidated_current_baseline_tail(version_count):
+    baselines = []
+    for index in range(1, version_count + 1):
+        baselines.append(
+            lifecycle_baseline(
+                "B%s" % index,
+                reviewed_at="2026-09-20T10:00:00+09:00" if index < version_count else "2026-09-28T10:00:00+09:00",
+                locked_at="2026-09-20T10:05:00+09:00" if index < version_count else "2026-09-28T10:05:00+09:00",
+                supersedes_baseline_id="B%s" % (index - 1) if index > 1 else "",
+            )
+        )
+    issues = postponed_lifecycle_issues(baselines)
+    assert not issues, "\n".join(issue.format() for issue in issues)
+
+
+def test_superseded_revalidated_baseline_does_not_bypass_current_stale_tail():
+    baselines = [
+        lifecycle_baseline("B1"),
+        lifecycle_baseline(
+            "B2",
+            reviewed_at="2026-09-20T10:00:00+09:00",
+            locked_at="2026-09-20T10:05:00+09:00",
+            supersedes_baseline_id="B1",
+        ),
     ]
-    revalidated_baseline = {
-        "earnings_event_id": "E1", "baseline_status": "locked", "reviewed_at": "2026-09-29T10:00:00+09:00",
-        "locked_at": "2026-09-29T10:05:00+09:00",
-    }
-    issues = _validate_event_lifecycle_constraints(
-        {"event_status_history": statuses, "pre_earnings_baseline": [revalidated_baseline]}
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues(baselines))
+    assert "current locked baseline was not reviewed at or after latest postponement" in messages
+
+
+def test_current_draft_tail_does_not_fall_back_to_old_locked_baseline():
+    baselines = [
+        lifecycle_baseline("B1"),
+        lifecycle_baseline("B2", baseline_status="draft", is_locked="false"),
+    ]
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues(baselines))
+    assert "multiple current prospective baseline tails; found 2" in messages
+
+
+def test_only_current_draft_tail_fails_locked_gate():
+    baselines = [lifecycle_baseline("B1", baseline_status="draft", is_locked="false")]
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues(baselines))
+    assert "current prospective baseline is not locked" in messages
+
+
+def test_multiple_current_baseline_tails_fail_closed():
+    baselines = [
+        lifecycle_baseline("B1", reviewed_at="2026-09-20T10:00:00+09:00"),
+        lifecycle_baseline("B2", supersedes_baseline_id="B1"),
+        lifecycle_baseline("B3", supersedes_baseline_id="B1"),
+    ]
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues(baselines))
+    assert "multiple current prospective baseline tails; found 2" in messages
+
+
+def test_missing_current_locked_baseline_tail_fails_closed():
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues([]))
+    assert "no current prospective baseline tail" in messages
+
+
+def test_other_event_current_baseline_does_not_satisfy_postponement_gate():
+    messages = "\n".join(
+        issue.format() for issue in postponed_lifecycle_issues([lifecycle_baseline("B2", event_id="E2")])
     )
+    assert "no current prospective baseline tail" in messages
+
+
+def test_legacy_baseline_is_not_a_current_prospective_tail():
+    legacy_baseline = lifecycle_baseline("B1")
+    legacy_baseline["baseline_status"] = ""
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues([legacy_baseline]))
+    assert "no current prospective baseline tail" in messages
+
+
+@pytest.mark.parametrize(
+    ("reviewed_at", "locked_at", "expected_issue"),
+    [
+        (
+            "2026-09-28T09:59:59+09:00",
+            "2026-09-28T10:05:00+09:00",
+            "current locked baseline was not reviewed at or after latest postponement",
+        ),
+        (
+            "2026-09-28T10:00:00+09:00",
+            "2026-10-08T15:30:00+09:00",
+            "current locked baseline must be locked before postponed scheduled_at",
+        ),
+        (
+            "2026-09-28T10:00:00+09:00",
+            "2026-10-08T15:30:01+09:00",
+            "current locked baseline must be locked before postponed scheduled_at",
+        ),
+    ],
+)
+def test_current_baseline_postponement_time_boundaries_fail(reviewed_at, locked_at, expected_issue):
+    baseline = lifecycle_baseline("B1", reviewed_at=reviewed_at, locked_at=locked_at)
+    messages = "\n".join(issue.format() for issue in postponed_lifecycle_issues([baseline]))
+    assert expected_issue in messages
+
+
+def test_review_at_postponement_timestamp_is_accepted():
+    issues = postponed_lifecycle_issues([lifecycle_baseline("B1", reviewed_at="2026-09-28T10:00:00+09:00")])
     assert not issues, "\n".join(issue.format() for issue in issues)
 
 
@@ -698,6 +834,46 @@ def test_prospective_baseline_activates_lifecycle_requirement(tmp_path):
     report = validate_dataset(samples)
     assert not report.ok
     assert "has no unique current lifecycle status" in issue_text(report)
+
+
+def test_invalid_baseline_lineage_skips_postponement_tail_inference(tmp_path):
+    samples = copy_prospective_baseline_dataset(tmp_path)
+    baseline_path = samples / "pre_earnings_baseline_sample.csv"
+    baseline_fieldnames, baselines = read_rows(baseline_path)
+    current = next(row for row in baselines if row["baseline_id"] == "BASE-ASTER-003")
+    current["supersedes_baseline_id"] = current["baseline_id"]
+    rehash_baseline(current)
+    write_rows(baseline_path, baseline_fieldnames, baselines)
+
+    status_path = samples / "event_status_history_sample.csv"
+    status_fieldnames, statuses = read_rows(status_path)
+    occurred_index = next(
+        index for index, row in enumerate(statuses) if row["event_status_record_id"] == "EVST-ASTER-002"
+    )
+    postponed = {field: "" for field in status_fieldnames}
+    postponed.update(
+        {
+            "event_status_record_id": "EVST-ASTER-POSTPONED",
+            "earnings_event_id": "EVT-ASTER-2026Q1",
+            "event_status": "postponed",
+            "scheduled_at": "2026-08-09T15:30:00+09:00",
+            "previous_scheduled_at": "2026-08-08T15:30:00+09:00",
+            "status_recorded_at": "2026-08-07T19:00:00+09:00",
+            "status_reason": "Delay",
+            "supersedes_status_record_id": "EVST-ASTER-001",
+        }
+    )
+    statuses.insert(occurred_index, postponed)
+    occurred = next(row for row in statuses if row["event_status_record_id"] == "EVST-ASTER-002")
+    occurred["scheduled_at"] = postponed["scheduled_at"]
+    occurred["supersedes_status_record_id"] = postponed["event_status_record_id"]
+    write_rows(status_path, status_fieldnames, statuses)
+
+    report = validate_dataset(samples)
+    messages = issue_text(report)
+    assert "supersedes_baseline_id cannot reference the same baseline_id" in messages
+    assert "current prospective baseline" not in messages
+    assert "current locked baseline" not in messages
 
 
 def test_occurred_review_requires_locked_baseline(tmp_path):
