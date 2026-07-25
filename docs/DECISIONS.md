@@ -308,7 +308,9 @@ Alternatives Considered: 既存 `is_locked` と自由形式hashだけを継続�
 
 Date: 2026-07-25
 
-Status: Proposed
+Status: Accepted
+
+Approval: Human承認。lifecycle activation bypassがなく、first statusを `scheduled` のみに限定し、append-onlyの非分岐status chainとcurrent tail一意性を逐次・大域検査で保証することを独立監査で確認した。`cancelled` と `occurred` はterminalであり、延期時刻と直前予定時刻のchain、延期後baselineのHuman reviewとlock時刻gate、cancelledまたは未発生eventのreview・return遮断、occurred確認後のみのpost-event処理を検証する。既存164 testsに加え、実CLI経由の独立境界case 48件で予期しない受理がないことを確認した。本ADR承認はprospective event選定・実運用開始の自動承認ではない。
 
 Context: baseline lockとformal evidence metadataは機械検証可能になったが、event延期・中止・発生確認はpolicy上の概念に留まる。既存 `earnings_event.announcement_status` を上書きすると履歴と認識時刻を失い、cancelled eventをpost-event scoringへ入れるriskがある。
 
