@@ -201,3 +201,73 @@ Decision: Git historyを保持して `/Users/maruyamayuuki/Documents/MaruyamaAIR
 Consequences: commit hashを維持したprivate remoteが実行履歴の正本となり、Mac上のpath変更でObsidian参照が失われない。旧pathの保持期間だけは運用判断として残る。
 
 Alternatives Considered: 現在のCodex作業directoryを恒久pathとして使い続ける案は削除riskと参照安定性に弱い。履歴なしで新repositoryへcopyする案は既存 `ers_commit` を無効化するため採用しない。
+
+## ERS-ADR-0014
+
+Date: 2026-07-24
+
+Status: Proposed
+
+Context: `THREE_COMPANY_PILOT_REVIEW.md` の横断結果では、Nintendo、Toyota、Olympic Groupの3社18noteで共通frontmatterが270回反復した。固定fieldの手入力はresearch valueを増やさず、company ID、date、status、commitのcopy-paste driftを生む。一方、semantic fieldの自動推測は未確認時刻、verification、hypothesis、KPIを誤生成するriskがある。
+
+Decision: `OBSIDIAN_FRONTMATTER_GENERATOR_SPEC.md` に従い、固定fieldだけを生成するpreview-first generatorを設計候補とする。既存noteを上書きせず、Human field不足、ERS commit不存在、path/ID衝突ではfileを書かず停止する。Human承認前に適用せず、generator codeは別taskで実装判断する。
+
+Consequences: 反復入力と構文driftを減らせるが、semantic field、status昇格、source/license/time/session、KPI、hypothesis、limitationsはHuman責任として残る。本ADRがAcceptedになるまでgeneratorを実装しない。
+
+Alternatives Considered: 全frontmatterをAIに推測させる案は誤ったverified状態を量産するため採用しない。template copyだけを継続する案は270回の反復とcopy-paste riskを解消しない。
+
+## ERS-ADR-0015
+
+Date: 2026-07-24
+
+Status: Proposed
+
+Context: `index.md`、`hot.md`、Pilot Logは3社pilotで `tool_workflow` を共有したが、durable routing、再生成可能cache、process historyとしてlifecycle、loading、lint、status semanticsが異なる。
+
+Decision: `OBSIDIAN_WORKFLOW_NOTE_TYPE_SPLIT.md` に従い、将来 `domain_index`、`context_cache`、`pilot_log` へ分割する。`context_cache` の失効条件は `OBSIDIAN_CACHE_STALENESS_POLICY.md` に従う。既存ID/path/body/statusを維持したtype-only migrationとし、policy/lint fixture、migration preview、Fast Read regressionを先に準備する。
+
+Consequences: context loadingとstale cache lintを型別にでき、`draft`の意味を整理できる。既存noteとpolicyへのmigration costがあるため、Human承認前にtype enumやVault noteを変更しない。
+
+Alternatives Considered: `tool_workflow`を継続する案は現規模では動くが、cacheと履歴の更新ruleを区別できない。全workflow noteを個別typeに細分化する案は初期scopeを超える。
+
+## ERS-ADR-0016
+
+Date: 2026-07-24
+
+Status: Proposed
+
+Context: 3社historical pilotはURLとSource IndexでHuman-readable reuseに成功したが、formal evidence ID、hash、observed time、machine reverse lookupを持たない。最初のprospective eventではbaseline lock前のsource timingをERSで証明する必要がある。
+
+Decision: `PROSPECTIVE_EVIDENCE_PILOT_POLICY.md` に従い、`FIRST_PROSPECTIVE_EVENT_SELECTION.md` の条件を満たすHuman承認後の最初のprospective eventからformal evidence運用を開始する。pre-event company forecast/直近決算、official event disclosure、time-bearing primary metadata、price source、hypothesis-supporting primary sourceを最小対象とする。baseline draftはevidence登録前でも許容するが、formal evidence、Human review、timing gateを満たすまでlockせず、未登録claimをprospective scoreへ使わない。
+
+Consequences: look-ahead防止とsource reverse lookupが強化される。現行evidence schemaにはhash/raw storage/license statusの専用列がないため、prospective開始前に保存mappingを別実装taskで承認する必要がある。
+
+Alternatives Considered: Source Indexだけでprospective scoringする案はtimingとlineageの機械検証が弱い。すべてのsourceをraw保存する案はlicense/storage条件未確認のため採用しない。
+
+## ERS-ADR-0017
+
+Date: 2026-07-24
+
+Status: Rejected
+
+Context: Nintendo、Toyota、Olympicはoutcomeを知った後に作成したhistorical reconstructionであり、actual observed/recorded timeはevent後である。3社の全sourceを一括遡及登録すると、prospective evidenceのように見えるriskがある。
+
+Decision: historical 3社のformal evidence一括backfillを行わない。現在のURL、metadata、Source Indexを維持し、legal/audit/reuse上の必要が生じたsourceだけをactual observed/recorded timeで個別遡及登録できる。遡及登録してもprospective baselineやcalibrationへ昇格させない。
+
+Consequences: 過去sourceのmachine reverse lookupは限定されたままだが、historical/prospective境界を守り、低価値な大量入力を避けられる。
+
+Alternatives Considered: 3社の全primary sourceを一括登録する案は時点証拠と後日整理を混同するためRejected。過去sourceを永久に登録禁止とする案は将来の監査必要性へ対応できない。
+
+## ERS-ADR-0018
+
+Date: 2026-07-24
+
+Status: Deferred
+
+Context: 3社すべてでTSO snapshotなしにcompany/event理解、metric再現、Fast Read、安全なtime/price uncertainty管理が成立した。TSO_LOG 29列にはunknown mappingとmeaning conflictが残る。
+
+Decision: `TSO_SNAPSHOT_DEFER_DECISION.md` に従い、TSO snapshot importとadapter実装を延期する。prospective evidence/price workflowを先に確立し、具体的なTSO比較需要、mapping contract、source row hash、mapping version、identity rule、explicit read-only adapter設計が揃った時点で再検討する。
+
+Consequences: ERS/TSOの結合度と誤mapping riskを抑えられる。TSO contextを使ったscore/event correlationは延期されるが、現在の決算知識再利用には影響しない。
+
+Alternatives Considered: historical 3社へ後付けsnapshotを作る案はprospective lockがなく価値が低い。TSO_LOGを直接共有・同期する案はownershipとrollback境界を壊すため採用しない。
