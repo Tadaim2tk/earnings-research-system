@@ -316,6 +316,6 @@ Context: baseline lockとformal evidence metadataは機械検証可能になっ�
 
 Decision: [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) に従い、独立 `event_status_history` tableへ `scheduled`、`postponed`、`cancelled`、`occurred` をappend-onlyで記録する。各eventは非分岐lineageと一意なcurrent tailを持つ。lifecycle row、prospective baseline metadata、または関連prospective evidence/reviewでactivatedされたeventにstatus historyを要求する。postponement後のoccurredには再review済みlocked baselineを要求し、cancelledまたは未occurred eventのpost-event reviewを拒否する。source訂正はevidence lineageの責務として分離する。
 
-Consequences: event rowとbaselineを上書きせず、延期履歴、cancelled除外、occurred gateをdataset-levelで検証できる。activated prospective eventを含むcomplete datasetにはstatus history fileが必要になる。terminal statusの誤記録訂正、cross-file lineage、return計算、自動calibrationは未実装であり、本ADRのAccepted statusだけではprospective運用開始を承認しない。
+Consequences: event rowとbaselineを上書きせず、延期履歴、cancelled除外、occurred gateをdataset-levelで検証できる。延期後gateはbaseline validation成功後、同一loaded dataset内のprospective rowから唯一のunsuperseded current locked baseline tailだけを使い、legacy、invalid lineage、superseded、0件、複数、current draftをfail-closedにする。activated prospective eventを含むcomplete datasetにはstatus history fileが必要になる。terminal statusの誤記録訂正、cross-file lineage、return計算、自動calibrationは未実装であり、本ADRのAccepted statusだけではprospective運用開始を承認しない。
 
 Alternatives Considered: event rowへcurrent statusを追加する方式Aは単純だが履歴を上書きしやすい。event全体をversion化する方式Cはbaseline versionとidentity semanticsが衝突する。独立history tableがappend-onlyとlegacy event互換性を最も明確に保つため方式Bを選ぶ。

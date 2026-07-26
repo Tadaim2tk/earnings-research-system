@@ -2,7 +2,7 @@
 
 ## Status
 
-`Proposed` under `ERS-ADR-0021`. This contract does not authorize prospective event selection or real evidence registration.
+`Accepted` under `ERS-ADR-0021`. This contract does not authorize prospective event selection or real evidence registration.
 
 ## Representation
 
@@ -77,7 +77,11 @@ Lifecycle validation is dataset-level and does not modify baseline rows.
 
 - Existing locked baselines remain unchanged.
 - Post-event review remains blocked while current status is `postponed`.
-- Before a postponed event can become operationally `occurred`, the dataset must contain a locked baseline reviewed at or after the latest postponement status and locked before the new schedule.
+- Before a postponed event can become operationally `occurred`, baseline contract and lineage validation must succeed. The validator does not infer a current tail from invalid lineage.
+- The validator derives the current baseline tail only from prospective rows with non-empty `baseline_status` that are not referenced by another prospective row's `supersedes_baseline_id` in the same loaded dataset. Legacy rows are not gate candidates.
+- The event must have exactly one current tail, and that row must have `baseline_status=locked` and `is_locked=true`. Zero or multiple tails fail closed.
+- Only that current locked tail is checked for Human approval, review at or after the latest postponement status, and lock before the new schedule. Superseded baselines cannot satisfy the gate. Distinct errors identify no tail, multiple tails, unlocked/draft current state, stale review, and an invalid lock boundary.
+- A current draft tail does not fall back to an earlier locked version.
 - This conservative pilot contract records revalidation through a new locked baseline version. Evidence published after the old lock is not added to the old baseline.
 
 ### Cancelled
@@ -116,6 +120,7 @@ Legacy baseline/review rows without prospective metadata do not activate lifecyc
 
 - terminal status correction/retraction
 - cross-file/global lifecycle lineage
+- cross-file/global baseline lineage and current-tail resolution
 - immutable external status record
 - automatic calibration cohort generation
 - return calculation

@@ -44,7 +44,7 @@ event延期・中止・発生確認のappend-only契約は [PROSPECTIVE_EVENT_LI
 
 ## Lifecycle exception handling
 
-event延期・中止・発生確認はProposedの `ERS-ADR-0021` と独立 `event_status_history` schemaで表現する。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で扱い、event lifecycleと混同しない。ADR-0021のHuman承認前にprospective運用を開始しない。
+event延期・中止・発生確認はAcceptedの `ERS-ADR-0021` と独立 `event_status_history` schemaで表現する。source correction/retraction lineageはAcceptedの `ERS-ADR-0019`、baseline version relationはAcceptedの `ERS-ADR-0020` で扱い、event lifecycleと混同しない。各ADRの承認だけではprospective運用を開始しない。
 
 ### Event延期
 
@@ -53,10 +53,12 @@ event延期・中止・発生確認はProposedの `ERS-ADR-0021` と独立 `even
 - baselineが有効な場合も、延期判断と再review結果を元baselineとは別のaudit recordへ残す。
 - KPI対象期間、新規開示、前提条件、情報鮮度等により有効性を失った場合は、既存baselineを変更せずnew versionを作成する。
 - 延期後に公表された資料を旧baselineへ追記せず、新versionまたはevent evidenceとしてappend-onlyで登録する。
+- `occurred`へ進む際はbaseline contract・evidence・lineage validationを先に完了し、不正lineageからcurrent tailを推測しない。legacy rowを候補にせず、同一loaded dataset内のprospective unsuperseded current baseline tailが1件だけで、そのrow自体がlockedかつ延期後にHuman review済みであることを要求する。
+- superseded baselineをgateへ使わず、current tailが0件・複数・draftの場合は過去locked versionへfallbackせず停止する。cross-file baseline lineageは未実装とする。
 
 ### Event中止
 
-- `event_cancelled`相当のconceptual terminal stateと取消理由を記録する。implementation enumはschema decisionまで未確定とする。
+- `event_status=cancelled`のterminal stateと取消理由をappend-onlyで記録する。
 - baseline、evidence、lock timestamp、hash、lineageを保持する。
 - 当該eventをscoring、calibration、通常のpost-event review対象から除外する。
 - 後日別eventとして再設定された場合は、新しいevent identityまたは明示的なnew versionとして扱う。

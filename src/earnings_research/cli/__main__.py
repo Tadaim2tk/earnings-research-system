@@ -28,7 +28,12 @@ def main(argv=None) -> int:
         report = validate_dataset(args.path)
         return _print_report(report)
     if args.command == "validate-file":
-        report = validate_file(args.path)
+        try:
+            report = validate_file(args.path)
+        except (FileNotFoundError, ValueError) as exc:
+            print("Validation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
         return _print_report(report)
     if args.command == "show-schema":
         spec = load_spec(args.table)
