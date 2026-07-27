@@ -17,7 +17,7 @@
 
 ## 価格データ取得元と粒度
 
-- `J-Quants API Light + Tick/Minute Add-on` のtermsがlocal research DBへの継続保存、解約後retention、agent処理を許可するか。
+- J-Quantsは第1号prospective pilotのscope外とする。将来採用する場合、local保存、解約後retention、agent処理、二次利用条件を契約画面またはaccount文書でHuman確認する。
 - raw price rowsをGit trackingせずlocal-only保存とする運用で十分か。
 - calculated return、VWAP、chart screenshotを保存・共有できる範囲はどこまでか。
 - broker chartからの数値転記・screenshot保存・再利用がterms上許容されるか。
@@ -88,6 +88,17 @@
 - historical reconstruction noteをprospective baseline contextから機械的に除外する方法。
 - TSOとERSのCompany/Asset/Hypothesis ID衝突をどう防ぐか。
 - plugin、Vault再編、自動Web調査、自動validated昇格、J-Quants raw保存はいずれも未承認のままとするか。
+
+## Prospective pilot運用
+
+- 第1号candidate企業IRサイトのviewing、metadata記録、AI補助条件。
+- manual price entryに使う具体的な表示元とmetadata記録条件。
+- pilot開始前に固定するreviewer identifier。
+- primary calendar source、primary occurrence source、secondary confirmation source。
+- event予定日前後をHumanが監視できる具体日程。
+- effective locked baselineとworking draftを将来どう分離するか。
+- cross-file baseline lineageをいつglobal registryへ移行するか。
+- private hash helperをpublic `hash-baseline` CLIへ昇格するか。
 
 ## Historical reconstruction識別
 

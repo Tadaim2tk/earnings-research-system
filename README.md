@@ -16,6 +16,15 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Validation CLI for required columns, types, keys, event semantics, temporal constraints, scoring versions, evidence lineage, KPI references, NO_TRADE handling, and basic future-information contamination checks
 - Pytest coverage for the initial validation contract
 - Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
+- Human-operated prospective readiness contract with metadata-only evidence storage; no prospective event has been selected
+
+## Prospective Operations
+
+- [Operations contract](docs/PROSPECTIVE_OPERATIONS.md)
+- [Append-only pilot log](docs/PROSPECTIVE_PILOT_LOG.md)
+- [First event selection criteria](docs/FIRST_PROSPECTIVE_EVENT_SELECTION.md)
+
+The first pilot remains conditional on candidate-specific provider terms, an approved manual price source, a stable reviewer identifier, source assignments, monitoring availability, and Human event-selection approval.
 
 ## Out of Scope
 

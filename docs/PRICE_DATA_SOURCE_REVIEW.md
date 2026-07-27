@@ -6,24 +6,28 @@
 
 価格データを技術的に取得できることと、ERSへ保存・再利用できることは別問題である。`storage_allowed` や `redistribution_allowed` が公開情報だけで確定しない場合は、利用規約またはproviderへの問い合わせ完了まで `unknown` とする。
 
+## 第1号Prospective Pilot Override
+
+本書の候補比較は技術調査として保持するが、第1号prospective pilotでは [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を優先する。J-Quants API、J-Quants Pro、TDnet API、TDnet DBSを使用せず、具体的な表示元をHumanが個別承認した `manual price entry` だけを候補とする。表示元がbaseline開始前に確定しないcandidateは見送る。
+
 ## 候補比較
 
 | provider_name | official_or_third_party | daily_ohlc_available | minute_bar_available | historical_minute_retention | adjusted_price_support | announcement_timestamp_compatibility | api_or_manual | authentication_required | cost | license_review_required | storage_allowed | redistribution_allowed | known_limitations | recommended_use | review_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `J-Quants API Free` | official / JPXI | yes | no | not_applicable | yes。adjusted/unadjusted OHLC | medium。TDnet時刻は別sourceが必要 | API | yes / API key | JPY 0 | yes | private analysisはlikely。raw保存条件はterms確認要 | no。raw dataの配布・共有禁止 | 2年分だが直近12週間を除く。recent pilotには不向き | 12週超前のhistorical daily pilot、symbol・adjustment確認 | candidate_for_historical_daily |
-| `J-Quants API Light + Tick/Minute Add-on` | official / JPXI | yes | yes | 2 years | daily OHLCはyes。minute/tickのadjustment仕様は要確認 | high。TDnetの実開示時刻とJSTでjoin可能。ただしprice dataはdaily deliveryでreal-timeではない | API / CSV | yes / API key | JPY 1,650 + JPY 5,500 per month, tax included | yes | personal internal researchはlikely。raw retention範囲をterms確認要 | no。raw dataの第三者共有禁止 | individual/private use限定。derivatives対象外。minute/tickはadd-on | recent 3-5 case pilotの第一候補。ただし契約前に保存可否を確認 | preferred_pending_license_review |
-| `JPX TDnet public viewing service` | official / JPX | no | no | not_applicable | not_applicable | highest。実開示日時が掲載時刻 | manual viewing | no for public viewing | free | yes | disclosure metadataの記録範囲をterms確認要 | source document再配布は別途確認 | 価格sourceではない。公開閲覧は31日、Listed Company Searchは過去10年閲覧 | announcement timestampとsource evidenceのprimary候補 | preferred_timestamp_source |
+| `J-Quants API Free` | official / JPXI | yes | no | not_applicable | yes。adjusted/unadjusted OHLC | medium。TDnet時刻は別sourceが必要 | API | yes / API key | JPY 0 | yes | private analysisはlikely。raw保存条件はterms確認要 | no。raw dataの配布・共有禁止 | 2年分だが直近12週間を除く。recent pilotには不向き | historical技術調査候補のみ。第1号prospectiveでは使用しない | excluded_from_first_prospective |
+| `J-Quants API Light + Tick/Minute Add-on` | official / JPXI | yes | yes | 2 years | daily OHLCはyes。minute/tickのadjustment仕様は要確認 | high。TDnetの実開示時刻とJSTでjoin可能。ただしprice dataはdaily deliveryでreal-timeではない | API / CSV | yes / API key | JPY 1,650 + JPY 5,500 per month, tax included | yes | personal internal researchはlikely。raw retention範囲をterms確認要 | no。raw dataの第三者共有禁止 | individual/private use限定。derivatives対象外。minute/tickはadd-on | 契約条件確認後の将来候補。第1号prospectiveでは使用しない | excluded_from_first_prospective |
+| `JPX TDnet public viewing service` | official / JPX | no | no | not_applicable | not_applicable | highest。実開示日時が掲載時刻 | manual viewing | no for public viewing | free | yes | disclosure metadataの記録範囲をterms確認要 | source document再配布は別途確認 | 価格sourceではない。公開閲覧は31日、Listed Company Searchは過去10年閲覧 | terms確認後のmanual secondary occurrence confirmationのみ | conditional_manual_secondary |
 | `Monex Trader chart` | third-party market data via broker | yes / display | yes / display | official tablet pageは最大200 bars。長期保持は不明 | unknown | medium。画面上の1-minute OHLCをTDnet時刻と手動照合 | manual | yes / brokerage account | tool is shown as free; account条件あり | yes | unknown | unknown | API/export前提ではない。表示期間・corporate action・licenseが研究DB要件を満たすか不明 | audit付き `manual reference price` のfallbackのみ | manual_fallback_pending_terms |
 | `JPX FLEX Historical` | official / JPXI | daily market information plus tick-derived OHLC | tick data。minuteは利用者側集計 | last 30 days / all-period / specified one-month spot。data since 2011 | no automatic adjusted series confirmed。base/issue informationとの別処理が必要 | high。exchange timestamp付きtick | Web API / S3 files | yes / contract | regular single entity JPY 100,000 monthly; all-period JPY 300,000 monthly, tax excluded | yes | internal use under contract | no unless separately approved | PCAP中心で大容量。個人pilotには費用・処理とも過剰 | 将来、tick-level再現性が必須になった場合のみ再検討 | deferred_overkill |
 | `J-Quants Pro` | official / JPXI | yes | minute/tickは個別dataset・契約確認要 | daily OHLC since 2008-05-07 | yes。unadjusted/adjusted/factor | high。TDnet/Snowflake等の法人向けdataと連携可能 | API / SFTP / Snowflake | yes / corporate contract | dataset別見積り | yes | internal use under license | no unless approved external-distribution contract | corporate users only。現在の個人pilotには不適合 | ERSが法人運用へ移行した場合の将来候補 | deferred_corporate_only |
 
 ## 暫定推奨
 
-1. 無料段階では `J-Quants API Free` で12週超前の3〜5件についてdaily OHLCとadjustmentの入力手順を確認する。
-2. recent intraday caseの必要性が確認できた時点で、`J-Quants API Light + Tick/Minute Add-on` のtermsを人間がreviewする。有料申込みは別承認とする。
-3. announcement timestampはTDnetの実開示日時をprimaryとし、予定時刻や推定時刻をactual timestampとして使わない。
-4. 分足契約前のpilotでは、既存broker chartからのmanual captureを許容する。ただしsource identifier、画面のbar時刻、observed_at、entered_byを記録し、raw chart dataを大量保存しない。
-5. `JPX FLEX Historical` と `J-Quants Pro` は現段階では費用・契約主体が過剰なためdeferredとする。
+1. 第1号prospective pilotからJ-Quants APIとJ-Quants Proを除外する。
+2. announcement occurrenceは会社公式IRをprimary候補とし、TDnet手動閲覧をsecondary候補にできる。候補固有terms確認前に正式採用しない。
+3. priceは具体的な表示元1つをHumanが選び、viewingとmetadata記録条件を確認したmanual entryに限定する。
+4. screenshot、raw chart data、raw price row、derived VWAPは許可条件確認と別承認なしに保存しない。
+5. API、scraping、automatic captureは第1号で実装しない。
 
 ## raw priceとadjusted priceの採用方針
 

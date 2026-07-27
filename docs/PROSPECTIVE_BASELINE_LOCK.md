@@ -72,6 +72,8 @@ No `superseded` status is added. An older locked row remains immutable; a later 
 
 `reviewed_at`, `as_of_datetime`, `evidence_published_at`, `source_data_max_observed_at`, and `recorded_at` must all be no later than `locked_at` for a locked prospective baseline.
 
+第1号のHuman checklist、兼任統制、canonical hash command、lock順序、pilot log記録は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を参照する。現行hash helperは一時運用のprivate APIであり、恒久CLI契約ではない。
+
 ## Hash Canonicalization V1
 
 The validator calculates the hash from the explicit `BASELINE_LOCK_HASH_FIELDS_V1` field list. The list contains every current baseline field except `baseline_record_hash`, including lifecycle, review, supersession, timing, and `recorded_at` fields.

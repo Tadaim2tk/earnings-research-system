@@ -2,7 +2,7 @@
 
 ## Status
 
-`Proposed`. 第4号prospective eventの選定前にHuman承認と現行schema gapの解消が必要である。
+`Conditionally ready`. schema／validator側の主要gateは独立監査済みだが、event未選定であり、candidate固有terms、価格source、reviewer、監視日程のHuman確認が必要である。
 
 ## 目的
 
@@ -14,6 +14,8 @@
 - 対象外: Nintendo、Toyota、Olympicの一括backfill
 - 優先順位: pre-event baseline draftの`as_of_datetime`と記録を先に固定し、formal evidence登録後にHuman reviewとlockを行う
 - formal evidence未登録またはtiming gate不合格ならprospective scoringへ進まない
+
+運用role、provider scope、metadata-only mapping、監視、review、lock、停止条件は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) に集約し、実行証跡は [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) へappendする。
 
 ## Lifecycle gate
 
@@ -140,6 +142,7 @@ event official disclosureとactual KPIはannouncement以後に登録する。pre
 
 ## Raw storage and license
 
+- 第1号はmetadata-onlyとし、J-Quants API、J-Quants Pro、TDnet API、TDnet DBS、自動scraping、raw disclosure保存をscope外とする。
 - raw保存不可でもURL、publisher、title、timing、hash statusを残す。
 - `license_status=unknown` は保存許可を意味しない。
 - local temporary reviewとGit/Vault長期保存を分ける。

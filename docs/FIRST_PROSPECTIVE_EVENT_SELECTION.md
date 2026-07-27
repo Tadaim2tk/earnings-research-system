@@ -8,6 +8,8 @@
 
 最初のprospective eventで、発表前baseline lock、formal evidence、時刻、price reference、Human reviewを無理なく実運用できるcaseを選ぶ。銘柄の話題性や結果予想の容易さではなく、監査可能性と手順検証可能性を優先する。
 
+運用role、provider terms、metadata-only storage、監視、review、lock、停止条件は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を正本とし、実行記録は [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) へappendする。
+
 ## 必須条件
 
 | criterion | acceptance evidence |
@@ -15,17 +17,17 @@
 | 発表予定日を事前確認可能 | company IR calendarまたはexchange一次情報 |
 | baseline lock時間を確保 | 発表予定より十分前のHuman review slot |
 | baseline lock契約を利用可能 | Acceptedの`ERS-ADR-0020`に基づくschema、validator、sample、testsが利用可能 |
-| event lifecycle契約を利用可能 | `ERS-ADR-0021`承認後にstatus historyとcancelled／occurred gateが利用可能 |
+| event lifecycle契約を利用可能 | Acceptedの`ERS-ADR-0021`に基づくstatus historyとcancelled／occurred gateが利用可能 |
 | 公式資料へアクセス可能 | current company forecast/直近決算資料のURL |
 | formal evidence登録可能 | source timing、entity relation、publisher/titleを記録可能 |
 | event時刻を監査可能 | time-bearing primary metadataまたはunconfirmed時の安全な延期手順 |
-| price sourceを合法利用可能 | license/storage/AI processing条件をHuman確認済み |
+| price sourceを利用可能 | 具体的なmanual表示元のviewing/metadata条件をHuman確認済み |
 | price reference policy適用可能 | sessionに応じたraw unadjusted price候補がある |
 | KPI/forecastが明確 | 主要3〜15項目程度を一次資料から定義可能 |
 | 過度な企業複雑性がない | accounting/corporate actionでpilot目的が埋没しない |
 | TSO snapshotなしで成立 | company/event/evidence captureにTSOを必須としない |
 | Human review時間を確保 | baseline、evidence、event後reviewの担当時間がある |
-| provider terms確認済み | raw/metadata/hash/derived valueの許容範囲を記録済み |
+| provider terms確認済み | viewing、metadata、raw、redistribution、AI raw input、automationを分離記録済み |
 | postponement contingency準備済み | 延期・中止・訂正・撤回時にbaselineを保持して安全に停止・再reviewできる |
 
 ## 除外条件
@@ -81,6 +83,8 @@ formal_evidence_storage_mapping_ready
 baseline_lock_contract_ready
 event_lifecycle_contract_ready
 license_review_status
+terms_reference
+terms_checked_at
 price_source
 price_reference_policy
 corporate_action_check
@@ -105,7 +109,7 @@ postponement_contingency
 - event中止時にscoring、calibration、通常のpost-event reviewから除外できる。
 - 誤開示、撤回、訂正時に元evidenceを保持したappend-only correctionを扱える。
 
-これらは選定時点の運用準備確認である。baseline version relationは [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) とAcceptedの `ERS-ADR-0020` に従う。`event_cancelled`相当のevent enumは別のschema decisionを必要とする。source撤回は既存 `verified_status: retracted` とAcceptedの `ERS-ADR-0019` correction lineageを使う。baseline contractの承認はprospective運用開始の自動承認ではない。
+これらは選定時点の運用準備確認である。baseline version relationは [PROSPECTIVE_BASELINE_LOCK.md](PROSPECTIVE_BASELINE_LOCK.md) とAcceptedの `ERS-ADR-0020` に従う。event中止はAcceptedの `ERS-ADR-0021` にある `event_status=cancelled` を使う。source撤回は既存 `verified_status: retracted` とAcceptedの `ERS-ADR-0019` correction lineageを使う。各contractの承認はprospective運用開始の自動承認ではない。
 
 ## Pilot success measures
 
@@ -122,4 +126,4 @@ postponement_contingency
 
 ## Decision gate
 
-Humanがcandidate、evidence/price readiness、baseline deadlineを承認するまでCompany/Event noteを作らない。candidate選定とbaseline開始は別gateとし、candidateが不適切になった場合は理由を残して次候補へ移る。
+Humanがcandidate、candidate固有terms、evidence/price readiness、監視可能日程、reviewer identifier、baseline deadlineを承認するまでCompany/Event noteを作らない。candidate選定とbaseline開始は別gateとし、candidateが不適切になった場合は [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) へ理由をappendして次候補へ移る。

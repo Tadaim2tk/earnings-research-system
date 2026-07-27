@@ -93,3 +93,17 @@ correction or retraction_notice
 ## Raw storage boundary
 
 `raw_location`はraw contentそのものではない。sampleではrepository外のimmutable storageを示すopaque identifierを使う。実provider dataの保存先、retention、AI processing、derived data条件はHuman承認が必要であり、raw fileをGitへ入れることをdefaultにしない。
+
+## First Pilot Operations Profile
+
+第1号は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) に従うmetadata-only運用とする。
+
+```text
+raw_storage_status = metadata_only
+raw_location = empty
+content_hash_status = not_recorded
+content_hash = empty
+content_hash_algorithm = empty
+```
+
+source URLは `source_url` に記録し、`raw_location` へ入れない。`license_status` はHuman terms reviewの結果を現行enumで記録し、未確認sourceをscoreへ使用しない。metadata-onlyはrawの存在または内容をERSが独立証明するものではない。
