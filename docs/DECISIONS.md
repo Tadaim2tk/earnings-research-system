@@ -319,3 +319,5 @@ Decision: [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md) に�
 Consequences: event rowとbaselineを上書きせず、延期履歴、cancelled除外、occurred gateをdataset-levelで検証できる。延期後gateはbaseline validation成功後、同一loaded dataset内のprospective rowから唯一のunsuperseded current locked baseline tailだけを使い、legacy、invalid lineage、superseded、0件、複数、current draftをfail-closedにする。activated prospective eventを含むcomplete datasetにはstatus history fileが必要になる。terminal statusの誤記録訂正、cross-file lineage、return計算、自動calibrationは未実装であり、本ADRのAccepted statusだけではprospective運用開始を承認しない。
 
 Alternatives Considered: event rowへcurrent statusを追加する方式Aは単純だが履歴を上書きしやすい。event全体をversion化する方式Cはbaseline versionとidentity semanticsが衝突する。独立history tableがappend-onlyとlegacy event互換性を最も明確に保つため方式Bを選ぶ。
+
+Operational Clarification (2026-07-27): 第1号prospective pilotは [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) のmetadata-only、Human-operated contractに従う。J-Quants、contract型TDnet service、自動取得、raw保存をscope外とし、candidate固有terms、manual price source、reviewer、監視日程のHuman承認前にpilotを開始しない。ADR-0011のJ-Quants第一候補判断は過去のmanual/historical price-source reviewとして保持するが、第1号prospective pilotには適用しない。この明確化は既存ADRのstatusまたはschemaを変更しない。

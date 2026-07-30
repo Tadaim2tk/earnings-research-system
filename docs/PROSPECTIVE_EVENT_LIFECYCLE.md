@@ -73,6 +73,8 @@ Publication time for the notice proving a postponement, cancellation, or occurre
 
 Lifecycle validation is dataset-level and does not modify baseline rows.
 
+第1号の手動監視、source of truth、`occurred`確認checklist、停止条件、incident記録は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を参照する。
+
 ### Postponed
 
 - Existing locked baselines remain unchanged.
