@@ -6,7 +6,7 @@
 
 ## Scope And Truth Boundary
 
-第1号では手動・metadata-only運用に限定する。
+第1号ではapproval-gated Level 2 monitoringとmetadata-only保存を推奨する。AIはHumanが `automated_access_permitted=true` と承認したsourceだけを定期確認し、変更候補と判断案を作る。Human approval gateは自動化しない。monitoring実装がない期間、またはsource固有の自動accessが未承認の場合は、そのsourceだけLevel 1の手動開始へ落とす。
 
 本書を第1号prospective pilotの運用契約の正本とする。関連文書は要約と本書への参照だけを持ち、同一規則を複製しない。
 
@@ -26,6 +26,8 @@ ERSからTSOまたはTSO_LOGへ書き戻さない。Vaultは機械データ正�
 ### Terms Review Record
 
 sourceごとに次を別々にHumanが記録する。未確認項目を他の許可から推測しない。
+
+candidate固有のTerms Review Recordは、machine schemaが承認されるまで [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) のappend-only entryへ保存する。`terms_reference` にはHumanが実際に確認した規約URL、契約文書identifier、またはprovider回答referenceを記録する。
 
 ```text
 source_name
@@ -88,7 +90,7 @@ automated_access_permitted = false
 条件:
 
 - candidate選定時にissuerサイトの利用条件をHumanが確認する。
-- raw保存、自動取得、再配布、raw documentのAI入力をdefaultで禁止する。
+- raw保存、再配布、raw documentのAI入力、自動取得をdefaultで禁止する。Humanが利用方法ごとに明示承認した項目だけを許可する。
 - 利用条件が不明なら停止する。
 
 ### TDnet Timely Disclosure Viewing Service
@@ -97,41 +99,65 @@ automated_access_permitted = false
 
 - Humanによる手動閲覧でevent発生確認を補助する。
 - 会社コード、開示表題、表示日時、URL等の最小metadataを、条件確認後に記録する。
+- candidate-specific terms reviewでHumanが `automated_access_permitted=true` と承認した場合に限り、Level 2 monitoringの対象にできる。
 
 禁止:
 
 - raw PDFのERS repository保存
-- 自動巡回または大量取得
+- Human承認のない自動巡回、または大量取得
 - 再配布
 - TDnetページ本文またはdataの大量AI入力
 - TDnet APIまたはTDnet DBSの利用
 
-TDnetは正式な開示経路だが、自由な二次利用を意味しない。会社公式IRをprimary候補とし、TDnet手動閲覧はoccurrence確認の補助候補として扱う。
+TDnetは正式な開示経路だが、自由な二次利用を意味しない。会社公式IRをprimary候補とする。TDnetは `automated_access_permitted=true` がHuman承認済みならLevel 2の補助候補、未承認ならHuman-triggered Level 1のmanual lookup候補として扱う。public websiteであることだけを自動access許可の根拠にせず、AIが許可状態を自己設定しない。terms変更の疑いが生じた場合はLevel 2 monitoringを停止する。
 
-### First Pilot Exclusions
+### Unapproved Or Unimplemented Capabilities
 
-次は第1号pilotのscope外とする。
+次は本documentation contractだけでは利用可能にならない。provider採用または実装には別のHuman承認を要する。
 
 ```text
-J-Quants API
+J-Quants API integration
 J-Quants Pro
 TDnet API
 TDnet DBS
-automated scraping
+unapproved automated access
 raw disclosure storage
 raw disclosure redistribution
 unreviewed price provider
 ```
 
-J-Quantsは保存、AI処理、二次利用等の具体的な契約条件のHuman確認が未完了であるため採用しない。
+J-Quantsは技術候補として残すが、保存、AI処理、二次利用、自動取得等の具体的な契約条件のHuman確認が未完了であるため、現時点では採用済みと扱わない。
 
 ### Price Source
 
-- 第1号は `manual price entry` とする。
-- candidate選定時に具体的な価格表示元を1つ決め、利用条件を個別確認する。
-- price source未確定のままbaselineを開始しない。
-- event時点までに確定できないcandidateは見送る。
+- 目標は、Humanが利用条件を承認したsourceからAIが必要な価格項目だけを取得することである。
+- providerは本書では正式採用しない。candidate選定時に具体的sourceと取得方法を決め、利用条件を個別確認する。
+- `automated_access_permitted=true` が未確認のsourceをAIが定期取得しない。
+- Yahoo!ファイナンスは自動取得に使わず、Humanによる限定的なmanual fallback候補に限る。
+- J-Quantsは技術候補だが、契約、保存、AI処理、自動取得のHuman承認前は採用済みと扱わない。
+- price source未確定のままbaselineを開始せず、event時点までに確定できないcandidateは見送る。
 - 利用条件未確認の価格、chart screenshot、raw row、derived VWAPを保存しない。
+
+将来price recordへ保持する最小候補は次とする。今回はschemaを追加しない。
+
+```text
+ticker
+price_date
+price_timestamp_or_session
+open
+high
+low
+close
+reference_source
+source_url
+source_checked_at
+adjusted_or_unadjusted
+recorded_by
+```
+
+`recorded_by` でHuman入力とAI取得を区別する。
+
+`price observation != formal evidence` である。price observationだけでformal evidence、`used_for_score`、event status、baseline approvalへ自動昇格しない。`price_timestamp_or_session` または `adjusted_or_unadjusted` が不明な場合は推測入力しない。timestamp不明、event return基準を決められないsession不明、adjustment basis不明、source間価格矛盾、source取得失敗のいずれかでは停止またはHuman reviewを要求し、price referenceを採用しない。今回はprice observation schemaを作成しない。
 
 ## Evidence Storage Mapping
 
@@ -159,11 +185,11 @@ content_hash_algorithm = empty
 | --- | --- |
 | event selector | Human |
 | source terms reviewer | Human |
-| evidence recorder | Human |
+| evidence recorder | AI draft / Human approval |
 | baseline author | Human with AI drafting support |
 | Human reviewer | Human |
 | lock operator | Human |
-| event monitor | Human |
+| event monitor | AI for approved sources / Human gate and Level 1 fallback |
 | post-event reviewer | Human |
 | incident owner | Human |
 
@@ -173,10 +199,16 @@ AIへ許可する作業:
 - 文書起草
 - field入力案
 - validator実行支援
-- diff確認支援
+- IR calendar、IR news／disclosure indexの確認
+- 前回monitor checkpointとの差分確認
+- 新資料、予定変更、延期、中止、訂正候補の検知
+- URL、資料名、公開日時、KPI、guidance変更の整理
+- evidence、event status、monitoring entryの下書き
+- Human承認済みprice sourceからの必要項目取得案
+- 取得失敗、矛盾、不明点の通知
 - missing itemの指摘
 
-AI支援へ渡せるのは、Humanが利用条件を確認した最小metadata、Human作成の要約、ERS内部fieldだけである。raw document、TDnet page本文、provider raw dataは入力しない。
+AIがsourceへaccessし、またはraw documentを処理できるのは、該当する利用方法をHumanが個別承認した場合だけである。未承認時にAIへ渡せるのは、Humanが利用条件を確認した最小metadata、Human作成の要約、ERS内部fieldだけとし、raw document、TDnet page本文、provider raw dataを入力しない。
 
 AIへ委譲しない判断:
 
@@ -207,7 +239,7 @@ reviewerには個人本名ではなく、pilot開始前に固定した安定iden
 
 ## Event Monitoring
 
-第1号はHumanによる手動監視とする。event選定時に次を記録する。
+第1号の推奨はapproval-gated Level 2 monitoringである。Humanへ毎日の定期巡回を要求せず、AIが承認済みsourceを定期確認し、変化または判断が必要な場合だけHumanへ通知する。event選定時に次を記録する。
 
 ```text
 primary_calendar_source
@@ -215,18 +247,106 @@ primary_occurrence_source
 secondary_confirmation_source
 ```
 
-会社公式IRをprimary候補とし、TDnet手動閲覧をsecondary occurrence確認候補にできる。
+会社公式IRをprimary候補とし、TDnetをsecondary occurrence確認候補にできる。TDnetのLevel 1／2区分は本書のcandidate-specific terms review規則に従う。
+
+自動化level:
+
+```text
+Level 1 = Humanが開始を指示し、AIが検索・整理する
+Level 2 = AIが定期監視し、変化時に通知と判断案を作り、Humanが重要判断を承認する
+Level 3 = monitoringからevidence、price、post-event準備まで広範囲に自動化する
+```
+
+第1号ではLevel 2を推奨する。ただしsourceごとに `automated_access_permitted=true` のHuman承認を必須とし、未承認sourceだけLevel 1へ落とす。Level 3は別承認とする。
+
+通常は全文を再読込せず、前回確認結果との差分を中心に監視する。
+
+- 毎回確認: IR calendar、IR news／disclosure index、event関係metadata、monitor checkpoint
+- 変更時だけ確認: 新規決算短信、決算説明資料、適時開示
+- 必要時だけ再確認: 過去決算資料、KPI定義、segment構造、accounting policy、過去の補足資料
+- 再利用: 企業identity、accounting period、segment構造、KPI名称、IR URL構造、recurring source map
+
+### Monitor Checkpoint
+
+正式evidenceとは別に、少なくとも次のmonitoring状態を概念上保持する。今回はschemaを作成しない。
+
+```text
+monitor_target_id
+source_url
+source_title
+last_checked_at
+last_success_at
+last_seen_document_id
+last_seen_published_at
+metadata_fingerprint
+result
+error_code
+```
+
+`monitor checkpoint != formal evidence` である。変更がないrunは短い `no_change` monitoring entryだけを残し、formal evidenceを作らない。取得失敗、parse失敗、terms不明、timestamp不明は `no_change` にせず、errorまたはstop候補として記録する。
+
+`metadata_fingerprint` は少なくとも `source_url`、`source_title`、document identifier、published metadata、その他利用条件上確認可能なstable observed metadataから作る候補値である。ETag、Last-Modified、content length等を利用できる場合はobserved metadata候補にできるが、raw全文hashは本metadata-only運用の必須条件にしない。
+
+`metadata_fingerprint` の一致は本文内容が完全に同一であることの証明ではない。同一URLまたは同一titleでも、PDF差替えの疑い、公開日時更新、document identifier変更、file metadata変更、source側の訂正表示、またはmetadata間の矛盾がある場合は `no_change` にせず、`change_detected`、`error`、またはstop／Human reviewへ送る。
+
+次の取得障害を `no_change` として扱わない。
+
+```text
+HTTP failure
+timeout
+login/authentication required
+rate limit
+parse failure
+timestamp parse failure
+content ambiguity
+low AI confidence
+source unavailable
+unexpected response format
+```
+
+これらは `error` として記録し、利用条件に従う限定回数のretryだけを許す。解消しなければstopまたはHuman notificationへ進む。retry回数と間隔は実装契約で定めるが、無限retryは禁止する。
+
+IR sourceから原則保存するのはURL、資料名、公開日時、確認日時、document identifier、eventとの関係、主要変更点、必要な主要数値、短い要約に限る。PDF全文、HTML全文、screenshot、raw document、大量の本文copyは原則保存しない。formal evidence policyが追加の保存を要求する場合は、そちらの承認済み規則を優先する。
 
 監視頻度:
 
 - 通常は毎営業日1回。
 - event予定日の5営業日前から毎営業日1回以上。
+- event前日は必要に応じて頻度を増やす。
 - event当日は予定session前後に確認する。
 - event固有の確認時刻は選定checklistでHumanが決め、ここでは発明しない。
-- 自動通知は未実装である。
-- 監視不能期間が見込まれるcandidateは選定しない。
+- scheduler、自動通知、checkpoint schemaは未実装である。
+- Level 1 fallbackを含めても監視不能期間が見込まれるcandidateは選定しない。
 
 `status_recorded_at` はHumanが変更を実際に認知して記録した時刻とする。過去時刻へ偽装しない。延期または中止の根拠sourceをevidenceとして記録し、不確実ならstatusを推測更新せず停止する。
+
+### アイスコへの適用例
+
+これは運用例であり、アイスコの利用条件、candidate、event、sourceを承認済みとする記録ではない。
+
+```text
+通常:
+アイスコIR calendar / IR newsを確認
+-> checkpointと比較
+-> 変更なしならno_change monitoring entry
+
+変更あり:
+-> URL、資料名、公開日時、document identifierを整理
+-> 前回との差分を作成
+-> Humanへ通知
+
+決算資料公開:
+-> 利用条件が許す範囲だけ必要資料を読む
+-> KPI / guidance / evidence候補を整理
+-> occurred候補を提示
+-> Human認定待ち
+
+価格:
+-> Human承認済みsourceがあれば必要項目の取得案を作る
+-> 未承認または取得不能なら停止またはLevel 1 fallback
+```
+
+TDnet等の補助確認も `automated_access_permitted=true` のHuman承認がある場合だけ定期実行し、未承認ならHuman開始のLevel 1とする。
 
 ## Evidence Registration Rules
 
@@ -247,7 +367,7 @@ EVD-<earnings_event_id>-<3-digit sequence>
 - exact published timestampを確認できないsourceをformal score evidenceに採用しない。
 - `published_at` はschema required datetimeなので、exact timestampがない状態でformal evidence rowを作成しない。
 - date-onlyという制約と発見経路はcandidate note、pilot logまたは非formal noteへ記録し、machine-dataへ虚偽時刻を入れない。
-- date-only sourceへformal evidence IDを発行せず、`used_for_score=false` として扱う。
+- date-only sourceへformal evidence IDを発行しない。非formal記録側で `used_for_score=false` 相当と明記し、存在しないformal evidence rowのfieldを設定したように表現しない。
 - schemaを通す目的で00:00、23:59その他の架空時刻を入力しない。
 - exact timestampを持つ別の公式sourceを探す。
 - 見つからなければ停止するか、ERS formal evidence外のscore非利用補助sourceとして扱う。
@@ -384,6 +504,13 @@ draft完成
 18. provider規約変更の疑いがある。
 19. operatorが手順を一意に判断できない。
 20. AI出力以外に根拠がない。
+21. sourceの自動accessが未承認のままLevel 2 monitoringを試みた。Level 2を停止し、Human-triggered Level 1または承認待ちへ戻す。
+22. monitoring取得失敗またはparse失敗を変更なしと区別できない。
+23. source間でevent日時が矛盾する。
+24. PDF差替えまたは訂正関係が不明である。
+25. corporate actionの影響を判定できない。
+26. price取得不能、またはadjusted／unadjustedを識別できない。
+27. content ambiguityまたは低いAI confidenceにより変更有無を安全に判定できない。
 
 停止時は推測して続行せず、machine-dataを無理に埋めない。incidentまたは停止理由と再開条件をpilot logへappendし、必要ならcandidateを見送る。
 
@@ -400,7 +527,7 @@ resume_approved_by
 resumed_at
 ```
 
-再開は `resume_requirements` が満たされたことをHumanが確認し、`resume_approved_by` と `resumed_at` を新しいappend-only entryへ記録した後に限る。AIは停止・再開案を提示できるが、承認済みとして記録しない。
+再開は `resume_requirements` が満たされたことをHumanが確認し、`resume_approved_by` と `resumed_at` を新しいappend-only entryへ記録した後に限る。`stopped_at` と `resumed_at` は実際に認知・実行した時刻を記録し、過去時刻へ偽装しない。AIは停止・再開案を提示できるが、承認済みとして記録しない。
 
 該当する場合、再開前にprovider terms、exact timestampを持つ公式source、Human reviewer、validator成功、clean worktree、current lifecycle status、current baseline tail一意性、再review完了をHumanが確認する。根拠は `evidence_reference`、未解消条件は `resume_requirements` に残す。
 

@@ -4,15 +4,15 @@ Do not scrape, store, or automate collection from sources whose terms have not b
 
 ## First Prospective Pilot Override
 
-第1号prospective pilotでは [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を優先する。会社公式IRとTDnet適時開示情報閲覧サービスの手動閲覧を、candidate固有terms確認後の最小metadata用途に限定する。raw保存、再配布、AIへのraw入力、自動取得はdefault禁止である。J-Quants API、J-Quants Pro、TDnet API、TDnet DBSはscope外とする。
+第1号prospective pilotでは [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) を優先する。approval-gated Level 2 monitoringを推奨するが、AIによる定期accessはsourceごとにHumanが `automated_access_permitted=true` と記録した場合だけ許可する。未承認sourceはLevel 1へ落とす。raw保存、再配布、AIへのraw入力、自動取得はdefault禁止であり、各用途を個別承認する。J-Quants API、J-Quants Pro、TDnet API、TDnet DBSは正式採用済みではない。
 
 | source_name | data_type | official_or_unofficial | expected_reliability | terms_review_required | automation_status | storage_policy | citation_required | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TDnet | Earnings releases and timely disclosure | official | high | yes | manual viewing only for first pilot | minimum metadata only after Human terms review; no raw PDF | yes | Secondary occurrence confirmation candidate; public availability does not imply unrestricted reuse |
+| TDnet | Earnings releases and timely disclosure | official | high | yes | Level 1 unless automated access is Human-approved | minimum metadata only after Human terms review; no raw PDF by default | yes | Secondary occurrence confirmation candidate; public availability does not imply unrestricted reuse |
 | EDINET | Securities filings | official | high | yes | not implemented | store filing identifiers and extracted facts | yes | Useful for annual and quarterly filings |
 | JPX | Listing and market reference data | official | high | yes | not implemented | store reference metadata | yes | Market classification and listing checks |
-| Company IR | Releases, guidance, presentations | official | high | yes | manual viewing only for first pilot | minimum metadata only by default; no raw document | yes | Primary calendar/occurrence candidate after issuer-specific terms review |
-| Price Data | OHLCV and returns | mixed | medium to high | yes | manual entry only for first pilot | provider-specific approved metadata only | yes | Concrete display source must be approved before baseline start |
+| Company IR | Releases, guidance, presentations | official | high | yes | Level 2 only after issuer-specific automated access approval | minimum metadata only by default; no raw document | yes | Primary calendar/occurrence candidate after issuer-specific terms review |
+| Price Data | OHLCV and returns | mixed | medium to high | yes | AI acquisition only after provider-specific approval; otherwise manual fallback | approved minimum fields only; no raw dataset by default | yes | Concrete source and acquisition method must be approved before baseline start |
 | Margin and Short Data | Credit balance and short interest | official or vendor | medium to high | yes | not implemented | store source and effective date | yes | Definitions differ by market |
 | Analyst Consensus | Revenue, profit, EPS estimates | vendor | medium | yes | not implemented | store licensed fields only | yes | Paid data availability undecided |
 | Minkabu | Retail sentiment and forecasts | unofficial | medium | yes | not implemented | metadata only until terms reviewed | yes | Do not scrape before review |
