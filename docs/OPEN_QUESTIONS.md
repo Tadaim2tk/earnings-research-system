@@ -91,11 +91,12 @@
 
 ## Prospective pilot運用
 
-- 第1号candidate企業IRサイトのviewing、metadata記録、AI補助条件。
-- manual price entryに使う具体的な表示元とmetadata記録条件。
+- 第1号candidate企業IRサイトのviewing、metadata記録、AI raw input、自動access条件。
+- AI取得またはmanual fallbackに使う具体的なprice sourceとmetadata記録条件。
 - pilot開始前に固定するreviewer identifier。
 - primary calendar source、primary occurrence source、secondary confirmation source。
-- event予定日前後をHumanが監視できる具体日程。
+- Level 2 monitoringの実行基盤、通知先、実行日程。未承認sourceはLevel 1 fallbackでcoverできるか。
+- monitor checkpointを専用schemaとvalidatorへ昇格する時期。
 - effective locked baselineとworking draftを将来どう分離するか。
 - cross-file baseline lineageをいつglobal registryへ移行するか。
 - private hash helperをpublic `hash-baseline` CLIへ昇格するか。

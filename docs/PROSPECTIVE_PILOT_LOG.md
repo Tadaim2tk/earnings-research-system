@@ -15,6 +15,9 @@
 - 未確認値を推測入力しない。
 - `event_id` 未選定時は `not_selected` とする。
 - machine-dataはERS CSV、schema、Gitを正本とし、本logだけでstatus、score、lockを変更しない。
+- Humanがまだ承認していないdecisionは必ず `pending` とし、AIの推奨を確定判断として記録しない。
+- `no_change` はmonitoring結果でありformal evidenceではない。取得失敗を `no_change` として記録しない。
+- `stopped_at` と `resumed_at` は実際の認知・実行時刻とし、backdateしない。
 
 ## Entry Template
 
@@ -29,6 +32,10 @@ phase: <phase>
 actor_role: <role>
 action: <observed action>
 decision: <Human decision | pending>
+monitor_target_id: <target ID | not_applicable>
+monitor_result: <no_change/change_detected/error/not_run>
+metadata_fingerprint: <fingerprint | not_applicable>
+error_code: <code | none>
 evidence_reference: <evidence ID/source reference | not_applicable>
 validation_result: <success/failure/not_run>
 git_commit: <commit hash | pending | not_applicable>

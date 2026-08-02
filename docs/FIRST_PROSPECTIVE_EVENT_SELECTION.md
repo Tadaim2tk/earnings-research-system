@@ -21,12 +21,12 @@
 | 公式資料へアクセス可能 | current company forecast/直近決算資料のURL |
 | formal evidence登録可能 | source timing、entity relation、publisher/titleを記録可能 |
 | event時刻を監査可能 | time-bearing primary metadataまたはunconfirmed時の安全な延期手順 |
-| price sourceを利用可能 | 具体的なmanual表示元のviewing/metadata条件をHuman確認済み |
+| price sourceを利用可能 | 具体的source、取得方法、viewing/metadata/automation条件をHuman確認済み |
 | price reference policy適用可能 | sessionに応じたraw unadjusted price候補がある |
 | KPI/forecastが明確 | 主要3〜15項目程度を一次資料から定義可能 |
 | 過度な企業複雑性がない | accounting/corporate actionでpilot目的が埋没しない |
 | TSO snapshotなしで成立 | company/event/evidence captureにTSOを必須としない |
-| Human review時間を確保 | baseline、evidence、event後reviewの担当時間がある |
+| Human review時間を確保 | baseline、evidence、event後reviewの承認時間がある。毎日の定期巡回は要求しない |
 | provider terms確認済み | viewing、metadata、raw、redistribution、AI raw input、automationを分離記録済み |
 | postponement contingency準備済み | 延期・中止・訂正・撤回時にbaselineを保持して安全に停止・再reviewできる |
 
@@ -85,7 +85,9 @@ event_lifecycle_contract_ready
 license_review_status
 terms_reference
 terms_checked_at
+automated_access_permitted
 price_source
+price_acquisition_mode
 price_reference_policy
 corporate_action_check
 expected_kpi_count
@@ -127,3 +129,5 @@ postponement_contingency
 ## Decision gate
 
 Humanがcandidate、candidate固有terms、evidence/price readiness、監視可能日程、reviewer identifier、baseline deadlineを承認するまでCompany/Event noteを作らない。candidate選定とbaseline開始は別gateとし、candidateが不適切になった場合は [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) へ理由をappendして次候補へ移る。
+
+監視可能性は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) のLevel 2を基準に判定する。source固有の自動accessが未承認の場合は、そのsourceのLevel 1 fallbackを含めてevent期間をcoverできることをHumanが確認する。
