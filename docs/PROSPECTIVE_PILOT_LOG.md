@@ -95,3 +95,57 @@ stopped_at: not_applicable
 resume_requirements: not_applicable
 resume_approved_by: not_applicable
 resumed_at: not_applicable
+
+## 2026-08-02T12:07:55+09:00 - correction
+
+timestamp: 2026-08-02T12:07:55+09:00
+entry_id: OPLOG-20260802-003
+corrects_entry_id: OPLOG-20260727-001
+event_id: not_selected
+phase: correction
+actor_role: AI documentation correction
+action: Human未承認decisionを確定表現にしない規則へ合わせ、OPLOG-20260727-001の有効decisionを訂正
+decision: pending
+monitor_target_id: not_applicable
+monitor_result: not_run
+metadata_fingerprint: not_applicable
+error_code: none
+evidence_reference: not_applicable
+validation_result: not_run
+git_commit: pending
+exception_or_stop_reason: corrected entryはdecision_makerがpendingのまま確定的なdecisionを記載していた
+next_gate: Level 2 monitoring documentationのHuman review
+stop_reason: none
+affected_event_or_phase: preflight_documentation
+decision_maker: pending
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable
+
+## 2026-08-02T12:07:55+09:00 - correction
+
+timestamp: 2026-08-02T12:07:55+09:00
+entry_id: OPLOG-20260802-004
+corrects_entry_id: OPLOG-20260727-002
+event_id: not_selected
+phase: correction
+actor_role: AI documentation correction
+action: Human未承認decisionを確定表現にしない規則へ合わせ、OPLOG-20260727-002の有効decisionを訂正
+decision: pending
+monitor_target_id: not_applicable
+monitor_result: not_run
+metadata_fingerprint: not_applicable
+error_code: none
+evidence_reference: not_applicable
+validation_result: not_run
+git_commit: pending
+exception_or_stop_reason: corrected entryはdecision_makerがpendingのまま確定的なdecisionを記載していた
+next_gate: Level 2 monitoring documentationのHuman review
+stop_reason: none
+affected_event_or_phase: preflight_validation
+decision_maker: pending
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable

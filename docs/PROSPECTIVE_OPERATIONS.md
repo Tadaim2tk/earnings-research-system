@@ -99,16 +99,17 @@ automated_access_permitted = false
 
 - Humanによる手動閲覧でevent発生確認を補助する。
 - 会社コード、開示表題、表示日時、URL等の最小metadataを、条件確認後に記録する。
+- candidate-specific terms reviewでHumanが `automated_access_permitted=true` と承認した場合に限り、Level 2 monitoringの対象にできる。
 
 禁止:
 
 - raw PDFのERS repository保存
-- 自動巡回または大量取得
+- Human承認のない自動巡回、または大量取得
 - 再配布
 - TDnetページ本文またはdataの大量AI入力
 - TDnet APIまたはTDnet DBSの利用
 
-TDnetは正式な開示経路だが、自由な二次利用を意味しない。会社公式IRをprimary候補とし、TDnet手動閲覧はoccurrence確認の補助候補として扱う。
+TDnetは正式な開示経路だが、自由な二次利用を意味しない。会社公式IRをprimary候補とする。TDnetは `automated_access_permitted=true` がHuman承認済みならLevel 2の補助候補、未承認ならHuman-triggered Level 1のmanual lookup候補として扱う。public websiteであることだけを自動access許可の根拠にせず、AIが許可状態を自己設定しない。terms変更の疑いが生じた場合はLevel 2 monitoringを停止する。
 
 ### Unapproved Or Unimplemented Capabilities
 
@@ -155,6 +156,8 @@ recorded_by
 ```
 
 `recorded_by` でHuman入力とAI取得を区別する。
+
+`price observation != formal evidence` である。price observationだけでformal evidence、`used_for_score`、event status、baseline approvalへ自動昇格しない。`price_timestamp_or_session` または `adjusted_or_unadjusted` が不明な場合は推測入力しない。timestamp不明、event return基準を決められないsession不明、adjustment basis不明、source間価格矛盾、source取得失敗のいずれかでは停止またはHuman reviewを要求し、price referenceを採用しない。今回はprice observation schemaを作成しない。
 
 ## Evidence Storage Mapping
 
@@ -244,7 +247,7 @@ primary_occurrence_source
 secondary_confirmation_source
 ```
 
-会社公式IRをprimary候補とし、TDnet手動閲覧をsecondary occurrence確認候補にできる。
+会社公式IRをprimary候補とし、TDnetをsecondary occurrence確認候補にできる。TDnetのLevel 1／2区分は本書のcandidate-specific terms review規則に従う。
 
 自動化level:
 
@@ -281,6 +284,27 @@ error_code
 ```
 
 `monitor checkpoint != formal evidence` である。変更がないrunは短い `no_change` monitoring entryだけを残し、formal evidenceを作らない。取得失敗、parse失敗、terms不明、timestamp不明は `no_change` にせず、errorまたはstop候補として記録する。
+
+`metadata_fingerprint` は少なくとも `source_url`、`source_title`、document identifier、published metadata、その他利用条件上確認可能なstable observed metadataから作る候補値である。ETag、Last-Modified、content length等を利用できる場合はobserved metadata候補にできるが、raw全文hashは本metadata-only運用の必須条件にしない。
+
+`metadata_fingerprint` の一致は本文内容が完全に同一であることの証明ではない。同一URLまたは同一titleでも、PDF差替えの疑い、公開日時更新、document identifier変更、file metadata変更、source側の訂正表示、またはmetadata間の矛盾がある場合は `no_change` にせず、`change_detected`、`error`、またはstop／Human reviewへ送る。
+
+次の取得障害を `no_change` として扱わない。
+
+```text
+HTTP failure
+timeout
+login/authentication required
+rate limit
+parse failure
+timestamp parse failure
+content ambiguity
+low AI confidence
+source unavailable
+unexpected response format
+```
+
+これらは `error` として記録し、利用条件に従う限定回数のretryだけを許す。解消しなければstopまたはHuman notificationへ進む。retry回数と間隔は実装契約で定めるが、無限retryは禁止する。
 
 IR sourceから原則保存するのはURL、資料名、公開日時、確認日時、document identifier、eventとの関係、主要変更点、必要な主要数値、短い要約に限る。PDF全文、HTML全文、screenshot、raw document、大量の本文copyは原則保存しない。formal evidence policyが追加の保存を要求する場合は、そちらの承認済み規則を優先する。
 
@@ -480,12 +504,13 @@ draft完成
 18. provider規約変更の疑いがある。
 19. operatorが手順を一意に判断できない。
 20. AI出力以外に根拠がない。
-21. sourceの自動accessが未承認である。
+21. sourceの自動accessが未承認のままLevel 2 monitoringを試みた。Level 2を停止し、Human-triggered Level 1または承認待ちへ戻す。
 22. monitoring取得失敗またはparse失敗を変更なしと区別できない。
 23. source間でevent日時が矛盾する。
 24. PDF差替えまたは訂正関係が不明である。
 25. corporate actionの影響を判定できない。
 26. price取得不能、またはadjusted／unadjustedを識別できない。
+27. content ambiguityまたは低いAI confidenceにより変更有無を安全に判定できない。
 
 停止時は推測して続行せず、machine-dataを無理に埋めない。incidentまたは停止理由と再開条件をpilot logへappendし、必要ならcandidateを見送る。
 
