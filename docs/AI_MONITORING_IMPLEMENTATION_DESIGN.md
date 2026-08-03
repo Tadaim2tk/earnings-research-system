@@ -24,6 +24,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
 6. GitHub Actions artifactは短期pilot用のtemporary persistenceであり、長期machine truthの唯一の正本にしない。
 7. source observationとnotification deliveryを分離し、通知失敗で観測結果を消さない。
 8. monitoring結果をformal evidence、event status、baseline approval、price referenceへ自動昇格しない。
+9. unresolved `change_detected` はHuman resolutionまで `pending_human_review` を維持し、後続 `no_change` だけで解消しない。
 
 ## Data Responsibilities
 
@@ -195,6 +196,7 @@ notification_error
 | `degraded` | later change | `pending_human_review` | change notificationを優先 |
 | `degraded` | retry exhausted or stale gap exceeds profile | `stopped` or `degraded` | Human notificationとpolicyに従う |
 | `pending_human_review` | repeated same change | `pending_human_review` | Issueを重複発行しない |
+| `pending_human_review` | later `no_change`, unresolved change remains | `pending_human_review` | 後続runは未解決changeを消去しない |
 | `pending_human_review` | Human resolution recorded | next runで `healthy` candidate | workflowがHuman decisionを捏造しない |
 | any state | `enabled=false` | `disabled` | source accessなし |
 | any active state | previous valid state unavailable | `stopped` | `state_unavailable`、再初期化禁止 |
@@ -204,7 +206,26 @@ error != no_change
 change_detected != formal evidence
 initialized != no_change
 notification failure != observation failure
+unresolved change_detected cannot transition to healthy until Human review resolves the pending change
 ```
+
+### State Priority
+
+重要な `change_detected` が存在する場合、notificationの成否にかかわらず `target_state=pending_human_review` を優先する。
+
+```text
+change_detected + notification success
+-> pending_human_review
+
+change_detected + notification failure
+-> pending_human_review
+   + notification_status=failed
+   + notification_error_code=notification_error
+```
+
+notification failureによって未確認のchangeを `degraded` へ置き換えない。`degraded` はsource observation failure、state retrieval failure、persistence failure、stale monitoring gap、その他の正常な監視継続能力の低下に使用する。
+
+Run Nが `change_detected`、notification failureで終わり、Run N+1に追加変更がない場合、Run N+1の `run_result` は `no_change` にできるが、checkpointの `target_state` はHuman resolutionまで `pending_human_review` を維持する。
 
 ## Atomic Persistence
 
@@ -252,7 +273,7 @@ commit済みstateとは、次をすべて満たす公開済みbundleである。
 
 run保存失敗ならcheckpointを進めない。checkpoint保存失敗ならrunを成功扱いにしない。upload/finalizeまたはread-after-write validation失敗は `persistence_error` とし、partial bundleをcurrent stateへ昇格しない。
 
-通知はbundle commit前に試行し、その結果をrunへ記録する。通知成功後にpersistenceが失敗した場合、次runはIssue dedup keyで重複を抑制する。通知失敗でもsource observationは消さず、`notification_status=failed`、`notification_error_code=notification_error`、`target_state=degraded` を記録する。
+通知はbundle commit前に試行し、その結果をrunへ記録する。通知成功後にpersistenceが失敗した場合、次runはIssue dedup keyで重複を抑制する。通知失敗でもsource observationは消さず、`notification_status=failed` と `notification_error_code=notification_error` を記録する。重要なchangeが存在する場合は `target_state=pending_human_review` を維持し、changeがなく監視継続能力だけが低下した場合に `degraded` を使用する。
 
 `last_successful_run_id` は最後にcommit済みでsource observationが成功したrunを指す。復旧時はlatestと称するartifact名だけを信用せず、lineage、version、manifest hashを検証してcurrent stateを決定する。
 
@@ -438,11 +459,12 @@ monitor_target_id + error_code + error_episode_identifier
 source observation、state persistence、notification deliveryを別結果として扱う。
 
 - source observation成功、state persistence成功、notification成功: observation resultを維持する。
-- source observation成功、state persistence成功、notification失敗: observation resultを維持し、notification failureを記録してtargetを `degraded` とする。Human decisionが必要なら代替notificationまたはwatchdogを要求する。
+- source observationが `change_detected`、state persistence成功、notification失敗: `run_result=change_detected` と `target_state=pending_human_review` を維持し、notification failureを別fieldへ記録する。代替notificationまたはwatchdogを要求する。
+- source observationが成功し重要changeなし、state persistence成功、notification失敗: observation resultを維持し、監視継続能力への影響がある場合はtargetを `degraded` とする。
 - source observation成功、notification成功、state persistence失敗: bundleはcommit不可。`persistence_error` とし、次runでIssue dedup keyを使う。
 - source observation失敗: notification成否にかかわらず `no_change` または `change_detected` にしない。
 
-notification failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` と扱わない。
+notification failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` または単なる `degraded` と扱わない。未解決changeは後続runが `no_change` でも `pending_human_review` を維持し、対象changeに対するHuman resolution recordが確認された場合だけ解除候補になる。
 
 ## Schema Proposal
 
@@ -481,10 +503,22 @@ PR Bのvalidatorは最低限次を検査する。
 - stale gapをschedule profile thresholdに従ってfailまたはwarning化する。
 - terms review未承認、expired、reference欠落時のaccess拒否。
 - notification required/status/dedup/referenceの整合。
-- `pending_human_review` をHuman resolutionなしで `healthy` へ戻さない。
+- unresolved `change_detected` が存在するcheckpointを `healthy` にしない。
+- `change_detected + notification_error` でも `pending_human_review` を維持する。
+- 後続 `no_change` が未解決changeを自動解消しない。
+- Human resolutionなしの `pending_human_review -> healthy` を拒否する。
+- notification resultとobservation resultを独立に検査し、一方のfailureで他方を書き換えない。
 - raw content、credentials、provider dataをdiagnostic fieldへ保存しない。
 
 positive fixtureだけでなく、state loss、partial bundle、version skip、duplicate tail、approval bypass、false no-change、notification failureのnegative fixtureを必須とする。
+
+PR Bでは最低限次のfixtureを含める。
+
+| case | input | expected |
+| --- | --- | --- |
+| 1 | Run Nが `change_detected`、notification failed、`checkpoint_after=degraded` | reject |
+| 2 | Run Nがunresolved `change_detected`、Run N+1が `no_change`、Human resolutionなしで `checkpoint_after=healthy` | reject |
+| 3 | `change_detected`、notification failed、`checkpoint_after=pending_human_review` | valid |
 
 ## ICECO Non-Activated Examples
 
@@ -537,6 +571,8 @@ positive fixtureだけでなく、state loss、partial bundle、version skip、d
 ## Open Implementation Decisions
 
 - artifact APIでprevious committed bundleを検索・再取得する具体的制約、retention監視、permission。
+- 真の初回activationとprevious state消失を区別するmachine-readableなHuman-owned情報。`activation_state`、`activated_at`、`activation_approved_by`、`initialization_generation` 等を候補とし、fieldはPR Bで決定する。初回であることを積極的に証明できる場合だけ `initialized` を許し、artifactが見つからないだけなら `state_unavailable` で停止する。
+- pending changeのHuman resolutionを示すidentifier、`resolved_at`、`resolved_by`、対象runとのlineage。
 - 通常時、5営業日前、前日、当日の最大許容stale gap。
 - manifestを独立schemaとする時期と恒久storage migration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。
