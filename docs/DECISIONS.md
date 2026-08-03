@@ -330,7 +330,7 @@ Status: Proposed
 
 Context: 2026-07-27時点の第1号prospective contractはHumanによる定期巡回とmanual price entryを前提としていた。この方式は承認権限をHumanへ残す一方、変更のないsourceを毎日再確認する負荷と確認漏れriskをHumanへ集中させる。IR資料の再読込も、定常情報と新規差分を分離していなかった。
 
-Decision: [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) に従い、第1号pilotの推奨をapproval-gated Level 2 monitoringとする。AIは `automated_access_permitted=true` をHumanがsource単位で承認した範囲だけ定期確認し、monitor checkpointとの差分、取得失敗、判断候補を整理する。変更なしではformal evidenceを作らない。candidate採用、terms、`used_for_score`、baseline review／lock、event status、price reference、stop／resume、post-event確定はHuman gateとして維持する。sourceの自動accessが未承認なら当該sourceだけLevel 1へ落とす。monitor checkpoint、scheduler、price adapterのschemaまたは実装は本ADRに含めない。
+Decision: [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) に従い、第1号pilotの推奨をapproval-gated Level 2 monitoringとする。AIは `automated_access_permitted=true` をHumanがsource単位で承認した範囲だけ定期確認し、monitor checkpointとの差分、取得失敗、判断候補を整理する。変更なしではformal evidenceを作らない。candidate採用、terms、`used_for_score`、baseline review／lock、event status、price reference、stop／resume、post-event確定はHuman gateとして維持する。sourceの自動accessが未承認なら当該sourceだけLevel 1へ落とす。monitor checkpoint、scheduler、price adapterのschemaまたは実装は本ADRに含めない。実装候補のmachine state、atomic persistence、fingerprint、notification境界は [AI_MONITORING_IMPLEMENTATION_DESIGN.md](AI_MONITORING_IMPLEMENTATION_DESIGN.md) で設計する。
 
 Consequences: Humanへ毎日の定期巡回を要求せず、AIへ作業量を移しながら承認権限を増やさない。monitor checkpointとformal evidenceを分離し、取得失敗を `no_change` と誤認しない。価格sourceはHuman承認済みproviderから必要項目だけ取得することを目標とするが、providerの正式採用と自動取得実装は別承認になる。本ADRがAcceptedになるまで、実monitoring automation、price adapter、実event登録を開始しない。
 
