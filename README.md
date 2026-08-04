@@ -21,6 +21,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 ## Prospective Operations
 
 - [Operations contract](docs/PROSPECTIVE_OPERATIONS.md)
+- [AI monitoring implementation design](docs/AI_MONITORING_IMPLEMENTATION_DESIGN.md)
 - [Append-only pilot log](docs/PROSPECTIVE_PILOT_LOG.md)
 - [First event selection criteria](docs/FIRST_PROSPECTIVE_EVENT_SELECTION.md)
 
