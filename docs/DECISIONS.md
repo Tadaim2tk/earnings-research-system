@@ -326,7 +326,7 @@ Historical Operational Clarification (2026-07-27): 当時の第1号prospective p
 
 Date: 2026-08-02
 
-Status: Proposed
+Status: Accepted
 
 Context: 2026-07-27時点の第1号prospective contractはHumanによる定期巡回とmanual price entryを前提としていた。この方式は承認権限をHumanへ残す一方、変更のないsourceを毎日再確認する負荷と確認漏れriskをHumanへ集中させる。IR資料の再読込も、定常情報と新規差分を分離していなかった。
 
