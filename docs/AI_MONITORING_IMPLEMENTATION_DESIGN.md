@@ -2,7 +2,7 @@
 
 ## Status And Scope
 
-本書は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) で定義したapproval-gated Level 2 monitoringを、将来schema、validator、single-company monitorへ実装するための詳細設計である。
+本書は [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) で定義したapproval-gated Level 2 monitoringを、schema、validator、single-company monitorへ段階実装するための詳細設計である。
 
 ```text
 PROSPECTIVE_OPERATIONS.md
@@ -12,12 +12,12 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
   = machine state、状態遷移、永続化、実行・通知契約の設計
 ```
 
-本書はdocumentation-onlyである。monitor schema、validator、monitor code、source adapter、GitHub Actions、scheduler、price adapter、実target、実eventを実装または承認しない。[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Proposed` のままとし、独立監査Pass後にHumanがstatus変更を判断する。
+[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bではmonitor schema、validator、offline fixturesまでを実装する。monitor code、source adapter、GitHub Actions、scheduler、price adapter、実target、実eventは実装または承認しない。
 
 ## Design Invariants
 
 1. `monitor_target` はHuman-owned configurationであり、workflowはread-onlyで扱う。
-2. `monitor_checkpoint` はtargetごとの現在状態、`monitor_run` は1回ごとのappend-only監査記録である。
+2. `monitor_checkpoint` はtargetごとの現在状態、`monitor_run` は1回ごとのappend-only監査記録、`monitor_resolution` はHuman判断のappend-only記録である。
 3. `error != no_change`、`change_detected != formal evidence`、`initialized != no_change` とする。
 4. 前回の有効stateを取得できない場合は再初期化せず、`state_unavailable` で停止する。
 5. runとcheckpointの片方だけをcommit済みstateとして公開しない。
@@ -28,7 +28,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
 
 ## Data Responsibilities
 
-3つの責務は統合しない。所有者、更新頻度、immutability、保存先が異なるため、分離した方がHuman approval bypassと履歴上書きを検出しやすい。
+4つの責務は統合しない。所有者、更新頻度、immutability、保存先が異なるため、分離した方がHuman approval bypassと履歴上書きを検出しやすい。
 
 ### monitor_target
 
@@ -53,6 +53,11 @@ Humanが承認する監視設定である。第1号pilotのregistry候補はGit�
 | `last_terms_review_at` | datetime or null | 最終Human確認時刻 |
 | `terms_review_reference` | string | 規約URL、契約identifier、provider回答reference |
 | `automation_approved_by` | string or null | stable Human identifier |
+| `activation_state` | enum | Human-owned activation lifecycle |
+| `activated_at` | datetime or null | Human activation timestamp |
+| `activation_approved_by` | string or null | stable Human identifier |
+| `initialization_generation` | integer | activation generation。未activationは0 |
+| `initialization_run_id` | string or null | Human-reviewed first initialized run marker |
 
 次はHuman-only fieldである。
 
@@ -68,9 +73,16 @@ terms_review_state
 last_terms_review_at
 terms_review_reference
 automation_approved_by
+activation_state
+activated_at
+activation_approved_by
+initialization_generation
+initialization_run_id
 ```
 
 workflow tokenはregistryへのwrite権限を持たず、これらを変更できない。特に `automated_access_permitted=true`、`enabled=true`、`automation_approved_by` の設定をAIが行ってはならない。設定が不完全、不整合、期限外、terms未承認ならrunは `skipped` または `error` とし、sourceへaccessしない。
+
+schemaはfield typeとenum、validatorはapproval組合せと `human:<stable-id>` identifierを検査する。実際のactor authorizationは将来runtimeでregistryをread-onlyにするpermission boundaryが担う。schemaまたは文字列prefixだけでidentityを証明したとは扱わない。
 
 ### monitor_checkpoint
 
@@ -95,6 +107,8 @@ targetごとの最後にcommitされたmachine stateである。過去runの代�
 | `replacement_detection` | enum | `available`、`partial`、`unavailable` |
 | `last_error_code` | enum or null | 最後のmachine-readable error |
 | `consecutive_error_count` | integer | 連続error回数 |
+| `pending_change_run_id` | string or null | 未解決 `change_detected` run |
+| `resolution_applied_id` | string or null | current stateへ適用したeffective Human resolution |
 | `recorded_by` | string | workflow identityとversion |
 
 `last_checked_at` はerror runでも更新候補だが、commit済みbundle内でのみ進める。`last_success_at` と `last_successful_run_id` はsource observationが成功し、run/checkpoint bundleがcommitされた場合だけ進める。notificationだけが失敗した場合もsource observationの成功は保持する。
@@ -107,30 +121,47 @@ targetごとの最後にcommitされたmachine stateである。過去runの代�
 | --- | --- | --- |
 | `monitor_run_id` | string | globally unique run ID |
 | `monitor_target_id` | string | registry reference |
-| `workflow_run_id` | string or null | GitHub Actions等のexternal execution ID |
 | `started_at` | datetime | run開始時刻 |
 | `finished_at` | datetime | run終了時刻 |
 | `run_result` | enum | observationの結果 |
+| `observation_status` | enum | observation execution result |
 | `error_code` | enum or null | machine-readable observation/persistence error |
-| `error_message` | string or null | raw本文やsecretを含めない短い診断 |
+| `error_detail` | string or null | raw本文やsecretを含めない短い診断 |
 | `retry_count` | integer | 同一run内のbounded retry回数 |
 | `checkpoint_version_before` | integer or null | initialization時だけnull候補 |
 | `checkpoint_version_after` | integer or null | commit不可ならnull |
-| `previous_successful_run_id` | string or null | run lineage |
+| `initialization_generation` | integer or null | initialized runのHuman-approved generation |
 | `fingerprint_before` | string or null | 初回だけnull |
 | `fingerprint_after` | string or null | observation失敗時はnull候補 |
-| `replacement_detection` | enum | same-URL replacement detection能力 |
+| `fingerprint_version` | enum or null | canonicalization version |
 | `detected_change_summary` | string or null | metadata差分の短い説明 |
-| `observation_confidence` | enum | `high`、`medium`、`low`、`unknown` |
-| `stale_gap_detected` | boolean | expected observation window違反 |
+| `persistence_status` | enum | `committed`、`failed`、`not_attempted` |
 | `notification_required` | boolean | notification policyの判定 |
 | `notification_status` | enum | `not_required`、`pending`、`delivered`、`failed` |
 | `notification_error_code` | enum or null | observation resultを消さないdelivery error |
-| `notification_dedup_key` | string or null | Issue重複抑制key |
 | `notification_reference` | string or null | Issue URL等 |
+| `previous_run_id` | string or null | append-only target run lineage |
 | `recorded_by` | string | workflow identityとversion |
 
-`error_message` は自由記述、`error_code` はmachine判定に使う。HTTP response body、PDF本文、credential、provider raw dataをerrorへ含めない。
+`error_detail` は自由記述、`error_code` はmachine判定に使う。HTTP response body、PDF本文、credential、provider raw dataをerrorへ含めない。
+
+### monitor_resolution
+
+未解決changeに対するHuman判断のappend-only recordである。monitor executionではないため `monitor_run` へ混在させない。
+
+| field | meaning |
+| --- | --- |
+| `resolution_id` | stable resolution ID |
+| `monitor_target_id` | target reference |
+| `source_monitor_run_id` | 解決対象の `change_detected` run |
+| `resolution_type` | Human判断の分類 |
+| `resolution` | Human-readable decision |
+| `resolved_at` | source run完了以後のtimezone-aware timestamp |
+| `resolved_by` | `human:<stable-id>` identifier |
+| `supersedes_resolution_id` | append-only correction parent |
+| `notes` | optional note |
+
+訂正は元recordを上書きせず、同じtargetとsource runを維持した新recordでcurrent resolutionをsupersedeする。
 
 ## Enumerations
 
@@ -466,21 +497,22 @@ source observation、state persistence、notification deliveryを別結果とし
 
 notification failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` または単なる `degraded` と扱わない。未解決changeは後続runが `no_change` でも `pending_human_review` を維持し、対象changeに対するHuman resolution recordが確認された場合だけ解除候補になる。
 
-## Schema Proposal
+## Implemented Data Contracts
 
-次PRでは次の3 schemaを分離して作る。
+PR Bでは次の4 schemaを分離する。
 
 ```text
 monitor_target.schema.json
 monitor_checkpoint.schema.json
 monitor_run.schema.json
+monitor_resolution.schema.json
 ```
 
-統合しない理由は、`monitor_target` がHuman-owned Git configuration、`monitor_checkpoint` がmutable current state、`monitor_run` がappend-only audit recordだからである。ownershipとimmutabilityの異なるrecordを1 schemaへ統合すると、workflowによるapproval field更新やrun履歴上書きを検出しにくくなる。
+統合しない理由は、`monitor_target` がHuman-owned Git configuration、`monitor_checkpoint` がmutable current state、`monitor_run` がappend-only machine audit record、`monitor_resolution` がappend-only Human decisionだからである。
 
-bundle manifestはpersistence transport contractであり、PR BまたはPR Dで独立schemaを追加するかを決める。ただしmanifest validationなしでartifactをcurrent stateへ昇格する実装は許可しない。
+bundle manifestはartifact transportとread-after-writeの実装に依存するためPR Dへ延期する。PR BはCSV上のrun/checkpoint version、previous run、last successful run、fingerprint、resolution lineageを検査する。PR Dでもmanifest validationなしでartifactをcurrent stateへ昇格してはならない。
 
-## Validator Proposal
+## Validator Contract
 
 PR Bのvalidatorは最低限次を検査する。
 
@@ -498,7 +530,7 @@ PR Bのvalidatorは最低限次を検査する。
 - checkpoint versionのtarget単位単調増加とexact +1。
 - before/run/after ID、version、fingerprint、previous run lineage。
 - targetごとのcurrent checkpoint一意性。
-- manifest file set、hash、commit marker、read-after-write result。
+- run/checkpointのversion、ID、fingerprint lineage。manifest file set、hash、commit marker、read-after-write resultはPR Dで追加する。
 - persistence error時にcheckpointをadvanceしない。
 - stale gapをschedule profile thresholdに従ってfailまたはwarning化する。
 - terms review未承認、expired、reference欠落時のaccess拒否。
@@ -535,7 +567,7 @@ PR Bでは最低限次のfixtureを含める。
 ## Pull Request Sequence
 
 1. PR A: 本書と最小限のreferenceだけを追加するdocumentation-only PR。
-2. PR B: monitor target/checkpoint/run schemas、manifest decision、validator、positive/negative fixtures。
+2. PR B: monitor target/checkpoint/run/resolution schemas、validator、positive/negative fixtures。manifestはPR Dへ延期。
 3. PR C: single-company monitor、offline fixture/dry-run tests。network activationなし。
 4. PR D: GitHub Actions、artifact temporary persistence、Issue notification。artifact APIとretentionを実測する。
 5. PR E: Human terms承認後のICECO target activation。実event採用は別のHuman gateを満たす。
@@ -571,10 +603,8 @@ PR Bでは最低限次のfixtureを含める。
 ## Open Implementation Decisions
 
 - artifact APIでprevious committed bundleを検索・再取得する具体的制約、retention監視、permission。
-- 真の初回activationとprevious state消失を区別するmachine-readableなHuman-owned情報。`activation_state`、`activated_at`、`activation_approved_by`、`initialization_generation` 等を候補とし、fieldはPR Bで決定する。初回であることを積極的に証明できる場合だけ `initialized` を許し、artifactが見つからないだけなら `state_unavailable` で停止する。
-- pending changeのHuman resolutionを示すidentifier、`resolved_at`、`resolved_by`、対象runとのlineage。
 - 通常時、5営業日前、前日、当日の最大許容stale gap。
-- manifestを独立schemaとする時期と恒久storage migration contract。
+- PR Dで追加するmanifest schemaのfield、artifact read-after-write手順、恒久storage migration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。
 
 これらは実装前に閉じる。未決の値をworkflowへ埋め込んで運用開始しない。

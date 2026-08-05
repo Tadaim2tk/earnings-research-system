@@ -17,6 +17,10 @@ TABLE_ORDER = [
     "company_master",
     "earnings_event",
     "event_status_history",
+    "monitor_target",
+    "monitor_run",
+    "monitor_resolution",
+    "monitor_checkpoint",
     "score_definition",
     "pre_earnings_baseline",
     "post_earnings_review",
@@ -25,6 +29,12 @@ TABLE_ORDER = [
     "evidence",
     "kpi_observation",
 ]
+MONITOR_TABLES = {
+    "monitor_target",
+    "monitor_checkpoint",
+    "monitor_run",
+    "monitor_resolution",
+}
 
 BASELINE_LOCK_HASH_FIELDS_V1 = (
     "baseline_id",
@@ -87,6 +97,9 @@ PROSPECTIVE_BASELINE_FIELDS = {
     "reviewed_at",
 }
 BASELINE_VERSION_PATTERN = re.compile(r"^v([1-9][0-9]*)$", re.ASCII)
+LOWER_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+HUMAN_IDENTIFIER_PATTERN = re.compile(r"^human:[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
+FATAL_MONITOR_ERROR_CODES = {"state_unavailable", "persistence_error"}
 
 
 @dataclass
@@ -161,11 +174,16 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     rows_by_table = {}
     fieldnames_by_table = {}
     issues = []
+    monitor_bundle_present = any((dataset_dir / specs[table].file).exists() for table in MONITOR_TABLES)
 
     for table in TABLE_ORDER:
         spec = specs[table]
         path = dataset_dir / spec.file
         if not path.exists():
+            if table in MONITOR_TABLES and not monitor_bundle_present:
+                rows_by_table[table] = []
+                fieldnames_by_table[table] = []
+                continue
             if table == "event_status_history":
                 rows_by_table[table] = []
                 fieldnames_by_table[table] = []
@@ -205,6 +223,7 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
     issues.extend(_validate_trade_constraints(rows_by_table))
     issues.extend(_validate_append_only_constraints(rows_by_table))
     issues.extend(_validate_hypothesis_constraints(rows_by_table))
+    issues.extend(_validate_monitor_constraints(rows_by_table, require_dataset_relations=True))
     return ValidationReport(issues)
 
 
@@ -234,6 +253,8 @@ def validate_file(path: Path) -> ValidationReport:
         issues.extend(_validate_evidence_metadata_constraints(rows))
     if spec.table == "event_status_history":
         issues.extend(_validate_event_lifecycle_constraints({spec.table: rows}, False))
+    if spec.table in MONITOR_TABLES:
+        issues.extend(_validate_monitor_constraints({spec.table: rows}, require_dataset_relations=False))
     return ValidationReport(issues)
 
 
@@ -1610,6 +1631,506 @@ def _canonicalize_baseline_value(column: ColumnSpec, value: str) -> str:
     if column.type == "boolean":
         return value.lower()
     return value
+
+
+def _validate_monitor_constraints(
+    rows_by_table: Dict[str, List[Dict[str, str]]],
+    require_dataset_relations: bool,
+) -> List[ValidationIssue]:
+    issues = []
+    issues.extend(_validate_monitor_target_rows(rows_by_table.get("monitor_target", [])))
+    issues.extend(_validate_monitor_run_rows(rows_by_table.get("monitor_run", [])))
+    issues.extend(_validate_monitor_resolution_rows(rows_by_table.get("monitor_resolution", [])))
+    issues.extend(_validate_monitor_checkpoint_rows(rows_by_table.get("monitor_checkpoint", [])))
+    if not require_dataset_relations or not any(rows_by_table.get(table, []) for table in MONITOR_TABLES):
+        return issues
+    issues.extend(_validate_monitor_dataset_relations(rows_by_table))
+    return issues
+
+
+def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    issues = []
+    for row_number, row in enumerate(rows, start=2):
+        active_from = _monitor_datetime("monitor_target", row_number, "active_from", row, issues)
+        active_until = _monitor_datetime("monitor_target", row_number, "active_until", row, issues)
+        _monitor_datetime("monitor_target", row_number, "last_terms_review_at", row, issues)
+        _monitor_datetime("monitor_target", row_number, "activated_at", row, issues)
+        if active_from and active_until and active_until < active_from:
+            issues.append(ValidationIssue("monitor_target", row_number, "active_until", "active_until must not be before active_from"))
+
+        if _clean(row.get("timezone", "")) != "Asia/Tokyo":
+            issues.append(ValidationIssue("monitor_target", row_number, "timezone", "unsupported monitoring timezone"))
+        if not _clean(row.get("source_url", "")).startswith("https://"):
+            issues.append(ValidationIssue("monitor_target", row_number, "source_url", "monitor source_url must use https"))
+        if _clean(row.get("source_category", "")) == "event_document" and not _clean(row.get("earnings_event_id", "")):
+            issues.append(ValidationIssue("monitor_target", row_number, "earnings_event_id", "event_document target requires earnings_event_id"))
+
+        for column in ("automation_approved_by", "activation_approved_by"):
+            value = _clean(row.get(column, ""))
+            if value and not _is_human_identifier(value):
+                issues.append(ValidationIssue("monitor_target", row_number, column, "Human-owned approval requires human:<stable-id> identifier"))
+
+        terms_state = _clean(row.get("terms_review_state", ""))
+        terms_reviewed_at = _clean(row.get("last_terms_review_at", ""))
+        terms_reference = _clean(row.get("terms_review_reference", ""))
+        automation_approved_by = _clean(row.get("automation_approved_by", ""))
+        access_permitted = _is_true(row.get("automated_access_permitted", ""))
+        enabled = _is_true(row.get("enabled", ""))
+        activation_state = _clean(row.get("activation_state", ""))
+        activated_at = _clean(row.get("activated_at", ""))
+        activation_approved_by = _clean(row.get("activation_approved_by", ""))
+        generation = _parse_integer(_clean(row.get("initialization_generation", "")))
+        initialization_run_id = _clean(row.get("initialization_run_id", ""))
+
+        if terms_state == "candidate_specific_review_completed" and (not terms_reviewed_at or not terms_reference):
+            issues.append(ValidationIssue("monitor_target", row_number, "terms_review_reference", "completed terms review requires timestamp and reference"))
+        if access_permitted and (
+            terms_state != "candidate_specific_review_completed"
+            or not _is_human_identifier(automation_approved_by)
+        ):
+            issues.append(ValidationIssue("monitor_target", row_number, "automated_access_permitted", "automated access requires completed terms review and Human approval"))
+
+        if activation_state == "not_activated":
+            if activated_at or activation_approved_by or generation != 0 or initialization_run_id:
+                issues.append(ValidationIssue("monitor_target", row_number, "activation_state", "not_activated target must not contain activation approval and must use generation 0"))
+            if enabled:
+                issues.append(ValidationIssue("monitor_target", row_number, "enabled", "not_activated target cannot be enabled"))
+        elif activation_state in {"activated", "suspended", "retired"}:
+            if not activated_at or not _is_human_identifier(activation_approved_by) or generation is None or generation < 1:
+                issues.append(ValidationIssue("monitor_target", row_number, "activation_state", "activated lifecycle state requires Human activation timestamp and generation"))
+            if activation_state in {"suspended", "retired"} and enabled:
+                issues.append(ValidationIssue("monitor_target", row_number, "enabled", "%s target cannot be enabled" % activation_state))
+
+        if enabled and (
+            _clean(row.get("monitoring_level", "")) != "level_2"
+            or not access_permitted
+            or activation_state != "activated"
+        ):
+            issues.append(ValidationIssue("monitor_target", row_number, "enabled", "enabled target requires approved Level 2 access and activated state"))
+    return issues
+
+
+def _validate_monitor_checkpoint_rows(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    issues = []
+    for row_number, row in enumerate(rows, start=2):
+        last_checked = _monitor_datetime("monitor_checkpoint", row_number, "last_checked_at", row, issues)
+        last_success = _monitor_datetime("monitor_checkpoint", row_number, "last_success_at", row, issues)
+        _monitor_datetime("monitor_checkpoint", row_number, "last_seen_published_at", row, issues)
+        if last_checked and last_success and last_success > last_checked:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "last_success_at", "last_success_at must not be after last_checked_at"))
+
+        fingerprint = _clean(row.get("metadata_fingerprint", ""))
+        fingerprint_version = _clean(row.get("fingerprint_version", ""))
+        if bool(fingerprint) != bool(fingerprint_version):
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "fingerprint_version", "fingerprint and fingerprint_version must be present together"))
+        if fingerprint and not LOWER_SHA256_PATTERN.fullmatch(fingerprint):
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "metadata_fingerprint", "monitor fingerprint must be lowercase SHA-256 hex"))
+
+        state = _clean(row.get("target_state", ""))
+        version = _parse_integer(_clean(row.get("checkpoint_version", "")))
+        pending_change = _clean(row.get("pending_change_run_id", ""))
+        if state == "uninitialized" and version != 0:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "checkpoint_version", "uninitialized checkpoint must use version 0"))
+        if state == "pending_human_review" and not pending_change:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "pending_change_run_id", "pending_human_review requires pending_change_run_id"))
+        if pending_change and state not in {"pending_human_review", "stopped"}:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "pending_change_run_id", "unresolved change can only be held by pending_human_review or stopped state"))
+
+        error_code = _clean(row.get("last_error_code", ""))
+        error_count = _parse_integer(_clean(row.get("consecutive_error_count", "")))
+        if bool(error_code) != bool(error_count and error_count > 0):
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "consecutive_error_count", "last_error_code and positive consecutive_error_count must be present together"))
+        if state == "degraded" and not error_code:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "last_error_code", "degraded checkpoint requires operational error"))
+    return issues
+
+
+def _validate_monitor_run_rows(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    issues = []
+    for row_number, row in enumerate(rows, start=2):
+        started_at = _monitor_datetime("monitor_run", row_number, "started_at", row, issues)
+        finished_at = _monitor_datetime("monitor_run", row_number, "finished_at", row, issues)
+        if started_at and finished_at and finished_at < started_at:
+            issues.append(ValidationIssue("monitor_run", row_number, "finished_at", "finished_at must not be before started_at"))
+
+        result = _clean(row.get("run_result", ""))
+        observation = _clean(row.get("observation_status", ""))
+        error_code = _clean(row.get("error_code", ""))
+        error_detail = _clean(row.get("error_detail", ""))
+        persistence = _clean(row.get("persistence_status", ""))
+        before = _parse_integer(_clean(row.get("checkpoint_version_before", "")))
+        after = _parse_integer(_clean(row.get("checkpoint_version_after", "")))
+        fingerprint_before = _clean(row.get("fingerprint_before", ""))
+        fingerprint_after = _clean(row.get("fingerprint_after", ""))
+        fingerprint_version = _clean(row.get("fingerprint_version", ""))
+        summary = _clean(row.get("detected_change_summary", ""))
+
+        for column, value in (("fingerprint_before", fingerprint_before), ("fingerprint_after", fingerprint_after)):
+            if value and not LOWER_SHA256_PATTERN.fullmatch(value):
+                issues.append(ValidationIssue("monitor_run", row_number, column, "monitor fingerprint must be lowercase SHA-256 hex"))
+        if (fingerprint_before or fingerprint_after) and not fingerprint_version:
+            issues.append(ValidationIssue("monitor_run", row_number, "fingerprint_version", "fingerprint values require fingerprint_version"))
+
+        if result == "initialized":
+            if observation != "succeeded" or before is not None or after != 1 or fingerprint_before or not fingerprint_after:
+                issues.append(ValidationIssue("monitor_run", row_number, "run_result", "initialized run requires first committed observation with no prior fingerprint"))
+            if _parse_integer(_clean(row.get("initialization_generation", ""))) != 1 or _clean(row.get("previous_run_id", "")):
+                issues.append(ValidationIssue("monitor_run", row_number, "initialization_generation", "initialized run requires approved generation 1 and no previous_run_id"))
+        elif result == "no_change":
+            if observation != "succeeded" or not fingerprint_before or fingerprint_before != fingerprint_after or summary:
+                issues.append(ValidationIssue("monitor_run", row_number, "run_result", "no_change requires equal before and after fingerprints and no change summary"))
+        elif result == "change_detected":
+            if observation != "succeeded" or not fingerprint_before or not fingerprint_after or fingerprint_before == fingerprint_after or not summary:
+                issues.append(ValidationIssue("monitor_run", row_number, "run_result", "change_detected requires differing fingerprints and detected_change_summary"))
+        elif result == "error":
+            if not error_code or not error_detail:
+                issues.append(ValidationIssue("monitor_run", row_number, "error_code", "error run requires error_code and error_detail"))
+            if error_code != "persistence_error" and observation != "failed":
+                issues.append(ValidationIssue("monitor_run", row_number, "observation_status", "non-persistence error requires failed observation"))
+        elif result == "skipped" and observation != "not_attempted":
+            issues.append(ValidationIssue("monitor_run", row_number, "observation_status", "skipped run requires observation_status not_attempted"))
+
+        if result != "error" and (error_code or error_detail):
+            issues.append(ValidationIssue("monitor_run", row_number, "error_code", "non-error run must not contain observation error"))
+        if persistence == "committed":
+            if after is None or (result != "initialized" and (before is None or after != before + 1)):
+                issues.append(ValidationIssue("monitor_run", row_number, "checkpoint_version_after", "committed run must advance checkpoint_version by exactly one"))
+        elif persistence == "failed":
+            if result != "error" or error_code != "persistence_error" or after is not None:
+                issues.append(ValidationIssue("monitor_run", row_number, "persistence_status", "failed persistence requires persistence_error and no checkpoint_version_after"))
+        elif persistence == "not_attempted" and after is not None:
+            issues.append(ValidationIssue("monitor_run", row_number, "checkpoint_version_after", "not_attempted persistence must not advance checkpoint"))
+
+        notification_required = _is_true(row.get("notification_required", ""))
+        notification_status = _clean(row.get("notification_status", ""))
+        notification_error = _clean(row.get("notification_error_code", ""))
+        notification_reference = _clean(row.get("notification_reference", ""))
+        if notification_status == "failed":
+            if not notification_required or notification_error != "notification_error" or notification_reference:
+                issues.append(ValidationIssue("monitor_run", row_number, "notification_status", "failed notification requires notification_error and no delivery reference"))
+        elif notification_status == "delivered":
+            if not notification_required or not notification_reference or notification_error:
+                issues.append(ValidationIssue("monitor_run", row_number, "notification_status", "delivered notification requires reference and no error"))
+        elif notification_status == "not_required":
+            if notification_required or notification_error or notification_reference:
+                issues.append(ValidationIssue("monitor_run", row_number, "notification_status", "not_required notification must not contain delivery state"))
+        elif notification_status == "pending" and (not notification_required or notification_error or notification_reference):
+            issues.append(ValidationIssue("monitor_run", row_number, "notification_status", "pending notification requires notification_required without outcome"))
+        if result in {"change_detected", "error"} and not notification_required:
+            issues.append(ValidationIssue("monitor_run", row_number, "notification_required", "%s run requires Human notification" % result))
+    return issues
+
+
+def _validate_monitor_resolution_rows(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    issues = []
+    for row_number, row in enumerate(rows, start=2):
+        _monitor_datetime("monitor_resolution", row_number, "resolved_at", row, issues)
+        if not _is_human_identifier(_clean(row.get("resolved_by", ""))):
+            issues.append(ValidationIssue("monitor_resolution", row_number, "resolved_by", "Human resolution requires human:<stable-id> identifier"))
+        if _clean(row.get("supersedes_resolution_id", "")) == _clean(row.get("resolution_id", "")):
+            issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "resolution cannot supersede itself"))
+    return issues
+
+
+def _validate_monitor_dataset_relations(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:
+    issues = []
+    targets = {
+        _clean(row.get("monitor_target_id", "")): row
+        for row in rows_by_table.get("monitor_target", [])
+        if _clean(row.get("monitor_target_id", ""))
+    }
+    events = {
+        _clean(row.get("earnings_event_id", "")): row
+        for row in rows_by_table.get("earnings_event", [])
+        if _clean(row.get("earnings_event_id", ""))
+    }
+    runs = rows_by_table.get("monitor_run", [])
+    run_by_id = {
+        _clean(row.get("monitor_run_id", "")): row
+        for row in runs
+        if _clean(row.get("monitor_run_id", ""))
+    }
+    run_number_by_id = {
+        _clean(row.get("monitor_run_id", "")): row_number
+        for row_number, row in enumerate(runs, start=2)
+        if _clean(row.get("monitor_run_id", ""))
+    }
+
+    for row_number, target in enumerate(rows_by_table.get("monitor_target", []), start=2):
+        event_id = _clean(target.get("earnings_event_id", ""))
+        if event_id and event_id in events and _clean(events[event_id].get("company_id", "")) != _clean(target.get("company_id", "")):
+            issues.append(ValidationIssue("monitor_target", row_number, "earnings_event_id", "monitor target event must belong to target company"))
+
+    runs_by_target = {}
+    for row in runs:
+        runs_by_target.setdefault(_clean(row.get("monitor_target_id", "")), []).append(row)
+
+    lineage_state = {}
+    for target_id, target_runs in runs_by_target.items():
+        target = targets.get(target_id)
+        current_version = 0
+        current_fingerprint = ""
+        previous_run = None
+        latest_committed = None
+        latest_successful = None
+        for index, run in enumerate(target_runs):
+            row_number = run_number_by_id.get(_clean(run.get("monitor_run_id", "")))
+            run_id = _clean(run.get("monitor_run_id", ""))
+            previous_id = _clean(run.get("previous_run_id", ""))
+            if previous_run is None:
+                if previous_id:
+                    issues.append(ValidationIssue("monitor_run", row_number, "previous_run_id", "first target run must not reference previous_run_id"))
+            elif previous_id != _clean(previous_run.get("monitor_run_id", "")):
+                issues.append(ValidationIssue("monitor_run", row_number, "previous_run_id", "monitor run lineage must reference the immediately previous target run"))
+            if previous_run is not None:
+                previous_finished = _parse_aware_datetime(_clean(previous_run.get("finished_at", "")))
+                started_at = _parse_aware_datetime(_clean(run.get("started_at", "")))
+                if previous_finished and started_at and started_at < previous_finished:
+                    issues.append(ValidationIssue("monitor_run", row_number, "started_at", "monitor run timestamps must increase within target lineage"))
+
+            result = _clean(run.get("run_result", ""))
+            persistence = _clean(run.get("persistence_status", ""))
+            before = _parse_integer(_clean(run.get("checkpoint_version_before", "")))
+            after = _parse_integer(_clean(run.get("checkpoint_version_after", "")))
+            fingerprint_before = _clean(run.get("fingerprint_before", ""))
+            fingerprint_after = _clean(run.get("fingerprint_after", ""))
+            if index == 0 and result != "initialized":
+                issues.append(ValidationIssue("monitor_run", row_number, "run_result", "first target run must be initialized"))
+            if index > 0 and result == "initialized":
+                issues.append(ValidationIssue("monitor_run", row_number, "run_result", "existing run lineage cannot be reinitialized"))
+            if result == "initialized" and target is not None:
+                activated_at = _parse_aware_datetime(_clean(target.get("activated_at", "")))
+                started_at = _parse_aware_datetime(_clean(run.get("started_at", "")))
+                if (
+                    _clean(target.get("activation_state", "")) != "activated"
+                    or not _is_true(target.get("enabled", ""))
+                    or not _is_true(target.get("automated_access_permitted", ""))
+                    or _parse_integer(_clean(target.get("initialization_generation", ""))) != _parse_integer(_clean(run.get("initialization_generation", "")))
+                    or _clean(target.get("initialization_run_id", "")) != run_id
+                    or activated_at is None
+                    or started_at is None
+                    or activated_at > started_at
+                ):
+                    issues.append(ValidationIssue("monitor_run", row_number, "run_result", "initialized run requires matching Human-owned activation record"))
+
+            if result != "initialized" and fingerprint_before and current_fingerprint and fingerprint_before != current_fingerprint:
+                issues.append(ValidationIssue("monitor_run", row_number, "fingerprint_before", "fingerprint_before must match the last successful observation"))
+            if persistence == "committed":
+                if result == "initialized":
+                    if current_version != 0 or after != 1:
+                        issues.append(ValidationIssue("monitor_run", row_number, "checkpoint_version_after", "initialized run must create checkpoint version 1"))
+                elif before != current_version or after != current_version + 1:
+                    issues.append(ValidationIssue("monitor_run", row_number, "checkpoint_version_before", "committed run version must continue the current checkpoint"))
+                if after is not None:
+                    current_version = after
+                    latest_committed = run
+                if _clean(run.get("observation_status", "")) == "succeeded" and result in {"initialized", "no_change", "change_detected"}:
+                    latest_successful = run
+                    if fingerprint_after:
+                        current_fingerprint = fingerprint_after
+            previous_run = run
+        lineage_state[target_id] = {
+            "version": current_version,
+            "fingerprint": current_fingerprint,
+            "latest_committed": latest_committed,
+            "latest_successful": latest_successful,
+            "runs": target_runs,
+        }
+
+    resolutions = rows_by_table.get("monitor_resolution", [])
+    resolution_by_id = {
+        _clean(row.get("resolution_id", "")): row
+        for row in resolutions
+        if _clean(row.get("resolution_id", ""))
+    }
+    resolution_number_by_id = {
+        _clean(row.get("resolution_id", "")): row_number
+        for row_number, row in enumerate(resolutions, start=2)
+        if _clean(row.get("resolution_id", ""))
+    }
+    current_resolution_by_source = {}
+    referenced_resolution_ids = set()
+    for row_number, resolution in enumerate(resolutions, start=2):
+        resolution_id = _clean(resolution.get("resolution_id", ""))
+        target_id = _clean(resolution.get("monitor_target_id", ""))
+        source_run_id = _clean(resolution.get("source_monitor_run_id", ""))
+        source_run = run_by_id.get(source_run_id)
+        supersedes_id = _clean(resolution.get("supersedes_resolution_id", ""))
+        if source_run is not None:
+            if _clean(source_run.get("monitor_target_id", "")) != target_id:
+                issues.append(ValidationIssue("monitor_resolution", row_number, "source_monitor_run_id", "resolution source run must belong to the same target"))
+            if _clean(source_run.get("run_result", "")) != "change_detected":
+                issues.append(ValidationIssue("monitor_resolution", row_number, "source_monitor_run_id", "Human resolution source must be a change_detected run"))
+            run_finished = _parse_aware_datetime(_clean(source_run.get("finished_at", "")))
+            resolved_at = _parse_aware_datetime(_clean(resolution.get("resolved_at", "")))
+            if run_finished and resolved_at and resolved_at < run_finished:
+                issues.append(ValidationIssue("monitor_resolution", row_number, "resolved_at", "resolved_at must not be before source monitor run finished_at"))
+        if supersedes_id:
+            referenced_resolution_ids.add(supersedes_id)
+            parent = resolution_by_id.get(supersedes_id)
+            if parent is not None:
+                if resolution_number_by_id.get(supersedes_id, row_number) >= row_number:
+                    issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "resolution correction must reference an earlier row"))
+                if (
+                    _clean(parent.get("monitor_target_id", "")) != target_id
+                    or _clean(parent.get("source_monitor_run_id", "")) != source_run_id
+                ):
+                    issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "resolution correction must preserve target and source run"))
+                parent_time = _parse_aware_datetime(_clean(parent.get("resolved_at", "")))
+                resolved_at = _parse_aware_datetime(_clean(resolution.get("resolved_at", "")))
+                if parent_time and resolved_at and resolved_at <= parent_time:
+                    issues.append(ValidationIssue("monitor_resolution", row_number, "resolved_at", "resolution correction timestamp must increase"))
+            if current_resolution_by_source.get(source_run_id) != supersedes_id:
+                issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "resolution correction cannot branch from a non-current record"))
+        elif source_run_id in current_resolution_by_source:
+            issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "additional resolution must supersede the current resolution"))
+        current_resolution_by_source[source_run_id] = resolution_id
+
+    effective_resolution_by_source = {
+        source_run_id: resolution_by_id[resolution_id]
+        for source_run_id, resolution_id in current_resolution_by_source.items()
+        if resolution_id in resolution_by_id and resolution_id not in referenced_resolution_ids
+    }
+    checkpoints = {
+        _clean(row.get("monitor_target_id", "")): (row_number, row)
+        for row_number, row in enumerate(rows_by_table.get("monitor_checkpoint", []), start=2)
+        if _clean(row.get("monitor_target_id", ""))
+    }
+
+    for target_id, target in targets.items():
+        checkpoint_entry = checkpoints.get(target_id)
+        if checkpoint_entry is None:
+            issues.append(ValidationIssue("monitor_checkpoint", None, "monitor_target_id", "monitor target %s has no current checkpoint" % target_id))
+            continue
+        checkpoint_number, checkpoint = checkpoint_entry
+        state = lineage_state.get(target_id, {"version": 0, "fingerprint": "", "latest_committed": None, "latest_successful": None, "runs": []})
+        target_runs = state["runs"]
+        checkpoint_version = _parse_integer(_clean(checkpoint.get("checkpoint_version", "")))
+        if checkpoint_version != state["version"]:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "checkpoint_version", "current checkpoint must match latest committed monitor run version"))
+
+        latest_committed = state["latest_committed"]
+        latest_successful = state["latest_successful"]
+        if target_runs and latest_committed is None:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "checkpoint_version", "monitor runs exist but no committed checkpoint state is available"))
+        if not target_runs and checkpoint_version != 0:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "checkpoint_version", "checkpoint without monitor run must remain uninitialized at version 0"))
+        if latest_committed is not None:
+            if _parse_aware_datetime(_clean(checkpoint.get("last_checked_at", ""))) != _parse_aware_datetime(_clean(latest_committed.get("finished_at", ""))):
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "last_checked_at", "last_checked_at must match the latest committed run"))
+        if latest_successful is not None:
+            if _clean(checkpoint.get("last_successful_run_id", "")) != _clean(latest_successful.get("monitor_run_id", "")):
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "last_successful_run_id", "last_successful_run_id must identify the latest successful committed observation"))
+            if _parse_aware_datetime(_clean(checkpoint.get("last_success_at", ""))) != _parse_aware_datetime(_clean(latest_successful.get("finished_at", ""))):
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "last_success_at", "last_success_at must match the latest successful committed observation"))
+            if _clean(checkpoint.get("metadata_fingerprint", "")) != state["fingerprint"]:
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "metadata_fingerprint", "checkpoint fingerprint must match the latest successful observation"))
+
+        change_runs = [row for row in target_runs if _clean(row.get("run_result", "")) == "change_detected"]
+        unresolved_change_ids = [
+            _clean(row.get("monitor_run_id", ""))
+            for row in change_runs
+            if _clean(row.get("monitor_run_id", "")) not in effective_resolution_by_source
+        ]
+        if len(unresolved_change_ids) > 1:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "pending_change_run_id", "multiple unresolved change runs cannot be represented by one current checkpoint"))
+        pending_change_id = unresolved_change_ids[-1] if unresolved_change_ids else ""
+        checkpoint_pending_id = _clean(checkpoint.get("pending_change_run_id", ""))
+        checkpoint_state = _clean(checkpoint.get("target_state", ""))
+        latest_error = _monitor_run_error_code(latest_committed)
+        if pending_change_id:
+            if checkpoint_pending_id != pending_change_id:
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "pending_change_run_id", "checkpoint must retain the unresolved change_detected run"))
+            expected_states = {"stopped"} if latest_error in FATAL_MONITOR_ERROR_CODES else {"pending_human_review"}
+            if checkpoint_state not in expected_states:
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "target_state", "unresolved Human-required change must remain pending_human_review unless a fatal monitor error stops the target"))
+        else:
+            if checkpoint_pending_id:
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "pending_change_run_id", "resolved target must not retain pending_change_run_id"))
+            if checkpoint_state == "pending_human_review":
+                issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "target_state", "pending_human_review requires an unresolved change_detected run"))
+
+        resolution_applied_id = _clean(checkpoint.get("resolution_applied_id", ""))
+        if resolution_applied_id:
+            resolution = resolution_by_id.get(resolution_applied_id)
+            if resolution is not None:
+                source_id = _clean(resolution.get("source_monitor_run_id", ""))
+                if _clean(resolution.get("monitor_target_id", "")) != target_id or source_id not in effective_resolution_by_source:
+                    issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "resolution_applied_id", "checkpoint resolution must be the effective Human resolution for this target"))
+        elif change_runs and not pending_change_id and checkpoint_state == "healthy":
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "resolution_applied_id", "healthy checkpoint after change requires effective Human resolution"))
+
+        if not _is_true(target.get("enabled", "")) and checkpoint_state not in {"disabled", "uninitialized", "stopped"}:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "target_state", "disabled target cannot have active checkpoint state"))
+
+        expected_error = _monitor_run_error_code(latest_committed)
+        actual_error = _clean(checkpoint.get("last_error_code", ""))
+        if expected_error != actual_error:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "last_error_code", "checkpoint last_error_code must match latest committed run outcome"))
+        expected_error_count = 0
+        if expected_error:
+            for run in reversed(target_runs):
+                if _clean(run.get("persistence_status", "")) != "committed" or _monitor_run_error_code(run) != expected_error:
+                    break
+                expected_error_count += 1
+        if _parse_integer(_clean(checkpoint.get("consecutive_error_count", ""))) != expected_error_count:
+            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "consecutive_error_count", "checkpoint error count must match the latest committed error episode"))
+    return issues
+
+
+def _monitor_run_error_code(run: Optional[Dict[str, str]]) -> str:
+    if run is None:
+        return ""
+    if _clean(run.get("run_result", "")) == "error":
+        return _clean(run.get("error_code", ""))
+    if _clean(run.get("notification_status", "")) == "failed":
+        return _clean(run.get("notification_error_code", ""))
+    return ""
+
+
+def _monitor_datetime(
+    table: str,
+    row_number: int,
+    column: str,
+    row: Dict[str, str],
+    issues: List[ValidationIssue],
+) -> Optional[datetime]:
+    value = _clean(row.get(column, ""))
+    if not value:
+        return None
+    parsed = _parse_aware_datetime(value)
+    if parsed is None:
+        issues.append(ValidationIssue(table, row_number, column, "monitor timestamp must be timezone-aware ISO 8601 without Z suffix"))
+    return parsed
+
+
+def _parse_aware_datetime(value: str) -> Optional[datetime]:
+    if not value or value.endswith(("Z", "z")):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _parse_integer(value: str) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _is_true(value: Optional[str]) -> bool:
+    return _clean(value).lower() == "true"
+
+
+def _is_human_identifier(value: str) -> bool:
+    return bool(HUMAN_IDENTIFIER_PATTERN.fullmatch(value))
 
 
 def _validate_hypothesis_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:

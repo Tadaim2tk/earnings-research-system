@@ -1,0 +1,289 @@
+[
+  {
+    "id": "monitor_invalid_missing_activation",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {
+          "enabled": "false",
+          "activation_state": "not_activated",
+          "activated_at": "",
+          "activation_approved_by": "",
+          "initialization_generation": "0",
+          "initialization_run_id": ""
+        }
+      }
+    ],
+    "expected_issue": "initialized run requires matching Human-owned activation record"
+  },
+  {
+    "id": "monitor_invalid_state_loss_reinitialized",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"initialization_generation": "2"}
+      },
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-ASTER-001"},
+        "values": {"initialization_generation": "2"}
+      }
+    ],
+    "expected_issue": "initialized run requires approved generation 1"
+  },
+  {
+    "id": "monitor_invalid_initialization_run_replaced",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"initialization_run_id": "MRUN-HOKUTO-001"}
+      }
+    ],
+    "expected_issue": "initialized run requires matching Human-owned activation record"
+  },
+  {
+    "id": "monitor_invalid_notification_failure_degrades",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-HOKUTO-NEWS"},
+        "values": {"target_state": "degraded"}
+      }
+    ],
+    "expected_issue": "unresolved Human-required change must remain pending_human_review"
+  },
+  {
+    "id": "monitor_invalid_pending_change_becomes_healthy",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-HOKUTO-NEWS"},
+        "values": {"target_state": "healthy", "pending_change_run_id": ""}
+      }
+    ],
+    "expected_issue": "checkpoint must retain the unresolved change_detected run"
+  },
+  {
+    "id": "monitor_invalid_ai_resolution",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_resolution",
+        "selector": {"resolution_id": "MRES-MINATO-001"},
+        "values": {"resolved_by": "ai:monitor-agent"}
+      }
+    ],
+    "expected_issue": "Human resolution requires human:<stable-id> identifier"
+  },
+  {
+    "id": "monitor_invalid_missing_checkpoint_after_run",
+    "operations": [
+      {
+        "action": "delete",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"}
+      }
+    ],
+    "expected_issue": "has no current checkpoint"
+  },
+  {
+    "id": "monitor_invalid_checkpoint_without_run",
+    "operations": [
+      {
+        "action": "delete",
+        "table": "monitor_run",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"}
+      }
+    ],
+    "expected_issue": "checkpoint without monitor run must remain uninitialized"
+  },
+  {
+    "id": "monitor_invalid_previous_run_lineage",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-HOKUTO-003"},
+        "values": {"previous_run_id": "MRUN-ASTER-001"}
+      }
+    ],
+    "expected_issue": "monitor run lineage must reference the immediately previous target run"
+  },
+  {
+    "id": "monitor_invalid_fingerprint_lineage",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-HOKUTO-003"},
+        "values": {"fingerprint_before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+      }
+    ],
+    "expected_issue": "fingerprint_before must match the last successful observation"
+  },
+  {
+    "id": "monitor_invalid_notification_error_missing",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-HOKUTO-002"},
+        "values": {"notification_error_code": ""}
+      }
+    ],
+    "expected_issue": "failed notification requires notification_error"
+  },
+  {
+    "id": "monitor_invalid_uppercase_fingerprint",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"metadata_fingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
+      }
+    ],
+    "expected_issue": "monitor fingerprint must be lowercase SHA-256 hex"
+  },
+  {
+    "id": "monitor_invalid_naive_timestamp",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"active_from": "2026-08-01T00:00:00"}
+      }
+    ],
+    "expected_issue": "monitor timestamp must be timezone-aware ISO 8601"
+  },
+  {
+    "id": "monitor_invalid_human_approval_identifier",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"automation_approved_by": "workflow:monitor-v1"}
+      }
+    ],
+    "expected_issue": "Human-owned approval requires human:<stable-id> identifier"
+  },
+  {
+    "id": "monitor_invalid_activation_approver_identifier",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"activation_approved_by": "ai:monitor-agent"}
+      }
+    ],
+    "expected_issue": "Human-owned approval requires human:<stable-id> identifier"
+  },
+  {
+    "id": "monitor_invalid_checkpoint_version_discontinuity",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"checkpoint_version": "2"}
+      }
+    ],
+    "expected_issue": "current checkpoint must match latest committed monitor run version"
+  },
+  {
+    "id": "monitor_invalid_last_successful_run_missing",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"last_successful_run_id": "MRUN-NOT-FOUND"}
+      }
+    ],
+    "expected_issue": "foreign key not found in monitor_run.monitor_run_id"
+  },
+  {
+    "id": "monitor_invalid_error_without_code",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-HOKUTO-003"},
+        "values": {"error_code": "", "error_detail": ""}
+      }
+    ],
+    "expected_issue": "error run requires error_code and error_detail"
+  },
+  {
+    "id": "monitor_invalid_no_change_with_error",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-MINATO-003"},
+        "values": {"error_code": "timeout", "error_detail": "Unexpected error state"}
+      }
+    ],
+    "expected_issue": "non-error run must not contain observation error"
+  },
+  {
+    "id": "monitor_invalid_change_summary_missing",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-HOKUTO-002"},
+        "values": {"detected_change_summary": ""}
+      }
+    ],
+    "expected_issue": "change_detected requires differing fingerprints and detected_change_summary"
+  },
+  {
+    "id": "monitor_invalid_activation_after_initialized_run",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_target",
+        "selector": {"monitor_target_id": "MON-ASTER-CALENDAR"},
+        "values": {"activated_at": "2026-08-01T10:00:00+09:00"}
+      }
+    ],
+    "expected_issue": "initialized run requires matching Human-owned activation record"
+  },
+  {
+    "id": "monitor_invalid_resolution_before_change_finished",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_resolution",
+        "selector": {"resolution_id": "MRES-MINATO-001"},
+        "values": {"resolved_at": "2026-08-02T09:00:00+09:00"}
+      }
+    ],
+    "expected_issue": "resolved_at must not be before source monitor run finished_at"
+  },
+  {
+    "id": "monitor_invalid_checkpoint_error_count",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-HOKUTO-NEWS"},
+        "values": {"consecutive_error_count": "2"}
+      }
+    ],
+    "expected_issue": "checkpoint error count must match the latest committed error episode"
+  }
+]

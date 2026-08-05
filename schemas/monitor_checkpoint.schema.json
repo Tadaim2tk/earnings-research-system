@@ -1,0 +1,34 @@
+{
+  "table": "monitor_checkpoint",
+  "file": "monitor_checkpoint_sample.csv",
+  "primary_key": ["monitor_target_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["monitor_target_id"], "ref_table": "monitor_target", "ref_columns": ["monitor_target_id"]},
+    {"columns": ["last_successful_run_id"], "ref_table": "monitor_run", "ref_columns": ["monitor_run_id"], "nullable": true},
+    {"columns": ["pending_change_run_id"], "ref_table": "monitor_run", "ref_columns": ["monitor_run_id"], "nullable": true},
+    {"columns": ["resolution_applied_id"], "ref_table": "monitor_resolution", "ref_columns": ["resolution_id"], "nullable": true}
+  ],
+  "columns": [
+    {"name": "monitor_target_id", "type": "string", "required": true},
+    {"name": "checkpoint_version", "type": "integer", "required": true, "min": 0},
+    {"name": "target_state", "type": "enum", "required": true, "allowed": ["uninitialized", "healthy", "degraded", "pending_human_review", "stopped", "disabled"]},
+    {"name": "last_checked_at", "type": "datetime", "required": false},
+    {"name": "last_success_at", "type": "datetime", "required": false},
+    {"name": "last_successful_run_id", "type": "string", "required": false},
+    {"name": "last_seen_document_id", "type": "string", "required": false},
+    {"name": "last_seen_title", "type": "string", "required": false},
+    {"name": "last_seen_published_at", "type": "datetime", "required": false},
+    {"name": "metadata_fingerprint", "type": "string", "required": false},
+    {"name": "fingerprint_version", "type": "enum", "required": false, "allowed": ["metadata_v1"]},
+    {"name": "observed_etag", "type": "string", "required": false},
+    {"name": "observed_last_modified", "type": "string", "required": false},
+    {"name": "observed_content_length", "type": "integer", "required": false, "min": 0},
+    {"name": "replacement_detection", "type": "enum", "required": true, "allowed": ["available", "partial", "unavailable"]},
+    {"name": "last_error_code", "type": "enum", "required": false, "allowed": ["http_error", "timeout", "authentication_required", "rate_limited", "parse_error", "timestamp_parse_error", "content_ambiguous", "low_confidence", "source_unavailable", "unexpected_format", "terms_not_approved", "state_unavailable", "persistence_error", "notification_error"]},
+    {"name": "consecutive_error_count", "type": "integer", "required": true, "min": 0},
+    {"name": "pending_change_run_id", "type": "string", "required": false},
+    {"name": "resolution_applied_id", "type": "string", "required": false},
+    {"name": "recorded_by", "type": "string", "required": true}
+  ]
+}

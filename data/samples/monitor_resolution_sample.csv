@@ -1,0 +1,2 @@
+resolution_id,monitor_target_id,source_monitor_run_id,resolution_type,resolution,resolved_at,resolved_by,supersedes_resolution_id,notes
+MRES-MINATO-001,MON-MINATO-DISCLOSURE,MRUN-MINATO-002,acknowledged_no_formal_action,Reviewed metadata change and confirmed no formal action,2026-08-02T10:00:00+09:00,human:reviewer-alpha,,Human decision recorded after change notification
