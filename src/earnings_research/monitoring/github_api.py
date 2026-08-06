@@ -40,27 +40,47 @@ class GitHubAPIClient:
     ) -> Optional[VerifiedMonitorBundle]:
         """Download the unique highest-version artifact and verify its identity."""
         artifacts = self._list_all_artifacts()
-        pattern = re.compile(
+        current_pattern = re.compile(
+            r"^ers-monitor-state-%s-v([1-9][0-9]*)-a([1-9][0-9]*)-([A-Za-z0-9._-]+)$"
+            % re.escape(monitor_target_id)
+        )
+        legacy_pattern = re.compile(
             r"^ers-monitor-state-%s-v([1-9][0-9]*)-([A-Za-z0-9._-]+)$"
             % re.escape(monitor_target_id)
         )
         candidates = []
         for artifact in artifacts:
-            match = pattern.fullmatch(str(artifact.get("name", "")))
+            name = str(artifact.get("name", ""))
+            current_match = current_pattern.fullmatch(name)
+            legacy_match = legacy_pattern.fullmatch(name)
             workflow_run = artifact.get("workflow_run") or {}
             if (
-                match
+                (current_match or legacy_match)
                 and not artifact.get("expired", False)
                 and workflow_run.get("head_branch") == "main"
             ):
-                candidates.append((int(match.group(1)), match.group(2), artifact))
+                if current_match:
+                    candidates.append(
+                        (
+                            int(current_match.group(1)),
+                            int(current_match.group(2)),
+                            current_match.group(3),
+                            artifact,
+                        )
+                    )
+                else:
+                    candidates.append(
+                        (int(legacy_match.group(1)), 0, legacy_match.group(2), artifact)
+                    )
         if not candidates:
             return None
-        highest = max(version for version, _, _ in candidates)
+        highest = max(version for version, _, _, _ in candidates)
         tails = [item for item in candidates if item[0] == highest]
+        highest_attempt = max(attempt for _, attempt, _, _ in tails)
+        tails = [item for item in tails if item[1] == highest_attempt]
         if len(tails) != 1:
-            raise BundleError("multiple GitHub artifacts claim the same current checkpoint version")
-        version, run_id, artifact = tails[0]
+            raise BundleError("multiple GitHub artifacts claim the same current checkpoint identity")
+        version, _attempt, run_id, artifact = tails[0]
         archive = self._request_bytes("GET", "/repos/%s/actions/artifacts/%s/zip" % (self.repository, artifact["id"]))
         output_dir = Path(output_dir)
         if output_dir.exists():

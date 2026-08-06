@@ -12,7 +12,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
   = machine state、状態遷移、永続化、実行・通知契約の設計
 ```
 
-[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidator、PR Cでnetwork-freeなoffline runtimeを実装した。PR DはGitHub Actions、temporary artifact persistence、stale gap、Issue通知を実装する。ただしproduction registryは空であり、自動実行対象は存在しない。live IR adapter、ICECO activation、price adapter、実eventは未実装・未承認のままとする。
+[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidator、PR Cでnetwork-freeなoffline runtime、PR DでGitHub Actions、temporary artifact persistence、stale gap、Issue通知を実装した。PR E1はapproval-gated live source adapterをlibrary boundaryとして追加するが、scheduled workflowへ接続しない。production registryはheader-onlyで、自動実行対象は存在しない。ICECO activation、price adapter、実eventは未実装・未承認のままとする。
 
 ## Design Invariants
 
@@ -338,7 +338,7 @@ previous valid stateを取得不能
 
 state取得不能を初回runとして再初期化してはならない。例外はregistryのHuman-owned activation fieldsが、run IDとgeneration 1を積極的に証明する初回だけである。artifact retentionは14日とするが、長期machine truthではない。retention等でstateが消失した場合は `state_unavailable` としてfail closedし、pilot終了前にobject storageまたはdatabase等の恒久storageを別ADRで再設計する。
 
-artifact名は `monitor_target_id + checkpoint_version + monitor_run_id` で一意化する。GitHub APIから非expiredかつ `head_branch=main` の候補を列挙し、最大versionが一意な場合だけdownloadする。manifestのtarget/version/run identityがartifact名と一致しなければ拒否する。
+artifact名は `monitor_target_id + checkpoint_version + run_attempt + monitor_run_id` で一意化する。旧artifact名もread互換を維持する。GitHub APIから非expiredかつ `head_branch=main` の候補を列挙し、最大version内の最大run attemptが一意な場合だけdownloadする。manifestのtarget/version/run identityがartifact名と一致しなければ拒否する。
 
 ## Registry Format
 
@@ -537,7 +537,7 @@ offline fixture -> SourceObservation -> normalization -> metadata_v1 fingerprint
 
 adapter inputはrepository内の自作HTML/JSON fixtureだけで、live network clientを持たない。coreはrunとcheckpointを1つの `MonitorTransitionResult` として返し、全run lineage、Human resolution、current checkpointをin-memory validatorへ通す。PR Dはtestableなoperational CLI、registry reader、stale評価、bundle persistence、GitHub artifact/Issue clientをcoreの外側へ追加する。GitHub clientはActionsのstate transportと通知だけに限定し、IR sourceへ接続しない。
 
-将来live adapterのfailure contractは次に固定する。これらを `no_change` へ変換してはならない。
+live adapterのfailure contractは次に固定する。これらを `no_change` へ変換してはならない。
 
 ```text
 HTML/API parse failure -> ObservationFailure(parse_error)
@@ -547,6 +547,46 @@ rate limit -> ObservationFailure(rate_limited)
 ```
 
 `source_url` にusernameまたはpasswordのuserinfoがあるtargetはregistry validationで拒否する。credentialがlog、artifact、Issueへ流出する入口を閉じるためである。
+
+## Live Source Adapter Contract
+
+PR E1の `LiveSourceAdapter` はpublic HTML／JSON metadataを1件観測するためのlibraryであり、実targetのactivationまたはscheduled executionではない。HTTP clientにはHTTPXを採用し、redirectを自動追従せず、streaming responseとtimeoutを明示制御する。
+
+network callより前に、既存 `monitor_target` の次の全条件を検査する。
+
+- `enabled=true`。
+- `automated_access_permitted=true`。
+- `monitoring_level=level_2`。
+- `terms_review_state=candidate_specific_review_completed`。
+- `automation_approved_by` が `human:` identifierである。
+- `activation_state=activated`。
+- `activation_approved_by` が `human:` identifierである。
+
+1条件でも欠ければ `access_not_approved` とし、transport call countは0でなければならない。AIがapproval fieldを補完、推定、更新してはならない。
+
+request policyは次に固定する。
+
+- `https`、default port 443、userinfoなし、credential様query keyなし。
+- target `source_url` のscheme／host／effective portをexact approved originとする。
+- redirectは1 hopずつ手動検査し、same-originだけを最大3 hop許可する。
+- cross-origin、HTTPSからHTTPへのdowngrade、userinfo、port変更、loop、hop超過を拒否する。
+- `localhost`、localhost suffix、private／loopback／link-local等のliteral IPを拒否する。
+- cookies、authentication、proxy環境変数、automatic retryを使用しない。TLS certificate verificationを無効化しない。
+- User-AgentはERS public-metadata monitorであることを明示する。
+
+DNS解決後のaddress固定、DNS rebinding耐性、network egress firewallはPR E1のapplication-only boundaryでは完全保証しない。実activation前にActions側egress制御またはresolve-and-pin方針を別途監査する。redirect先は各hopでapproved originを再検査する。
+
+resource limitはconnect 5秒、read 10秒、overall 15秒、response body 2 MiB、connection 1本とする。`Content-Length`が上限超過、invalid、または実bodyと矛盾する場合は成功扱いしない。許可するmedia typeは `text/html` と `application/json` だけである。charsetはUTF-8と一般的な日本語encodingをstrict decodeし、未知charset、decode replacement、JSONの非UTF-8を拒否する。
+
+generic parserが抽出するのはtitle、document ID候補、published timestamp候補、訂正marker等の最小metadataだけである。raw bodyは `SourceObservation`、monitor bundle、error detailへ保存しない。timestampがtimezoneなしまたは矛盾する場合は `timestamp_parse_error`、HTML／JSON構造または必須metadataを安全に読めない場合は `parse_error` とする。
+
+HTTP 401／403は `authentication_required`、429は `rate_limited`、408とtimeoutは `timeout`、404／5xx／transport failureは `source_unavailable`、その他の不正responseは `http_error` または `unexpected_format` へ写像する。exception本文、response本文、query、credentialをdiagnosticへ含めない。adapter自身はretryせず、retryable分類だけを返す。
+
+adapter自身はapplication logを出さない。callerが運用logを追加する場合も、`monitor_target_id`、sanitized origin、status class、elapsed time、`error_code`に限定し、full URL、query、cookies、authorization、response bodyを記録しない。
+
+ETag、Last-Modified、Content-Length、明示的な訂正markerが前回checkpointと矛盾する場合はreplacement suspicionを立てる。fingerprint一致でも `no_change` へ落とさず、runtimeの `content_ambiguous` 経路へ送る。conditional requestは未実装である。
+
+testはHTTPX mock transportだけを使用し、実internetへ接続しない。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
 
 ## Validator Contract
 
@@ -612,7 +652,8 @@ PR Bでは最低限次のfixtureを含める。
 2. PR B: monitor target/checkpoint/run/resolution schemas、validator、positive/negative fixtures。manifestはPR Dへ延期。
 3. PR C: single-company monitor、offline fixture/dry-run tests。network activationなし。
 4. PR D: GitHub Actions、artifact temporary persistence、stale gap、Issue notification、operational CLI。live IR accessなし。
-5. PR E: Human terms承認後のICECO target activation。実event採用は別のHuman gateを満たす。
+5. PR E1: approval-gated live source adapter library。mock-only test、実target activationなし、workflow接続なし。
+6. PR E2: Human terms承認後のICECO target activation。実event採用は別のHuman gateを満たす。
 
 価格取得、price adapter、J-Quants採用はこの系列から分離する。
 
@@ -644,10 +685,12 @@ PR Bでは最低限次のfixtureを含める。
 
 ## Remaining Implementation Decisions
 
-- live IR adapterのsource別parse contractとterms再確認。
+- live adapterのcompany固有parse contract、DNS rebinding boundary、terms再確認。
 - ICECO targetのHuman activation、event identity、reviewer、monitoring dates。
 - 14日retentionに依存しないpermanent storageとmigration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。
 - 日本の祝日を含むexchange calendarがpilot後に必要か。
 
 PR Dはfictional offline dispatchまでを実装し、production registryは空のままにする。上記を未決のまま実targetをactivationしない。
+
+PR E1で、state生成、upload後の再取得検証、notifyを同じtarget単位jobへ統合し、全処理を1つのconcurrency group内で直列化する。third-party Actionsはcommit SHAへ固定する。artifact identityには `run_attempt` を含め、workflow re-runを区別する。Human-approved intentional reinitializationはPR E2以降の別設計とし、artifact lossから自動的に入れない。実装する場合は `initialization_generation` の増加と新しいHuman approvalを必須にする。

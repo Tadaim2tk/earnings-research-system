@@ -69,11 +69,22 @@ class VerifiedMonitorBundle:
     validation_report: ValidationReport
 
 
-def artifact_name(manifest: MonitorBundleManifest) -> str:
+def artifact_name(
+    manifest: MonitorBundleManifest, *, run_attempt: Optional[int] = None
+) -> str:
     """Return a target/version/run-addressed immutable artifact name."""
     for value in (manifest.monitor_target_id, manifest.monitor_run_id):
         if not _SAFE_IDENTIFIER.fullmatch(value):
             raise BundleError("artifact identifiers must contain only safe characters")
+    if run_attempt is not None:
+        if run_attempt < 1:
+            raise BundleError("run_attempt must be a positive integer")
+        return "ers-monitor-state-%s-v%s-a%s-%s" % (
+            manifest.monitor_target_id,
+            manifest.checkpoint_version,
+            run_attempt,
+            manifest.monitor_run_id,
+        )
     return "ers-monitor-state-%s-v%s-%s" % (
         manifest.monitor_target_id,
         manifest.checkpoint_version,

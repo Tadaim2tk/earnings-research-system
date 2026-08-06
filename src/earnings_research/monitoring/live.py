@@ -1,0 +1,663 @@
+"""Approval-gated HTTP adapter for public source metadata."""
+
+import codecs
+import ipaddress
+import json
+import re
+import ssl
+import time
+from datetime import datetime
+from email.message import Message
+from html.parser import HTMLParser
+from typing import Dict, Mapping, Optional, Tuple
+from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
+
+import httpx
+
+from earnings_research.monitoring.models import (
+    LiveSourceContext,
+    ObservationFailure,
+    ObservationResult,
+    SourceObservation,
+)
+
+CONNECT_TIMEOUT_SECONDS = 5.0
+READ_TIMEOUT_SECONDS = 10.0
+OVERALL_BUDGET_SECONDS = 15.0
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_REDIRECT_HOPS = 3
+USER_AGENT = "EarningsResearchSystem-Monitor/1.0 (public-metadata-only)"
+
+_HUMAN_IDENTIFIER = re.compile(r"^human:[A-Za-z0-9][A-Za-z0-9._-]*$")
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_SECRET_QUERY_KEYS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "key",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+}
+_ALLOWED_CHARSETS = {"utf-8", "shift_jis", "cp932", "euc_jp", "iso2022_jp"}
+_ALLOWED_STABLE_METADATA_KEYS = {"category", "document_type", "language", "period"}
+
+
+class LiveSourcePolicyError(ValueError):
+    """A request was rejected before network access."""
+
+    def __init__(self, error_code: str, safe_message: str) -> None:
+        super().__init__(safe_message)
+        self.error_code = error_code
+        self.safe_message = safe_message
+
+
+class _GenericHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._in_title = False
+        self.title_closed = True
+        self.title_parts = []
+        self.metadata: Dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs) -> None:
+        attributes = {str(key).lower(): value for key, value in attrs}
+        if tag.lower() == "title":
+            self._in_title = True
+            self.title_closed = False
+        if tag.lower() == "meta":
+            name = attributes.get("name") or attributes.get("property")
+            content = attributes.get("content")
+            if name and content is not None:
+                self.metadata[str(name).strip().lower()] = str(content).strip()
+
+    def handle_endtag(self, tag) -> None:
+        if tag.lower() == "title":
+            self._in_title = False
+            self.title_closed = True
+
+    def handle_data(self, data) -> None:
+        if self._in_title:
+            self.title_parts.append(data)
+
+    @property
+    def title(self) -> Optional[str]:
+        if not self.title_parts:
+            return None
+        return _clean_text(" ".join(self.title_parts))
+
+
+class LiveSourceAdapter:
+    """Fetch one approved public source without automatic redirects or retries."""
+
+    def __init__(
+        self,
+        *,
+        transport: Optional[httpx.BaseTransport] = None,
+        monotonic=time.monotonic,
+    ) -> None:
+        self._monotonic = monotonic
+        self._client = httpx.Client(
+            transport=transport,
+            verify=ssl.create_default_context(),
+            trust_env=False,
+            follow_redirects=False,
+            timeout=httpx.Timeout(
+                READ_TIMEOUT_SECONDS,
+                connect=CONNECT_TIMEOUT_SECONDS,
+                read=READ_TIMEOUT_SECONDS,
+                write=CONNECT_TIMEOUT_SECONDS,
+                pool=CONNECT_TIMEOUT_SECONDS,
+            ),
+            limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html, application/json",
+                "Accept-Encoding": "identity",
+            },
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
+
+    def observe(self, target: Dict[str, str], context: LiveSourceContext) -> ObservationResult:
+        """Return one observation or sanitized failure without raising network details."""
+        _require_aware(context.observed_at)
+        requested_url = context.source_url or target.get("source_url", "")
+        try:
+            self._require_approval(target)
+            _approved_url, approved_origin = _validate_initial_target_url(target.get("source_url", ""))
+            current_url = _validate_request_url(requested_url, approved_origin)
+            if _canonical_url(current_url) != _canonical_url(requested_url):
+                current_url = _canonical_url(current_url)
+            return self._fetch(
+                current_url=current_url,
+                approved_origin=approved_origin,
+                context=context,
+            )
+        except LiveSourcePolicyError as exc:
+            return _failure(
+                exc.error_code,
+                exc.safe_message,
+                requested_url or target.get("source_url", ""),
+                context.observed_at,
+            )
+
+    def _fetch(
+        self,
+        *,
+        current_url: str,
+        approved_origin: Tuple[str, str, int],
+        context: LiveSourceContext,
+    ) -> ObservationResult:
+        started = self._monotonic()
+        visited = set()
+        redirect_hops = 0
+        while True:
+            canonical = _canonical_url(current_url)
+            if canonical in visited:
+                return _failure(
+                    "unexpected_format",
+                    "redirect loop rejected",
+                    current_url,
+                    context.observed_at,
+                )
+            visited.add(canonical)
+            remaining = OVERALL_BUDGET_SECONDS - (self._monotonic() - started)
+            if remaining <= 0:
+                return _failure("timeout", "overall request budget exceeded", current_url, context.observed_at, True)
+            timeout = httpx.Timeout(
+                min(READ_TIMEOUT_SECONDS, remaining),
+                connect=min(CONNECT_TIMEOUT_SECONDS, remaining),
+                read=min(READ_TIMEOUT_SECONDS, remaining),
+                write=min(CONNECT_TIMEOUT_SECONDS, remaining),
+                pool=min(CONNECT_TIMEOUT_SECONDS, remaining),
+            )
+            self._client.cookies.clear()
+            try:
+                with self._client.stream("GET", current_url, timeout=timeout) as response:
+                    self._client.cookies.clear()
+                    if response.status_code in _REDIRECT_STATUSES:
+                        location = response.headers.get("location", "")
+                        if not location or _contains_control_characters(location):
+                            return _failure(
+                                "unexpected_format",
+                                "redirect Location is missing or malformed",
+                                current_url,
+                                context.observed_at,
+                            )
+                        if redirect_hops >= MAX_REDIRECT_HOPS:
+                            return _failure(
+                                "unexpected_format",
+                                "redirect hop limit exceeded",
+                                current_url,
+                                context.observed_at,
+                            )
+                        try:
+                            current_url = _validate_request_url(
+                                urljoin(current_url, location), approved_origin
+                            )
+                        except LiveSourcePolicyError as exc:
+                            return _failure(
+                                exc.error_code,
+                                exc.safe_message,
+                                current_url,
+                                context.observed_at,
+                            )
+                        redirect_hops += 1
+                        continue
+                    status_failure = _status_failure(response.status_code)
+                    if status_failure is not None:
+                        code, message, retryable = status_failure
+                        return _failure(code, message, current_url, context.observed_at, retryable)
+                    if response.status_code != 200:
+                        return _failure(
+                            "http_error",
+                            "HTTP response was not successful",
+                            current_url,
+                            context.observed_at,
+                            False,
+                        )
+                    return self._parse_success(
+                        response,
+                        current_url,
+                        context,
+                        deadline=started + OVERALL_BUDGET_SECONDS,
+                    )
+            except httpx.TimeoutException:
+                return _failure("timeout", "HTTP request timed out", current_url, context.observed_at, True)
+            except (httpx.NetworkError, httpx.ProtocolError):
+                return _failure(
+                    "source_unavailable",
+                    "HTTP transport failed",
+                    current_url,
+                    context.observed_at,
+                    True,
+                )
+            except httpx.HTTPError:
+                return _failure("http_error", "HTTP request failed", current_url, context.observed_at)
+
+    def _parse_success(
+        self,
+        response: httpx.Response,
+        source_url: str,
+        context: LiveSourceContext,
+        *,
+        deadline: float,
+    ) -> ObservationResult:
+        content_type_header = response.headers.get("content-type", "")
+        media_type, charset = _parse_content_type(content_type_header)
+        if media_type not in {"text/html", "application/json"}:
+            return _failure(
+                "unexpected_format",
+                "response Content-Type is not approved",
+                source_url,
+                context.observed_at,
+            )
+        declared_length = _parse_content_length(response.headers.get("content-length"))
+        if declared_length is False:
+            return _failure(
+                "unexpected_format",
+                "response Content-Length is invalid",
+                source_url,
+                context.observed_at,
+            )
+        if isinstance(declared_length, int) and declared_length > MAX_RESPONSE_BYTES:
+            return _failure(
+                "unexpected_format",
+                "response exceeds the byte limit",
+                source_url,
+                context.observed_at,
+            )
+        body = bytearray()
+        try:
+            chunks = (response.content,) if response.is_stream_consumed else response.iter_raw()
+            for chunk in chunks:
+                if self._monotonic() >= deadline:
+                    return _failure(
+                        "timeout",
+                        "overall request budget exceeded",
+                        source_url,
+                        context.observed_at,
+                        True,
+                    )
+                body.extend(chunk)
+                if len(body) > MAX_RESPONSE_BYTES:
+                    return _failure(
+                        "unexpected_format",
+                        "response exceeds the byte limit",
+                        source_url,
+                        context.observed_at,
+                    )
+            if self._monotonic() >= deadline:
+                return _failure(
+                    "timeout",
+                    "overall request budget exceeded",
+                    source_url,
+                    context.observed_at,
+                    True,
+                )
+        except httpx.TimeoutException:
+            return _failure("timeout", "HTTP response read timed out", source_url, context.observed_at, True)
+        except httpx.HTTPError:
+            return _failure(
+                "source_unavailable",
+                "HTTP response stream failed",
+                source_url,
+                context.observed_at,
+                True,
+            )
+        if not body:
+            return _failure("parse_error", "response body is empty", source_url, context.observed_at)
+        try:
+            text = _decode_body(bytes(body), charset, media_type)
+            parsed = _parse_html(text) if media_type == "text/html" else _parse_json(text)
+        except UnicodeError:
+            return _failure("parse_error", "response charset decoding failed", source_url, context.observed_at)
+        except TimestampError:
+            return _failure(
+                "timestamp_parse_error",
+                "published timestamp is invalid or timezone-ambiguous",
+                source_url,
+                context.observed_at,
+            )
+        except (ValueError, json.JSONDecodeError):
+            return _failure("parse_error", "response metadata parsing failed", source_url, context.observed_at)
+
+        actual_length = len(body)
+        length_mismatch = isinstance(declared_length, int) and declared_length != actual_length
+        previous = context.previous_checkpoint
+        etag = _optional_header(response.headers.get("etag"))
+        last_modified = _optional_header(response.headers.get("last-modified"))
+        replacement_suspected = bool(parsed["replacement_suspected"] or length_mismatch)
+        replacement_suspected = replacement_suspected or _prior_header_changed(
+            previous.get("observed_etag", ""), etag
+        )
+        replacement_suspected = replacement_suspected or _prior_header_changed(
+            previous.get("observed_last_modified", ""), last_modified
+        )
+        prior_length = previous.get("observed_content_length", "")
+        if prior_length and prior_length != str(actual_length):
+            replacement_suspected = True
+        return SourceObservation(
+            source_url=_canonical_url(source_url),
+            title=parsed["title"],
+            document_id=parsed["document_id"],
+            published_at=parsed["published_at"],
+            etag=etag,
+            last_modified=last_modified,
+            content_length=actual_length,
+            replacement_suspected=replacement_suspected,
+            observed_at=context.observed_at,
+            stable_metadata=parsed["stable_metadata"],
+            response_date=_optional_header(response.headers.get("date")),
+            content_type=media_type,
+        )
+
+    @staticmethod
+    def _require_approval(target: Mapping[str, str]) -> None:
+        if (
+            target.get("enabled", "").lower() != "true"
+            or target.get("automated_access_permitted", "").lower() != "true"
+            or target.get("monitoring_level") != "level_2"
+            or target.get("terms_review_state") != "candidate_specific_review_completed"
+            or not _HUMAN_IDENTIFIER.fullmatch(target.get("automation_approved_by", ""))
+            or target.get("activation_state") != "activated"
+            or not _HUMAN_IDENTIFIER.fullmatch(target.get("activation_approved_by", ""))
+        ):
+            raise LiveSourcePolicyError(
+                "terms_not_approved",
+                "live source access is not Human-approved and activated",
+            )
+
+
+class TimestampError(ValueError):
+    pass
+
+
+def _validate_initial_target_url(url: str) -> Tuple[str, Tuple[str, str, int]]:
+    parts = _validated_url_parts(url)
+    origin = (parts.scheme.lower(), parts.hostname.lower(), parts.port or 443)
+    return _canonical_url(url), origin
+
+
+def _validate_request_url(url: str, approved_origin: Tuple[str, str, int]) -> str:
+    parts = _validated_url_parts(url)
+    origin = (parts.scheme.lower(), parts.hostname.lower(), parts.port or 443)
+    if origin != approved_origin:
+        raise LiveSourcePolicyError("terms_not_approved", "request origin is not Human-approved")
+    return _canonical_url(url)
+
+
+def _validated_url_parts(url: str):
+    if (
+        not isinstance(url, str)
+        or not url
+        or _contains_control_characters(url)
+        or any(character.isspace() for character in url)
+    ):
+        raise LiveSourcePolicyError("unexpected_format", "source URL is malformed")
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError as exc:
+        raise LiveSourcePolicyError("unexpected_format", "source URL is malformed") from exc
+    if parts.scheme.lower() != "https" or not parts.hostname:
+        raise LiveSourcePolicyError("terms_not_approved", "source URL must use HTTPS")
+    if parts.username is not None or parts.password is not None:
+        raise LiveSourcePolicyError("terms_not_approved", "source URL userinfo is forbidden")
+    if port not in (None, 443):
+        raise LiveSourcePolicyError("terms_not_approved", "source URL port is not approved")
+    hostname = parts.hostname.lower().rstrip(".")
+    if _is_local_or_private_literal(hostname):
+        raise LiveSourcePolicyError("terms_not_approved", "local or private source address is forbidden")
+    for key, _value in parse_qsl(parts.query, keep_blank_values=True):
+        normalized_key = key.strip().lower().replace("-", "_")
+        if normalized_key in _SECRET_QUERY_KEYS:
+            raise LiveSourcePolicyError("terms_not_approved", "secret-bearing query parameter is forbidden")
+    return parts
+
+
+def _is_local_or_private_literal(hostname: str) -> bool:
+    if (
+        hostname in {"localhost", "localhost.localdomain", "instance-data"}
+        or hostname.endswith((".localhost", ".local", ".internal"))
+    ):
+        return True
+    try:
+        address = ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        return bool(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9.]+)", hostname))
+    return not address.is_global
+
+
+def _canonical_url(url: str) -> str:
+    parts = urlsplit(url)
+    hostname = (parts.hostname or "").lower().rstrip(".")
+    netloc = hostname if parts.port in (None, 443) else "%s:%s" % (hostname, parts.port)
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", parts.query, ""))
+
+
+def _safe_url(url: str) -> str:
+    try:
+        parts = urlsplit(str(url))
+        hostname = (parts.hostname or "unavailable").lower()
+        port = "" if parts.port in (None, 443) else ":%s" % parts.port
+        return urlunsplit((parts.scheme.lower() or "https", hostname + port, parts.path or "/", "", ""))
+    except (TypeError, ValueError):
+        return "https://unavailable/"
+
+
+def _failure(
+    code: str,
+    message: str,
+    source_url: str,
+    observed_at: datetime,
+    retryable: bool = False,
+) -> ObservationFailure:
+    return ObservationFailure(
+        error_code=code,
+        error_detail=message,
+        observed_at=observed_at,
+        retry_count=0,
+        source_url=_safe_url(source_url),
+        retryable=retryable,
+    )
+
+
+def _status_failure(status: int):
+    if status in {401, 403}:
+        return "authentication_required", "public source requires authentication", False
+    if status == 429:
+        return "rate_limited", "public source rate limit was reached", True
+    if status == 408:
+        return "timeout", "public source request timed out", True
+    if status == 404:
+        return "source_unavailable", "public source was not found", False
+    if 500 <= status <= 599:
+        return "source_unavailable", "public source server was unavailable", True
+    return None
+
+
+def _parse_content_type(value: str) -> Tuple[str, Optional[str]]:
+    message = Message()
+    message["content-type"] = value
+    return message.get_content_type().lower(), message.get_content_charset()
+
+
+def _parse_content_length(value: Optional[str]):
+    if value is None:
+        return None
+    if not value.isascii() or not value.isdigit():
+        return False
+    return int(value)
+
+
+def _decode_body(body: bytes, charset: Optional[str], media_type: str) -> str:
+    requested = charset or "utf-8"
+    if requested.lower() == "windows-31j":
+        requested = "cp932"
+    try:
+        canonical = codecs.lookup(requested).name
+    except LookupError as exc:
+        raise UnicodeError("unsupported charset") from exc
+    if canonical not in _ALLOWED_CHARSETS:
+        raise UnicodeError("unsupported charset")
+    if media_type == "application/json" and canonical != "utf-8":
+        raise UnicodeError("JSON must use UTF-8")
+    text = body.decode(canonical, errors="strict")
+    if "\ufffd" in text:
+        raise UnicodeError("replacement character rejected")
+    return text
+
+
+def _parse_html(text: str) -> Dict:
+    if "\x00" in text:
+        raise ValueError("NUL in HTML")
+    parser = _GenericHTMLParser()
+    parser.feed(text)
+    parser.close()
+    if not parser.title_closed:
+        raise ValueError("unclosed title")
+    title = parser.title
+    if title is not None and not _is_meaningful_text(title):
+        raise ValueError("invalid title")
+    document_id = _first_metadata(
+        parser.metadata,
+        "document_id",
+        "document-id",
+        "citation_doi",
+        "og:id",
+    )
+    document_id = _validated_optional_metadata(document_id, "document ID")
+    published_value = _first_metadata(
+        parser.metadata,
+        "published_at",
+        "article:published_time",
+        "date",
+        "dc.date",
+    )
+    published_at = _parse_published_at(published_value)
+    corrected = _first_metadata(parser.metadata, "corrected", "updated", "article:modified_time")
+    if title is None and document_id is None and published_at is None:
+        raise ValueError("no generic metadata")
+    stable_metadata = {}
+    if parser.metadata.get("og:type"):
+        stable_metadata["og_type"] = parser.metadata["og:type"]
+    return {
+        "title": title,
+        "document_id": document_id,
+        "published_at": published_at,
+        "replacement_suspected": _truthy(corrected),
+        "stable_metadata": stable_metadata,
+    }
+
+
+def _parse_json(text: str) -> Dict:
+    loaded = json.loads(text)
+    if not isinstance(loaded, dict):
+        raise ValueError("JSON root must be an object")
+    recognized = {"title", "document_id", "published_at", "corrected", "updated", "stable_metadata"}
+    if not recognized.intersection(loaded):
+        raise ValueError("JSON has no recognized metadata")
+    title = None if loaded.get("title") is None else _clean_text(str(loaded.get("title")))
+    if title is not None and not _is_meaningful_text(title):
+        raise ValueError("invalid title")
+    document_id = _validated_optional_metadata(loaded.get("document_id"), "document ID")
+    published_at = _parse_published_at(loaded.get("published_at"))
+    stable_metadata = loaded.get("stable_metadata") or {}
+    if not isinstance(stable_metadata, dict):
+        raise ValueError("stable_metadata must be a flat object")
+    filtered_metadata = {}
+    for key, value in stable_metadata.items():
+        normalized_key = str(key).strip().lower()
+        if normalized_key not in _ALLOWED_STABLE_METADATA_KEYS:
+            continue
+        if isinstance(value, (dict, list)):
+            raise ValueError("stable_metadata values must be scalar")
+        cleaned_value = _validated_optional_metadata(value, "stable metadata")
+        if cleaned_value is not None:
+            filtered_metadata[normalized_key] = cleaned_value
+    if title is None and document_id is None and published_at is None:
+        raise ValueError("JSON has no usable metadata")
+    return {
+        "title": title,
+        "document_id": document_id,
+        "published_at": published_at,
+        "replacement_suspected": _truthy(loaded.get("corrected")) or _truthy(loaded.get("updated")),
+        "stable_metadata": filtered_metadata,
+    }
+
+
+def _parse_published_at(value) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise TimestampError from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise TimestampError
+    return parsed
+
+
+def _first_metadata(metadata: Mapping[str, str], *keys: str) -> Optional[str]:
+    for key in keys:
+        value = metadata.get(key)
+        if value:
+            return value
+    return None
+
+
+def _clean_text(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def _validated_optional_metadata(value, label: str) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = _clean_text(str(value))
+    if not cleaned:
+        return None
+    if len(cleaned) > 200 or _contains_control_characters(cleaned):
+        raise ValueError("%s is invalid" % label)
+    return cleaned
+
+
+def _is_meaningful_text(value: str) -> bool:
+    return bool(value and len(value) <= 500 and any(character.isalnum() for character in value))
+
+
+def _truthy(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "corrected", "updated"}
+
+
+def _optional_header(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = _clean_text(value)
+    if not cleaned or len(cleaned) > 500 or _contains_control_characters(cleaned):
+        return None
+    return cleaned
+
+
+def _prior_header_changed(previous: str, current: Optional[str]) -> bool:
+    return bool(previous and current is not None and previous != current)
+
+
+def _contains_control_characters(value: str) -> bool:
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def _require_aware(value: datetime) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("observed_at must be timezone-aware")

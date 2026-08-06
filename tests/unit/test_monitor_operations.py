@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import shutil
 import zipfile
 from dataclasses import replace
@@ -20,6 +21,7 @@ from earnings_research.monitoring.operations import StateUnavailable, execute_of
 from earnings_research.monitoring.persistence import (
     BundleError,
     PersistenceError,
+    artifact_name,
     verify_bundle,
     verify_uploaded_bundle,
     write_committed_bundle,
@@ -512,6 +514,52 @@ def test_github_artifact_lookup_selects_and_verifies_highest_main_bundle(tmp_pat
     assert restored.validation_report.ok
 
 
+def test_artifact_identity_includes_run_attempt_and_latest_attempt_wins(tmp_path):
+    bundle = initial_bundle(tmp_path)
+    assert artifact_name(bundle.manifest, run_attempt=2).endswith(
+        "-v1-a2-MRUN-EXAMPLE-001"
+    )
+    with pytest.raises(BundleError, match="positive integer"):
+        artifact_name(bundle.manifest, run_attempt=0)
+
+    archive_io = io.BytesIO()
+    with zipfile.ZipFile(archive_io, "w") as archive:
+        for path in bundle.path.iterdir():
+            archive.write(path, path.name)
+    listing = {
+        "artifacts": [
+            {
+                "id": 20,
+                "name": "ers-monitor-state-MON-EXAMPLE-CALENDAR-v1-a1-MRUN-EXAMPLE-001",
+                "expired": False,
+                "workflow_run": {"head_branch": "main"},
+            },
+            {
+                "id": 21,
+                "name": "ers-monitor-state-MON-EXAMPLE-CALENDAR-v1-a2-MRUN-EXAMPLE-001",
+                "expired": False,
+                "workflow_run": {"head_branch": "main"},
+            },
+        ]
+    }
+    downloaded = []
+
+    def opener(request):
+        if request.full_url.endswith("/zip"):
+            downloaded.append(request.full_url)
+            return FakeHTTPResponse(archive_io.getvalue())
+        return FakeHTTPResponse(json.dumps(listing).encode("utf-8"))
+
+    GitHubAPIClient(
+        repository="owner/repository", token="secret-token", opener=opener
+    ).fetch_previous_bundle(
+        monitor_target_id="MON-EXAMPLE-CALENDAR", output_dir=tmp_path / "attempt-restored"
+    )
+    assert downloaded == [
+        "https://api.github.com/repos/owner/repository/actions/artifacts/21/zip"
+    ]
+
+
 def test_userinfo_url_is_rejected_by_read_only_registry(tmp_path):
     text = REGISTRY.read_text(encoding="utf-8")
     unsafe = tmp_path / "unsafe.csv"
@@ -537,6 +585,15 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert "wget " not in raw
     assert "retention-days: 14" in raw
     assert "cancel-in-progress: false" in raw
+    assert raw.count("group: ers-level2-monitor-${{ matrix.monitor_target_id }}") == 1
+    assert "\n  notify:" not in raw
+    assert "python -m earnings_research.cli monitor-notify" in raw
+    assert ".monitor/reread" in raw
+    assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in raw
+    assert "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065" in raw
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in raw
+    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in raw
+    assert not re.search(r"uses:\s+actions/[^@]+@v[0-9]+", raw)
     assert "monitor-verify-bundle" in raw
     assert "tests/fixtures/monitor_operations/monitor_targets.csv" in raw
     assert "data/config/monitor_targets.csv" in raw
