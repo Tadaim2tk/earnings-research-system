@@ -1,0 +1,22 @@
+{
+  "table": "monitor_resolution",
+  "file": "monitor_resolution_sample.csv",
+  "primary_key": ["resolution_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["monitor_target_id"], "ref_table": "monitor_target", "ref_columns": ["monitor_target_id"]},
+    {"columns": ["source_monitor_run_id"], "ref_table": "monitor_run", "ref_columns": ["monitor_run_id"]},
+    {"columns": ["supersedes_resolution_id"], "ref_table": "monitor_resolution", "ref_columns": ["resolution_id"], "nullable": true}
+  ],
+  "columns": [
+    {"name": "resolution_id", "type": "string", "required": true},
+    {"name": "monitor_target_id", "type": "string", "required": true},
+    {"name": "source_monitor_run_id", "type": "string", "required": true},
+    {"name": "resolution_type", "type": "enum", "required": true, "allowed": ["acknowledged_no_formal_action", "promote_to_evidence_review", "event_status_review_required", "source_terms_review_required", "monitoring_resume_approved", "monitoring_stop_approved", "other"]},
+    {"name": "resolution", "type": "string", "required": true},
+    {"name": "resolved_at", "type": "datetime", "required": true},
+    {"name": "resolved_by", "type": "string", "required": true},
+    {"name": "supersedes_resolution_id", "type": "string", "required": false},
+    {"name": "notes", "type": "string", "required": false}
+  ]
+}
