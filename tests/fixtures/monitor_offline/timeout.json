@@ -1,0 +1,5 @@
+{
+  "error_code": "timeout",
+  "error_detail": "Offline timeout scenario",
+  "retry_count": 2
+}

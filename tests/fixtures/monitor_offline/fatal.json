@@ -1,0 +1,4 @@
+{
+  "error_code": "state_unavailable",
+  "error_detail": "Previous committed state could not be loaded"
+}
