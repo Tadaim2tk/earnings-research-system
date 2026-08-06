@@ -12,7 +12,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
   = machine state、状態遷移、永続化、実行・通知契約の設計
 ```
 
-[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bではmonitor schema、validator、offline fixturesまでを実装する。monitor code、source adapter、GitHub Actions、scheduler、price adapter、実target、実eventは実装または承認しない。
+[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidatorを実装した。PR Cは自作fixtureだけを読むoffline adapter、`metadata_v1` fingerprint、single-target state machine、run/checkpoint生成、in-memory self-validationを実装する。live source adapter、GitHub Actions、scheduler、artifact persistence、Issue通知、price adapter、実target、実eventは実装または承認しない。
 
 ## Design Invariants
 
@@ -221,16 +221,19 @@ notification_error
 | --- | --- | --- | --- |
 | `uninitialized` | first valid observation | `healthy` | runは `initialized`。state消失時には使用不可 |
 | `healthy` | valid comparison, no suspicion | `healthy` | runは `no_change` |
-| `healthy` | metadata change or replacement suspicion | `pending_human_review` | runは `change_detected` |
+| `healthy` | metadata fingerprint change | `pending_human_review` | runは `change_detected` |
+| `healthy` | fingerprint一致かつreplacement suspicion | `degraded` | runは `error/content_ambiguous`。`no_change`禁止 |
 | any active state | transient observation error | `degraded` | bounded retry後も解消しない場合 |
 | `degraded` | later valid no-change observation | `healthy` | error episodeをclose可能 |
 | `degraded` | later change | `pending_human_review` | change notificationを優先 |
 | `degraded` | retry exhausted or stale gap exceeds profile | `stopped` or `degraded` | Human notificationとpolicyに従う |
 | `pending_human_review` | repeated same change | `pending_human_review` | Issueを重複発行しない |
 | `pending_human_review` | later `no_change`, unresolved change remains | `pending_human_review` | 後続runは未解決changeを消去しない |
+| `pending_human_review` | transient observation error | `pending_human_review` | pending pointerとerror healthを直交して保持 |
 | `pending_human_review` | Human resolution recorded | next runで `healthy` candidate | workflowがHuman decisionを捏造しない |
 | any state | `enabled=false` | `disabled` | source accessなし |
 | any active state | previous valid state unavailable | `stopped` | `state_unavailable`、再初期化禁止 |
+| any active state | fatal persistence failure | `stopped` candidate | partial stateをcommitせずPR Dのatomic persistenceで確定 |
 
 ```text
 error != no_change
@@ -255,6 +258,10 @@ change_detected + notification failure
 ```
 
 notification failureによって未確認のchangeを `degraded` へ置き換えない。`degraded` はsource observation failure、state retrieval failure、persistence failure、stale monitoring gap、その他の正常な監視継続能力の低下に使用する。
+
+PR Cのruntimeでは、未解決changeがあるtransient errorは `pending_human_review` と `last_error_code` を同時に保持する。fatal `state_unavailable` はpending pointerを保持したまま `stopped` とする。`state_unavailable` または `persistence_error` がcheckpointのlatest fatal errorである場合、validatorは `target_state=healthy` を拒否する。
+
+実際の `persistence_error` は保存失敗時に発生するため、persistenceを実装しないPR Cは「失敗した書込みがcheckpointをcommitした」とするrecordを生成しない。fatal state分類は `stopped` と確定するが、run、partial bundle、current checkpointの公開規則はPR Dのatomic persistenceで実装する。
 
 Run Nが `change_detected`、notification failureで終わり、Run N+1に追加変更がない場合、Run N+1の `run_result` は `no_change` にできるが、checkpointの `target_state` はHuman resolutionまで `pending_human_review` を維持する。
 
@@ -358,7 +365,7 @@ profileのminimum semantics:
 
 exchange calendar、holiday、event-specific windows、最大許容gapはprofile定義の責務とする。GitHub Actions cronは起動機構でありdomain scheduleの正本ではない。scheduled runは厳密時刻を保証しないため、各runでprofile上のexpected previous observation windowとcheckpointの `last_success_at` を比較する。
 
-stale gapがprofileの最大許容値を超えた場合は `stale_gap_detected=true` とし、`no_change` にしない。通常時、5営業日前、前日、当日の具体的thresholdはPR Bまたは運用レビューでHuman承認するまで未確定とする。重大gapは `degraded`、Human notification、または `stopped` とする。
+stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。通常時、5営業日前、前日、当日の具体的thresholdは運用レビューでHuman承認するまで未確定である。PR Cはscheduleを評価しない。threshold、business calendar、stale gap判定、run/checkpointへの表現はPR Dで実装する。
 
 ## GitHub Actions Contract
 
@@ -438,7 +445,7 @@ source-side corrected marker
 source-side updated timestamp
 ```
 
-indicatorが前回と矛盾する、またはfingerprint一致でも差替え疑いがある場合は `no_change` にせず、`change_detected`、`content_ambiguous`、またはHuman reviewへ送る。indicatorを取得できない場合は `replacement_detection=unavailable` とし、本文同一を断定しない。availabilityの低下自体もrunへ記録する。
+PR Cではindicatorが前回と矛盾する、source側markerがある、またはadapterが差替え疑いを返し、かつfingerprintが一致する場合、`run_result=error`、`error_code=content_ambiguous` とする。既存contractではfingerprint差分のない `change_detected` は不正であるため、この経路を使用する。checkpointはpending changeがなければ `degraded`、既存pending changeがあればpointerを保持して `pending_human_review` とし、いずれもHuman notificationを必要とする。indicatorを取得できない場合は `replacement_detection=unavailable` とし、本文同一を断定しない。
 
 ## Notification Contract
 
@@ -483,7 +490,7 @@ error episodeのdedup key:
 monitor_target_id + error_code + error_episode_identifier
 ```
 
-同一open episodeでは新規Issueを毎run作らず、既存Issueへ追記する。error episode identifierは最初の連続error run ID等から安定生成し、成功runでepisodeをcloseする。Issue close候補はHumanがchangeを解決済みと記録した場合、またはerror後のsuccessful observationとstate回復がcommitされ、未解決Human判断がない場合とする。Human decisionが必要なchange Issueをworkflowが観測成功だけでcloseしない。
+同一open episodeでは新規Issueを毎run作らず、既存Issueへ追記する。error episode identifierは最初の連続error run ID等から安定生成し、成功runでepisodeをcloseする。Issue close候補はHumanがchangeを解決済みと記録した場合、またはerror後のsuccessful observationとstate回復がcommitされ、未解決Human判断がない場合とする。Human decisionが必要なchange Issueをworkflowが観測成功だけでcloseしない。このdedup key生成とIssue lifecycleはPR Cでは未実装で、PR Dの通知adapter責務とする。
 
 ### Notification Failure
 
@@ -497,7 +504,7 @@ source observation、state persistence、notification deliveryを別結果とし
 
 notification failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` または単なる `degraded` と扱わない。未解決changeは後続runが `no_change` でも `pending_human_review` を維持し、対象changeに対するHuman resolution recordが確認された場合だけ解除候補になる。
 
-## Implemented Data Contracts
+## Implemented Data Contracts And Runtime
 
 PR Bでは次の4 schemaを分離する。
 
@@ -512,9 +519,19 @@ monitor_resolution.schema.json
 
 bundle manifestはartifact transportとread-after-writeの実装に依存するためPR Dへ延期する。PR BはCSV上のrun/checkpoint version、previous run、last successful run、fingerprint、resolution lineageを検査する。PR Dでもmanifest validationなしでartifactをcurrent stateへ昇格してはならない。
 
+PR Cでは `src/earnings_research/monitoring/` に次を実装する。
+
+```text
+offline fixture -> SourceObservation -> normalization -> metadata_v1 fingerprint
+-> comparison/state transition -> monitor_run + monitor_checkpoint
+-> validate_monitor_bundle
+```
+
+adapter inputはrepository内の自作HTML/JSON fixtureだけで、network clientを持たない。coreはrunとcheckpointを1つの `MonitorTransitionResult` として返し、全run lineage、Human resolution、current checkpointをin-memory validatorへ通す。実ファイル保存、manifest、read-after-write、atomic publishはPR Dへ延期する。
+
 ## Validator Contract
 
-PR Bのvalidatorは最低限次を検査する。
+PR B/PR C時点のvalidatorは最低限次を検査する。
 
 - unique `monitor_target_id`。
 - `company_id`、`earnings_event_id`、target referenceの存在とscope。
@@ -532,15 +549,22 @@ PR Bのvalidatorは最低限次を検査する。
 - targetごとのcurrent checkpoint一意性。
 - run/checkpointのversion、ID、fingerprint lineage。manifest file set、hash、commit marker、read-after-write resultはPR Dで追加する。
 - persistence error時にcheckpointをadvanceしない。
-- stale gapをschedule profile thresholdに従ってfailまたはwarning化する。
 - terms review未承認、expired、reference欠落時のaccess拒否。
-- notification required/status/dedup/referenceの整合。
+- notification required/status/referenceのrow整合。Issue dedupはPR D。
 - unresolved `change_detected` が存在するcheckpointを `healthy` にしない。
 - `change_detected + notification_error` でも `pending_human_review` を維持する。
 - 後続 `no_change` が未解決changeを自動解消しない。
 - Human resolutionなしの `pending_human_review -> healthy` を拒否する。
 - notification resultとobservation resultを独立に検査し、一方のfailureで他方を書き換えない。
 - raw content、credentials、provider dataをdiagnostic fieldへ保存しない。
+- latest fatal `state_unavailable` / `persistence_error`を持つcheckpointが `healthy` を名乗らない。
+
+次はこのvalidatorで実装済みとは扱わない。
+
+- stale gap thresholdとschedule profile判定: PR D。
+- notification episode dedupとIssue lifecycle: PR D。
+- manifest file set、hash、commit marker、artifact read-after-write: PR D。
+- same-URL replacementのsignal取得: offline signal分類はPR C、live HTTP metadata取得はPR D。
 
 positive fixtureだけでなく、state loss、partial bundle、version skip、duplicate tail、approval bypass、false no-change、notification failureのnegative fixtureを必須とする。
 

@@ -258,6 +258,69 @@ def validate_file(path: Path) -> ValidationReport:
     return ValidationReport(issues)
 
 
+def validate_monitor_bundle(
+    rows_by_table: Dict[str, List[Dict[str, str]]],
+) -> ValidationReport:
+    """Validate an in-memory monitor bundle before persistence.
+
+    External company and event foreign keys remain the responsibility of the
+    full dataset validator. This entry point validates all four monitor
+    contracts and their cross-record lineage without writing temporary files.
+    """
+    specs = load_specs()
+    issues = []
+    missing_tables = MONITOR_TABLES.difference(rows_by_table)
+    for table in sorted(missing_tables):
+        issues.append(ValidationIssue(table, None, None, "missing monitor bundle table"))
+    if missing_tables:
+        return ValidationReport(issues)
+
+    monitor_rows = {table: rows_by_table.get(table, []) for table in MONITOR_TABLES}
+    for table in MONITOR_TABLES:
+        spec = specs[table]
+        rows = monitor_rows[table]
+        for row_number, row in enumerate(rows, start=2):
+            for column in spec.columns:
+                value = _clean(row.get(column.name, ""))
+                if column.required and value == "":
+                    issues.append(ValidationIssue(table, row_number, column.name, "required value is blank"))
+                elif value != "":
+                    issues.extend(_validate_value(table, row_number, column, value))
+        for key_columns in [spec.primary_key] + list(spec.unique):
+            issues.extend(_validate_unique_key(table, rows, key_columns))
+
+    indexes = {}
+    for table in MONITOR_TABLES:
+        spec = specs[table]
+        indexes[(table, tuple(spec.primary_key))] = {
+            tuple(_clean(row.get(column, "")) for column in spec.primary_key)
+            for row in monitor_rows[table]
+        }
+    for table in MONITOR_TABLES:
+        spec = specs[table]
+        for foreign_key in spec.foreign_keys:
+            if foreign_key.ref_table not in MONITOR_TABLES:
+                continue
+            ref_values = indexes.get((foreign_key.ref_table, tuple(foreign_key.ref_columns)), set())
+            for row_number, row in enumerate(monitor_rows[table], start=2):
+                key = tuple(_clean(row.get(column, "")) for column in foreign_key.columns)
+                if foreign_key.nullable and all(value == "" for value in key):
+                    continue
+                if key not in ref_values:
+                    issues.append(
+                        ValidationIssue(
+                            table,
+                            row_number,
+                            ",".join(foreign_key.columns),
+                            "foreign key not found in %s.%s"
+                            % (foreign_key.ref_table, ",".join(foreign_key.ref_columns)),
+                        )
+                    )
+
+    issues.extend(_validate_monitor_constraints(monitor_rows, require_dataset_relations=True))
+    return ValidationReport(issues)
+
+
 def _match_spec_for_file(path: Path, specs: Iterable[TableSpec]) -> TableSpec:
     stem = path.stem
     for spec in specs:
@@ -1742,6 +1805,8 @@ def _validate_monitor_checkpoint_rows(rows: List[Dict[str, str]]) -> List[Valida
             issues.append(ValidationIssue("monitor_checkpoint", row_number, "consecutive_error_count", "last_error_code and positive consecutive_error_count must be present together"))
         if state == "degraded" and not error_code:
             issues.append(ValidationIssue("monitor_checkpoint", row_number, "last_error_code", "degraded checkpoint requires operational error"))
+        if state == "healthy" and error_code in FATAL_MONITOR_ERROR_CODES:
+            issues.append(ValidationIssue("monitor_checkpoint", row_number, "target_state", "fatal monitor error cannot be healthy"))
     return issues
 
 

@@ -1,5 +1,37 @@
 [
   {
+    "id": "monitor_invalid_fatal_error_claims_healthy",
+    "operations": [
+      {
+        "action": "update",
+        "table": "monitor_run",
+        "selector": {"monitor_run_id": "MRUN-MINATO-003"},
+        "values": {
+          "run_result": "error",
+          "observation_status": "failed",
+          "error_code": "state_unavailable",
+          "error_detail": "Previous state unavailable",
+          "fingerprint_after": "",
+          "notification_required": "true",
+          "notification_status": "pending"
+        }
+      },
+      {
+        "action": "update",
+        "table": "monitor_checkpoint",
+        "selector": {"monitor_target_id": "MON-MINATO-DISCLOSURE"},
+        "values": {
+          "target_state": "healthy",
+          "last_success_at": "2026-08-02T09:10:10+09:00",
+          "last_successful_run_id": "MRUN-MINATO-002",
+          "last_error_code": "state_unavailable",
+          "consecutive_error_count": "1"
+        }
+      }
+    ],
+    "expected_issue": "fatal monitor error cannot be healthy"
+  },
+  {
     "id": "monitor_invalid_missing_activation",
     "operations": [
       {
