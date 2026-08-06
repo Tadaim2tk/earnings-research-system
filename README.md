@@ -16,7 +16,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Validation CLI for required columns, types, keys, event semantics, temporal constraints, scoring versions, evidence lineage, KPI references, NO_TRADE handling, and basic future-information contamination checks
 - Pytest coverage for the initial validation contract
 - Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
-- Approval-gated Level 2 monitoring contracts, validator, and a network-free single-company core that converts fictional HTML/metadata fixtures into canonical fingerprints and validated run/checkpoint transitions; scheduled monitoring and live source access are not implemented
+- Approval-gated Level 2 monitor contracts, validator, network-free core, and GitHub Actions pilot infrastructure for validated temporary state artifacts, stale-gap detection, and Issue notification
 
 ## Prospective Operations
 
@@ -54,7 +54,11 @@ python -m earnings_research.cli validate-file data/samples/pre_earnings_baseline
 python -m earnings_research.cli show-schema pre_earnings_baseline
 ```
 
-The offline monitoring core is a library API under `earnings_research.monitoring`. It intentionally has no live HTTP client or operational target registry. Generated transitions are checked in memory with the same monitor contract validator before a caller may persist them.
+The monitoring core remains network-free for source observations. PR D adds a read-only Human-owned registry, operational CLI, GitHub Actions artifact transport, strict manifest verification, stale-gap detection, and Issue notification. `data/config/monitor_targets.csv` is intentionally empty, so no real company is activated and scheduled runs have no live source target.
+
+The fictional offline workflow can be exercised with `workflow_dispatch`. Operational entry points are available under `python -m earnings_research.cli monitor-*`; they never write the registry or push repository contents. CI is fixed to Python 3.11.9. State artifacts use 14-day retention and are temporary pilot persistence, not permanent machine truth. Missing retained state fails closed outside an exact Human-approved initialization.
+
+Live IR access, ICECO activation, permanent storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
 
 ## Sample Data
 

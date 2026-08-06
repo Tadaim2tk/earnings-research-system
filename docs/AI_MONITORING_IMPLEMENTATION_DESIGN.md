@@ -12,7 +12,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
   = machine state、状態遷移、永続化、実行・通知契約の設計
 ```
 
-[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidatorを実装した。PR Cは自作fixtureだけを読むoffline adapter、`metadata_v1` fingerprint、single-target state machine、run/checkpoint生成、in-memory self-validationを実装する。live source adapter、GitHub Actions、scheduler、artifact persistence、Issue通知、price adapter、実target、実eventは実装または承認しない。
+[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidator、PR Cでnetwork-freeなoffline runtimeを実装した。PR DはGitHub Actions、temporary artifact persistence、stale gap、Issue通知を実装する。ただしproduction registryは空であり、自動実行対象は存在しない。live IR adapter、ICECO activation、price adapter、実eventは未実装・未承認のままとする。
 
 ## Design Invariants
 
@@ -213,7 +213,7 @@ persistence_error
 notification_error
 ```
 
-実装時に追加する場合もenum、validator、docs、negative testsを同じPRで更新する。notification failureは `notification_error_code=notification_error` で表し、成功したsource observationの `run_result` を `error` へ上書きしない。
+実装時に追加する場合もenum、validator、docs、negative testsを同じPRで更新する。PR Dはstateを先にcommitするため、notification failureを独立receiptの `status=failed` とerror分類で表し、commit済みrunを事後更新しない。成功したsource observationの `run_result` を `error` へ上書きしない。
 
 ## State Transitions
 
@@ -253,8 +253,8 @@ change_detected + notification success
 
 change_detected + notification failure
 -> pending_human_review
-   + notification_status=failed
-   + notification_error_code=notification_error
+   + committed run notification_status=pending
+   + notification receipt status=failed
 ```
 
 notification failureによって未確認のchangeを `degraded` へ置き換えない。`degraded` はsource observation failure、state retrieval failure、persistence failure、stale monitoring gap、その他の正常な監視継続能力の低下に使用する。
@@ -273,45 +273,49 @@ Run Nが `change_detected`、notification failureで終わり、Run N+1に追加
 
 ```text
 monitor_state_bundle/
-  checkpoint_before.json
-  monitor_run.json
-  checkpoint_after.json
+  target.json
+  checkpoint.json
+  run.json
+  run_history.json
+  resolution_history.json
   manifest.json
 ```
 
-初回だけ `checkpoint_before.json` は明示的なJSON `null` またはschemaで定義したinitial markerとする。ファイル欠落で初回を表現しない。
+単一checkpointだけでなく、validatorがlineageと未解決changeを再検証できるrun/resolution履歴を同じbundleへ保存する。上記6ファイル以外の欠落・追加を許可しない。
 
 `manifest.json` は最後に生成し、最低限次を持つ。
 
 ```text
-schema_version
-bundle_format_version
+schema_version = monitor_state_bundle_v1
 monitor_target_id
 monitor_run_id
 created_at
-checkpoint_version_before
-checkpoint_version_after
+checkpoint_version
 previous_run_id
-file_hashes
-commit_state
+target_sha256
+checkpoint_sha256
+run_sha256
+run_history_sha256
+resolution_history_sha256
+bundle_status = committed
 ```
 
-`file_hashes` は各fileのSHA-256を持つ。`commit_state=committed` は全fileのschema validation、cross-file validation、hash照合が成功した場合だけ設定する。manifest欠落、unknown version、hash mismatch、ID不一致、version不連続、file欠落をpartial/uncommitted bundleとして拒否する。
+manifestはstrict Pydantic modelでmachine validationし、unknown fieldを拒否する。`bundle_status=committed` は全fileのcontract validation、cross-file validation、hash照合が成功した場合だけ設定する。manifest欠落、unknown version、hash mismatch、ID不一致、version不連続、file欠落をpartial/uncommitted bundleとして拒否する。manifest延期はPR Dで `CLOSED` とする。
 
 ### Commit Rule
 
 commit済みstateとは、次をすべて満たす公開済みbundleである。
 
 1. previous committed bundleを取得・検証できる。初回はHuman-approved activationによりprevious state不存在を証明できる。
-2. `checkpoint_before` がprevious bundleの `checkpoint_after` と一致する。
-3. `monitor_run` とbefore/after checkpointのtarget ID、run ID、version、fingerprint lineageが一致する。
-4. after versionがbefore version + 1である。
-5. manifestが最後に生成され、全hashと `commit_state=committed` が有効である。
-6. bundle全体が1つのartifactとしてupload/finalizeされ、再取得して検証できる。
+2. previous bundleのcheckpoint、run history、resolution historyをruntime入力にする。
+3. generated run/checkpointと全履歴を `validate_monitor_bundle` へ通し、`validation_report.ok=true` を保存前hard gateにする。
+4. staging directoryへ全fileを書き、manifestを最後に生成してhashを照合する。
+5. localでbundle全体を再検証し、directory renameで公開する。
+6. bundle全体を1つのimmutable artifactとしてuploadし、再取得してmanifest、hash、ID、version、lineageを再検証する。
 
 run保存失敗ならcheckpointを進めない。checkpoint保存失敗ならrunを成功扱いにしない。upload/finalizeまたはread-after-write validation失敗は `persistence_error` とし、partial bundleをcurrent stateへ昇格しない。
 
-通知はbundle commit前に試行し、その結果をrunへ記録する。通知成功後にpersistenceが失敗した場合、次runはIssue dedup keyで重複を抑制する。通知失敗でもsource observationは消さず、`notification_status=failed` と `notification_error_code=notification_error` を記録する。重要なchangeが存在する場合は `target_state=pending_human_review` を維持し、changeがなく監視継続能力だけが低下した場合に `degraded` を使用する。
+通知はartifactのuploadと再取得検証が成功した後に別jobで実行する。通知失敗でもcommit済みobservationとcheckpointを変更せず、bounded retryの最終結果を独立notification receipt artifactへ保存する。重要なchangeは `target_state=pending_human_review` とrun上の `notification_status=pending` を維持する。
 
 `last_successful_run_id` は最後にcommit済みでsource observationが成功したrunを指す。復旧時はlatestと称するartifact名だけを信用せず、lineage、version、manifest hashを検証してcurrent stateを決定する。
 
@@ -332,9 +336,9 @@ previous valid stateを取得不能
 -> Human notification
 ```
 
-state取得不能を初回runとして再初期化してはならない。artifact retention日数はdomain contractへ固定せず、workflow側で設定・監視する。pilot中はretention残存期間とlast successful artifactの取得可能性を確認し、pilot終了前にobject storageまたはdatabase等の恒久storageを別ADRで再設計する。
+state取得不能を初回runとして再初期化してはならない。例外はregistryのHuman-owned activation fieldsが、run IDとgeneration 1を積極的に証明する初回だけである。artifact retentionは14日とするが、長期machine truthではない。retention等でstateが消失した場合は `state_unavailable` としてfail closedし、pilot終了前にobject storageまたはdatabase等の恒久storageを別ADRで再設計する。
 
-artifact discovery、retention、run削除、permissionに関するGitHub API上の制約はPR D実装前に実測する。取得できるはずという仮定だけでactivationしない。
+artifact名は `monitor_target_id + checkpoint_version + monitor_run_id` で一意化する。GitHub APIから非expiredかつ `head_branch=main` の候補を列挙し、最大versionが一意な場合だけdownloadする。manifestのtarget/version/run identityがartifact名と一致しなければ拒否する。
 
 ## Registry Format
 
@@ -343,7 +347,7 @@ artifact discovery、retention、run削除、permissionに関するGitHub API上
 | CSV | 現行ERSのrow-oriented data contract、diff、Human review、既存validator patternと整合 | null/boolean型、escaping、将来のnested schedule表現に注意 |
 | JSON | type、null、将来のnested structureを表現しやすい | Human diffが冗長になり、現行CSV data contractと別運用になる |
 
-第1号はflatなfieldだけで足りるため、`data/config/monitor_targets.csv` を推奨する。`schedule_profile` は別の承認済みprofile定義を参照し、cronやnested設定をrowへ埋め込まない。PR Bで `monitor_target.schema.json` とCSV validatorを追加する候補とする。
+第1号はflatなfieldだけで足りるため、`data/config/monitor_targets.csv` を採用する。`schedule_profile` は別の承認済みprofile定義を参照し、cronやnested設定をrowへ埋め込まない。production registryはheader-onlyで、実targetを含まない。manual dispatchだけがtest fixture registryのfictional targetを使用できる。
 
 registryはmain上のHuman-reviewed configurationを正本とする。GitHub Actionsは `contents: read` で読むだけとし、mainへのpush、registry自動修正、approval fieldの補完を禁止する。runtime checkpoint/runはregistry CSVへ書き込まない。
 
@@ -365,11 +369,11 @@ profileのminimum semantics:
 
 exchange calendar、holiday、event-specific windows、最大許容gapはprofile定義の責務とする。GitHub Actions cronは起動機構でありdomain scheduleの正本ではない。scheduled runは厳密時刻を保証しないため、各runでprofile上のexpected previous observation windowとcheckpointの `last_success_at` を比較する。
 
-stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。通常時、5営業日前、前日、当日の具体的thresholdは運用レビューでHuman承認するまで未確定である。PR Cはscheduleを評価しない。threshold、business calendar、stale gap判定、run/checkpointへの表現はPR Dで実装する。
+stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。PR Dでは通常時36時間、event 5営業日前から前日24時間、event当日12時間を上限とする。休日calendarを増設せず平日だけを数えるpilot最小実装とし、event dateが必要なのに不明なら最も厳しい12時間を使う。閾値超過は `ObservationFailure(state_unavailable)`、`target_state=stopped`、Human通知へ進む。
 
 ## GitHub Actions Contract
 
-将来workflowのminimum permissions:
+workflowのminimum permissions:
 
 ```yaml
 permissions:
@@ -378,9 +382,11 @@ permissions:
 
 Issue通知を行うjobだけに `issues: write` を付与する。`contents: write`、mainへのpush、registry変更権限は付与しない。
 
+artifact取得jobだけに `actions: read` を付与する。`actions: write` と `pull-requests: write` は使用しない。新しいsource credentialは導入せず、GitHub APIはjob-scoped `GITHUB_TOKEN` だけを環境変数から受け取る。tokenをURL、manifest、diagnostic、Issue本文へ含めない。
+
 workflowは次を満たす。
 
-1. `workflow_dispatch` とscheduled executionを持つ。
+1. `workflow_dispatch` と6時間ごとのscheduled executionを持ち、毎時0分を避ける。cronはmachine truthにしない。
 2. target/run単位のconcurrencyとidempotency keyでduplicate observationを抑制する。
 3. registryをvalidateし、terms、enabled、active period、Human approval gateをsource access前に検査する。
 4. previous committed stateを取得・検証する。取得不能ならstopし、初期化しない。
@@ -390,6 +396,8 @@ workflowは次を満たす。
 8. run/checkpoint bundleをcross-validateし、artifactとしてpublish後にread-after-write検証する。
 9. change/errorだけIssue通知し、`no_change` はActions summaryに留める。
 10. source result、persistence result、notification resultを別々に記録する。
+11. Python `3.11.9` を固定し、project最低versionと一致させる。
+12. target単位の `concurrency` を使い、state保存途中をcancelしないため `cancel-in-progress=false` とする。
 
 workflow run欠落自体はそのrunから記録できないため、次回runのstale gap検査と、別のwatchdogまたはHuman dashboardで検知する。stale watchdogが同じmonitor stateへ書き込む場合も、同じatomic bundle契約とconcurrencyを使用する。
 
@@ -481,7 +489,7 @@ requires_human_decision
 change episodeのdedup key:
 
 ```text
-monitor_target_id + fingerprint_after
+monitor_target_id + first unresolved change run ID
 ```
 
 error episodeのdedup key:
@@ -490,19 +498,19 @@ error episodeのdedup key:
 monitor_target_id + error_code + error_episode_identifier
 ```
 
-同一open episodeでは新規Issueを毎run作らず、既存Issueへ追記する。error episode identifierは最初の連続error run ID等から安定生成し、成功runでepisodeをcloseする。Issue close候補はHumanがchangeを解決済みと記録した場合、またはerror後のsuccessful observationとstate回復がcommitされ、未解決Human判断がない場合とする。Human decisionが必要なchange Issueをworkflowが観測成功だけでcloseしない。このdedup key生成とIssue lifecycleはPR Cでは未実装で、PR Dの通知adapter責務とする。
+同一open episodeでは新規Issueを毎run作らず、既存Issueへcommentを追記する。pending中の追加changeはappend-only run historyへ残し、checkpointはlatest unresolved changeを指す。dedup keyはfirst unresolved changeを使うため、Humanは同じIssue内で最初と追加changeを区別できる。error episode identifierは最初の連続同一error run IDから生成する。PR DはIssueを自動closeしない。change IssueはHuman resolutionまでopen、error Issueはsource回復、state正常化、unresolved Human decisionなしを満たした場合にclose候補とする。
 
 ### Notification Failure
 
 source observation、state persistence、notification deliveryを別結果として扱う。
 
 - source observation成功、state persistence成功、notification成功: observation resultを維持する。
-- source observationが `change_detected`、state persistence成功、notification失敗: `run_result=change_detected` と `target_state=pending_human_review` を維持し、notification failureを別fieldへ記録する。代替notificationまたはwatchdogを要求する。
+- source observationが `change_detected`、state persistence成功、notification失敗: `run_result=change_detected` と `target_state=pending_human_review` を維持し、notification failureを独立receiptへ記録する。代替notificationまたはwatchdogを要求する。
 - source observationが成功し重要changeなし、state persistence成功、notification失敗: observation resultを維持し、監視継続能力への影響がある場合はtargetを `degraded` とする。
 - source observation成功、notification成功、state persistence失敗: bundleはcommit不可。`persistence_error` とし、次runでIssue dedup keyを使う。
 - source observation失敗: notification成否にかかわらず `no_change` または `change_detected` にしない。
 
-notification failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` または単なる `degraded` と扱わない。未解決changeは後続runが `no_change` でも `pending_human_review` を維持し、対象changeに対するHuman resolution recordが確認された場合だけ解除候補になる。
+notificationは最大3 attempts、backoff 0/1/2秒の固定bounded retryとする。failureが観測metadataを消さない一方、Humanへ届いていないchangeを `healthy` または単なる `degraded` と扱わない。最終failureはreceipt artifactとworkflow failureで別経路から検知可能にする。未解決changeは後続runが `no_change` でも `pending_human_review` を維持し、対象changeに対するHuman resolution recordが確認された場合だけ解除候補になる。
 
 ## Implemented Data Contracts And Runtime
 
@@ -517,7 +525,7 @@ monitor_resolution.schema.json
 
 統合しない理由は、`monitor_target` がHuman-owned Git configuration、`monitor_checkpoint` がmutable current state、`monitor_run` がappend-only machine audit record、`monitor_resolution` がappend-only Human decisionだからである。
 
-bundle manifestはartifact transportとread-after-writeの実装に依存するためPR Dへ延期する。PR BはCSV上のrun/checkpoint version、previous run、last successful run、fingerprint、resolution lineageを検査する。PR Dでもmanifest validationなしでartifactをcurrent stateへ昇格してはならない。
+bundle manifestはPR Dでstrict Python modelとして実装済みである。CSV上のrun/checkpoint version、previous run、last successful run、fingerprint、resolution lineageに加え、artifact file set、SHA-256、identity、read-after-writeを検査する。manifest validationなしでartifactをcurrent stateへ昇格しない。
 
 PR Cでは `src/earnings_research/monitoring/` に次を実装する。
 
@@ -527,11 +535,22 @@ offline fixture -> SourceObservation -> normalization -> metadata_v1 fingerprint
 -> validate_monitor_bundle
 ```
 
-adapter inputはrepository内の自作HTML/JSON fixtureだけで、network clientを持たない。coreはrunとcheckpointを1つの `MonitorTransitionResult` として返し、全run lineage、Human resolution、current checkpointをin-memory validatorへ通す。実ファイル保存、manifest、read-after-write、atomic publishはPR Dへ延期する。
+adapter inputはrepository内の自作HTML/JSON fixtureだけで、live network clientを持たない。coreはrunとcheckpointを1つの `MonitorTransitionResult` として返し、全run lineage、Human resolution、current checkpointをin-memory validatorへ通す。PR Dはtestableなoperational CLI、registry reader、stale評価、bundle persistence、GitHub artifact/Issue clientをcoreの外側へ追加する。GitHub clientはActionsのstate transportと通知だけに限定し、IR sourceへ接続しない。
+
+将来live adapterのfailure contractは次に固定する。これらを `no_change` へ変換してはならない。
+
+```text
+HTML/API parse failure -> ObservationFailure(parse_error)
+timestamp parse failure -> ObservationFailure(timestamp_parse_error)
+authentication failure -> ObservationFailure(authentication_required)
+rate limit -> ObservationFailure(rate_limited)
+```
+
+`source_url` にusernameまたはpasswordのuserinfoがあるtargetはregistry validationで拒否する。credentialがlog、artifact、Issueへ流出する入口を閉じるためである。
 
 ## Validator Contract
 
-PR B/PR C時点のvalidatorは最低限次を検査する。
+PR BからPR Dのvalidator/persistence boundaryは最低限次を検査する。
 
 - unique `monitor_target_id`。
 - `company_id`、`earnings_event_id`、target referenceの存在とscope。
@@ -547,10 +566,10 @@ PR B/PR C時点のvalidatorは最低限次を検査する。
 - checkpoint versionのtarget単位単調増加とexact +1。
 - before/run/after ID、version、fingerprint、previous run lineage。
 - targetごとのcurrent checkpoint一意性。
-- run/checkpointのversion、ID、fingerprint lineage。manifest file set、hash、commit marker、read-after-write resultはPR Dで追加する。
+- run/checkpointのversion、ID、fingerprint lineage、manifest file set、hash、commit marker、read-after-write result。
 - persistence error時にcheckpointをadvanceしない。
 - terms review未承認、expired、reference欠落時のaccess拒否。
-- notification required/status/referenceのrow整合。Issue dedupはPR D。
+- notification required/status/referenceのrow整合とIssue episode dedup。
 - unresolved `change_detected` が存在するcheckpointを `healthy` にしない。
 - `change_detected + notification_error` でも `pending_human_review` を維持する。
 - 後続 `no_change` が未解決changeを自動解消しない。
@@ -559,12 +578,11 @@ PR B/PR C時点のvalidatorは最低限次を検査する。
 - raw content、credentials、provider dataをdiagnostic fieldへ保存しない。
 - latest fatal `state_unavailable` / `persistence_error`を持つcheckpointが `healthy` を名乗らない。
 
-次はこのvalidatorで実装済みとは扱わない。
+次は実装済みとは扱わない。
 
-- stale gap thresholdとschedule profile判定: PR D。
-- notification episode dedupとIssue lifecycle: PR D。
-- manifest file set、hash、commit marker、artifact read-after-write: PR D。
-- same-URL replacementのsignal取得: offline signal分類はPR C、live HTTP metadata取得はPR D。
+- live sourceからのsame-URL replacement signal取得。
+- Issueの自動closeとbackup notification。
+- permanent state storageとcross-artifact retention保証。
 
 positive fixtureだけでなく、state loss、partial bundle、version skip、duplicate tail、approval bypass、false no-change、notification failureのnegative fixtureを必須とする。
 
@@ -593,7 +611,7 @@ PR Bでは最低限次のfixtureを含める。
 1. PR A: 本書と最小限のreferenceだけを追加するdocumentation-only PR。
 2. PR B: monitor target/checkpoint/run/resolution schemas、validator、positive/negative fixtures。manifestはPR Dへ延期。
 3. PR C: single-company monitor、offline fixture/dry-run tests。network activationなし。
-4. PR D: GitHub Actions、artifact temporary persistence、Issue notification。artifact APIとretentionを実測する。
+4. PR D: GitHub Actions、artifact temporary persistence、stale gap、Issue notification、operational CLI。live IR accessなし。
 5. PR E: Human terms承認後のICECO target activation。実event採用は別のHuman gateを満たす。
 
 価格取得、price adapter、J-Quants採用はこの系列から分離する。
@@ -606,7 +624,7 @@ PR Bでは最低限次のfixtureを含める。
 - terms未承認、期限切れ、変更疑い。
 - previous committed state取得不能またはvalidation失敗。
 - current checkpoint 0件または複数件。ただしHuman-approved初回activationは別。
-- run/checkpoint/manifestの部分保存、hash mismatch、ID不一致、version不連続。
+- run/checkpoint/manifestの部分保存、unexpected file、hash mismatch、ID不一致、version不連続。
 - fingerprint version unknown、timestamp timezone欠落、canonical input ambiguity。
 - access/parse/response formatの失敗。
 - replacement suspicionを解消できない。
@@ -624,11 +642,12 @@ PR Bでは最低限次のfixtureを含める。
 7. same-URL replacementの補助metadata不足を `no_change` にしないか。
 8. stale gap、retry、Issue dedupが無限実行または通知洪水を起こさないか。
 
-## Open Implementation Decisions
+## Remaining Implementation Decisions
 
-- artifact APIでprevious committed bundleを検索・再取得する具体的制約、retention監視、permission。
-- 通常時、5営業日前、前日、当日の最大許容stale gap。
-- PR Dで追加するmanifest schemaのfield、artifact read-after-write手順、恒久storage migration contract。
+- live IR adapterのsource別parse contractとterms再確認。
+- ICECO targetのHuman activation、event identity、reviewer、monitoring dates。
+- 14日retentionに依存しないpermanent storageとmigration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。
+- 日本の祝日を含むexchange calendarがpilot後に必要か。
 
-これらは実装前に閉じる。未決の値をworkflowへ埋め込んで運用開始しない。
+PR Dはfictional offline dispatchまでを実装し、production registryは空のままにする。上記を未決のまま実targetをactivationしない。

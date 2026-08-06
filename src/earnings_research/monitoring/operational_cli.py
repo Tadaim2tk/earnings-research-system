@@ -1,0 +1,160 @@
+"""Operational CLI handlers kept separate from argparse wiring."""
+
+import json
+import os
+from datetime import date, datetime
+from pathlib import Path
+from typing import Optional
+
+from earnings_research.monitoring.github_api import GitHubAPIClient
+from earnings_research.monitoring.models import OfflineSourceInput
+from earnings_research.monitoring.notifications import (
+    NotificationReceipt,
+    build_issue_plan,
+    deliver_issue_notification,
+)
+from earnings_research.monitoring.operations import execute_offline_run
+from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
+from earnings_research.monitoring.registry import active_target_plan, find_target, load_registry
+
+
+def plan_registry(registry_path: Path, target_id: Optional[str], fixture_name: Optional[str]) -> int:
+    rows = load_registry(registry_path)
+    targets = active_target_plan(rows)
+    if target_id:
+        targets = [target for target in targets if target.get("monitor_target_id") == target_id]
+        if len(targets) != 1:
+            raise ValueError("requested active monitor target was not found")
+    plan = [
+        {
+            "monitor_target_id": target["monitor_target_id"],
+            "registry": str(registry_path),
+            "fixture_name": fixture_name or "",
+        }
+        for target in targets
+    ]
+    print(json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
+def fetch_state(repository: str, target_id: str, output_dir: Path) -> int:
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise ValueError("GITHUB_TOKEN is required for artifact lookup")
+    bundle = GitHubAPIClient(repository=repository, token=token).fetch_previous_bundle(
+        monitor_target_id=target_id,
+        output_dir=output_dir,
+    )
+    print(json.dumps({"state": "missing" if bundle is None else "verified"}, separators=(",", ":")))
+    return 0
+
+
+def run_offline(
+    *,
+    registry_path: Path,
+    target_id: str,
+    fixture_dir: Path,
+    fixture_name: str,
+    previous_dir: Optional[Path],
+    output_dir: Path,
+    run_id: str,
+    started_at: str,
+    finished_at: str,
+    event_date_value: Optional[str],
+) -> int:
+    target = find_target(load_registry(registry_path), target_id)
+    previous = None
+    if previous_dir is not None and (previous_dir / "manifest.json").is_file():
+        previous = verify_bundle(previous_dir, expected_target_id=target_id)
+    started = _aware_datetime(started_at, "started_at")
+    finished = _aware_datetime(finished_at, "finished_at")
+    event_date = date.fromisoformat(event_date_value) if event_date_value else None
+    html_path = fixture_dir / (fixture_name + ".html")
+    metadata_path = fixture_dir / (fixture_name + ".json")
+    bundle = execute_offline_run(
+        target=target,
+        source_input=OfflineSourceInput(
+            html_path=html_path if html_path.is_file() else None,
+            metadata_path=metadata_path,
+            observed_at=started,
+        ),
+        previous_bundle=previous,
+        output_dir=output_dir,
+        run_id=run_id,
+        started_at=started,
+        finished_at=finished,
+        event_date=event_date,
+    )
+    print(
+        json.dumps(
+            {
+                "artifact_name": artifact_name(bundle.manifest),
+                "run_result": bundle.latest_run["run_result"],
+                "target_state": bundle.checkpoint["target_state"],
+                "checkpoint_version": bundle.manifest.checkpoint_version,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+def verify_state(bundle_dir: Path) -> int:
+    bundle = verify_uploaded_bundle(bundle_dir)
+    print(
+        json.dumps(
+            {
+                "artifact_name": artifact_name(bundle.manifest),
+                "run_result": bundle.latest_run["run_result"],
+                "target_state": bundle.checkpoint["target_state"],
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+def notify_state(
+    *,
+    bundle_dir: Path,
+    repository: str,
+    receipt_path: Path,
+    recorded_at: str,
+) -> int:
+    bundle = verify_bundle(bundle_dir)
+    timestamp = _aware_datetime(recorded_at, "recorded_at")
+    plan = build_issue_plan(bundle)
+    if plan is None:
+        receipt = NotificationReceipt(
+            bundle.manifest.monitor_target_id,
+            bundle.manifest.monitor_run_id,
+            "",
+            "not_required",
+            0,
+            None,
+            None,
+            None,
+            timestamp.isoformat(),
+        )
+    else:
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if not token:
+            raise ValueError("GITHUB_TOKEN is required for Issue notification")
+        receipt = deliver_issue_notification(
+            client=GitHubAPIClient(repository=repository, token=token),
+            plan=plan,
+            target_id=bundle.manifest.monitor_target_id,
+            run_id=bundle.manifest.monitor_run_id,
+            recorded_at=timestamp,
+        )
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write(receipt_path)
+    print(json.dumps({"notification_status": receipt.status}, separators=(",", ":")))
+    return 1 if receipt.status == "failed" else 0
+
+
+def _aware_datetime(value: str, name: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("%s must be timezone-aware" % name)
+    return parsed
