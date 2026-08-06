@@ -5,6 +5,13 @@ import json
 import sys
 from pathlib import Path
 
+from earnings_research.monitoring.operational_cli import (
+    fetch_state,
+    notify_state,
+    plan_registry,
+    run_offline,
+    verify_state,
+)
 from earnings_research.validation.validator import load_spec, validate_dataset, validate_file
 
 
@@ -21,6 +28,37 @@ def main(argv=None) -> int:
 
     schema_parser = subparsers.add_parser("show-schema", help="Print one schema as JSON.")
     schema_parser.add_argument("table")
+
+    plan_parser = subparsers.add_parser("monitor-plan", help="Plan active targets from a read-only registry.")
+    plan_parser.add_argument("registry", type=Path)
+    plan_parser.add_argument("--target-id")
+    plan_parser.add_argument("--fixture-name")
+
+    fetch_parser = subparsers.add_parser("monitor-fetch-state", help="Fetch and verify prior GitHub artifact state.")
+    fetch_parser.add_argument("--repository", required=True)
+    fetch_parser.add_argument("--target-id", required=True)
+    fetch_parser.add_argument("--output", required=True, type=Path)
+
+    run_parser = subparsers.add_parser("monitor-run", help="Run the offline-compatible operational monitor.")
+    run_parser.add_argument("--registry", required=True, type=Path)
+    run_parser.add_argument("--target-id", required=True)
+    run_parser.add_argument("--fixture-dir", required=True, type=Path)
+    run_parser.add_argument("--fixture-name", required=True)
+    run_parser.add_argument("--previous-dir", type=Path)
+    run_parser.add_argument("--output", required=True, type=Path)
+    run_parser.add_argument("--run-id", required=True)
+    run_parser.add_argument("--started-at", required=True)
+    run_parser.add_argument("--finished-at", required=True)
+    run_parser.add_argument("--event-date")
+
+    verify_parser = subparsers.add_parser("monitor-verify-bundle", help="Verify one committed monitor bundle.")
+    verify_parser.add_argument("path", type=Path)
+
+    notify_parser = subparsers.add_parser("monitor-notify", help="Send one deduplicated Issue notification.")
+    notify_parser.add_argument("path", type=Path)
+    notify_parser.add_argument("--repository", required=True)
+    notify_parser.add_argument("--receipt", required=True, type=Path)
+    notify_parser.add_argument("--recorded-at", required=True)
 
     args = parser.parse_args(argv)
 
@@ -39,6 +77,37 @@ def main(argv=None) -> int:
         spec = load_spec(args.table)
         print(json.dumps(spec.model_dump(), ensure_ascii=False, indent=2))
         return 0
+    try:
+        if args.command == "monitor-plan":
+            return plan_registry(args.registry, args.target_id, args.fixture_name)
+        if args.command == "monitor-fetch-state":
+            return fetch_state(args.repository, args.target_id, args.output)
+        if args.command == "monitor-run":
+            return run_offline(
+                registry_path=args.registry,
+                target_id=args.target_id,
+                fixture_dir=args.fixture_dir,
+                fixture_name=args.fixture_name,
+                previous_dir=args.previous_dir,
+                output_dir=args.output,
+                run_id=args.run_id,
+                started_at=args.started_at,
+                finished_at=args.finished_at,
+                event_date_value=args.event_date,
+            )
+        if args.command == "monitor-verify-bundle":
+            return verify_state(args.path)
+        if args.command == "monitor-notify":
+            return notify_state(
+                bundle_dir=args.path,
+                repository=args.repository,
+                receipt_path=args.receipt,
+                recorded_at=args.recorded_at,
+            )
+    except (OSError, ValueError, RuntimeError) as exc:
+        print("Monitor operation failed:", file=sys.stderr)
+        print("- %s" % exc, file=sys.stderr)
+        return 1
     parser.error("unknown command")
     return 2
 

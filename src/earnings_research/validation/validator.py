@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import urlsplit
 
 from earnings_research.validation.spec import ColumnSpec, TableSpec
 
@@ -318,6 +319,22 @@ def validate_monitor_bundle(
                     )
 
     issues.extend(_validate_monitor_constraints(monitor_rows, require_dataset_relations=True))
+    return ValidationReport(issues)
+
+
+def validate_monitor_registry(rows: List[Dict[str, str]]) -> ValidationReport:
+    """Validate Human-owned target rows without requiring runtime state files."""
+    spec = load_spec("monitor_target")
+    issues = []
+    for row_number, row in enumerate(rows, start=2):
+        for column in spec.columns:
+            value = _clean(row.get(column.name, ""))
+            if column.required and value == "":
+                issues.append(ValidationIssue(spec.table, row_number, column.name, "required value is blank"))
+            elif value != "":
+                issues.extend(_validate_value(spec.table, row_number, column, value))
+    issues.extend(_validate_unique_key(spec.table, rows, spec.primary_key))
+    issues.extend(_validate_monitor_target_rows(rows))
     return ValidationReport(issues)
 
 
@@ -1725,6 +1742,10 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
             issues.append(ValidationIssue("monitor_target", row_number, "timezone", "unsupported monitoring timezone"))
         if not _clean(row.get("source_url", "")).startswith("https://"):
             issues.append(ValidationIssue("monitor_target", row_number, "source_url", "monitor source_url must use https"))
+        else:
+            parsed_url = urlsplit(_clean(row.get("source_url", "")))
+            if parsed_url.username is not None or parsed_url.password is not None:
+                issues.append(ValidationIssue("monitor_target", row_number, "source_url", "monitor source_url must not contain userinfo"))
         if _clean(row.get("source_category", "")) == "event_document" and not _clean(row.get("earnings_event_id", "")):
             issues.append(ValidationIssue("monitor_target", row_number, "earnings_event_id", "event_document target requires earnings_event_id"))
 
@@ -2097,8 +2118,8 @@ def _validate_monitor_dataset_relations(rows_by_table: Dict[str, List[Dict[str, 
             for row in change_runs
             if _clean(row.get("monitor_run_id", "")) not in effective_resolution_by_source
         ]
-        if len(unresolved_change_ids) > 1:
-            issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "pending_change_run_id", "multiple unresolved change runs cannot be represented by one current checkpoint"))
+        # The append-only run history is the complete pending set. The current
+        # checkpoint points to the newest unresolved change for Human routing.
         pending_change_id = unresolved_change_ids[-1] if unresolved_change_ids else ""
         checkpoint_pending_id = _clean(checkpoint.get("pending_change_run_id", ""))
         checkpoint_state = _clean(checkpoint.get("target_state", ""))

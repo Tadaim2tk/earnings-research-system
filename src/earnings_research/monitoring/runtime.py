@@ -55,6 +55,7 @@ class MonitorRuntime:
         previous = dict(previous_checkpoint) if previous_checkpoint is not None else None
         runs = [dict(row) for row in prior_runs]
         resolution_rows = [dict(row) for row in resolutions]
+        self._validate_resolution_times(runs, resolution_rows, started_at)
         if previous is None:
             self._require_initial_activation(target, runs, run_id, started_at)
         elif not runs:
@@ -62,16 +63,18 @@ class MonitorRuntime:
         elif previous.get("monitor_target_id") != target.get("monitor_target_id"):
             raise MonitorTransitionError("checkpoint and target IDs must match")
 
-        pending_change_id = "" if previous is None else previous.get("pending_change_run_id", "")
+        previous_pending_id = "" if previous is None else previous.get("pending_change_run_id", "")
         applied_resolution = self._effective_resolution(
             target_id=target.get("monitor_target_id", ""),
-            pending_change_id=pending_change_id,
+            pending_change_id=previous_pending_id,
             prior_runs=runs,
             resolutions=resolution_rows,
             transition_started_at=started_at,
         )
-        if applied_resolution is not None:
-            pending_change_id = ""
+        unresolved_change_ids = _unresolved_change_ids(runs, resolution_rows)
+        pending_change_id = unresolved_change_ids[-1] if unresolved_change_ids else ""
+        if previous_pending_id and applied_resolution is None and previous_pending_id != pending_change_id:
+            raise MonitorTransitionError("checkpoint must point to the latest unresolved change")
 
         run, checkpoint = self._build_records(
             target=target,
@@ -100,6 +103,25 @@ class MonitorRuntime:
                 % "\n".join(issue.format() for issue in report.issues)
             )
         return MonitorTransitionResult(run, checkpoint, report, all_runs, resolution_rows)
+
+    @staticmethod
+    def _validate_resolution_times(
+        prior_runs: Sequence[Dict[str, str]],
+        resolutions: Sequence[Dict[str, str]],
+        transition_started_at: datetime,
+    ) -> None:
+        runs_by_id = {row.get("monitor_run_id", ""): row for row in prior_runs}
+        for resolution in resolutions:
+            resolved_at = _parse_datetime(resolution.get("resolved_at", ""))
+            source_run = runs_by_id.get(resolution.get("source_monitor_run_id", ""))
+            source_finished = _parse_datetime(source_run.get("finished_at", "")) if source_run else None
+            if (
+                resolved_at is None
+                or source_finished is None
+                or resolved_at < source_finished
+                or resolved_at > transition_started_at
+            ):
+                raise MonitorTransitionError("Human resolution timestamp is outside the valid execution window")
 
     @staticmethod
     def _require_initial_activation(
@@ -213,11 +235,6 @@ class MonitorRuntime:
                     fingerprint_after = ""
                 elif fingerprint_after == previous_fingerprint:
                     result = "no_change"
-                elif pending_change_id:
-                    result = "error"
-                    error_code = "content_ambiguous"
-                    error_detail = "new metadata arrived while an earlier Human-required change remained unresolved"
-                    fingerprint_after = ""
                 else:
                     result = "change_detected"
                     change_summary = _change_summary(previous, observation)
@@ -381,6 +398,21 @@ def _next_error_count(previous: Optional[Dict[str, str]], error_code: str) -> in
     if previous is not None and previous.get("last_error_code") == error_code:
         return int(previous.get("consecutive_error_count", "0")) + 1
     return 1
+
+
+def _unresolved_change_ids(
+    runs: Sequence[Dict[str, str]], resolutions: Sequence[Dict[str, str]]
+) -> List[str]:
+    current_resolution_by_source = {}
+    for resolution in resolutions:
+        source_id = resolution.get("source_monitor_run_id", "")
+        current_resolution_by_source[source_id] = resolution.get("resolution_id", "")
+    return [
+        row.get("monitor_run_id", "")
+        for row in runs
+        if row.get("run_result") == "change_detected"
+        and row.get("monitor_run_id", "") not in current_resolution_by_source
+    ]
 
 
 def _parse_datetime(value: str) -> Optional[datetime]:

@@ -1,0 +1,176 @@
+name: ERS Level 2 Monitor
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      target_id:
+        description: Fictional offline target ID
+        required: true
+        default: MON-EXAMPLE-CALENDAR
+      fixture_name:
+        description: Offline fixture name
+        required: true
+        type: choice
+        options:
+          - initial
+          - same
+          - changed
+          - replacement
+          - timeout
+          - fatal
+      run_id:
+        description: Deterministic dry-run monitor run ID
+        required: true
+        default: MRUN-EXAMPLE-001
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: python -m pip install -e .
+      - id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_ID: ${{ github.event.inputs.target_id }}
+          FIXTURE_NAME: ${{ github.event.inputs.fixture_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            matrix=$(python -m earnings_research.cli monitor-plan \
+              tests/fixtures/monitor_operations/monitor_targets.csv \
+              --target-id "$TARGET_ID" \
+              --fixture-name "$FIXTURE_NAME")
+          else
+            matrix=$(python -m earnings_research.cli monitor-plan \
+              data/config/monitor_targets.csv)
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  monitor:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ers-level2-monitor-${{ matrix.monitor_target_id }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: python -m pip install -e .
+      - name: Fetch previous committed state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_ID: ${{ matrix.monitor_target_id }}
+        run: |
+          python -m earnings_research.cli monitor-fetch-state \
+            --repository "$REPOSITORY" \
+            --target-id "$TARGET_ID" \
+            --output .monitor/previous
+      - id: run-monitor
+        name: Generate and validate state bundle
+        env:
+          REGISTRY: ${{ matrix.registry }}
+          TARGET_ID: ${{ matrix.monitor_target_id }}
+          FIXTURE_NAME: ${{ matrix.fixture_name }}
+          DISPATCH_RUN_ID: ${{ github.event.inputs.run_id }}
+          GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT_VALUE: ${{ github.run_attempt }}
+        run: |
+          started_at=$(date --iso-8601=seconds)
+          finished_at=$(date --iso-8601=seconds --date='+1 second')
+          run_id=${DISPATCH_RUN_ID:-MRUN-${GITHUB_RUN_ID_VALUE}-${GITHUB_RUN_ATTEMPT_VALUE}}
+          result=$(python -m earnings_research.cli monitor-run \
+            --registry "$REGISTRY" \
+            --target-id "$TARGET_ID" \
+            --fixture-dir tests/fixtures/monitor_offline \
+            --fixture-name "$FIXTURE_NAME" \
+            --previous-dir .monitor/previous \
+            --output .monitor/current \
+            --run-id "$run_id" \
+            --started-at "$started_at" \
+            --finished-at "$finished_at")
+          artifact_name=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+      - id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.run-monitor.outputs.artifact_name }}
+          path: .monitor/current/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: false
+      - name: Re-download uploaded artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.run-monitor.outputs.artifact_name }}
+          path: .monitor/reread
+      - name: Verify re-downloaded committed state
+        run: python -m earnings_research.cli monitor-verify-bundle .monitor/reread
+
+  notify:
+    needs: [plan, monitor]
+    if: needs.monitor.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ers-monitor-state-${{ matrix.monitor_target_id }}-*
+          path: .monitor/committed
+          merge-multiple: true
+      - id: notify
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python -m earnings_research.cli monitor-notify \
+            .monitor/committed \
+            --repository "$REPOSITORY" \
+            --receipt .monitor/notification/receipt.json \
+            --recorded-at "$(date --iso-8601=seconds)"
+      - name: Preserve notification receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ers-monitor-notification-${{ matrix.monitor_target_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .monitor/notification/receipt.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Surface exhausted notification retry
+        if: steps.notify.outcome == 'failure'
+        run: exit 1
