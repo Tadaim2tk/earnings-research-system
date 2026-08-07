@@ -574,19 +574,23 @@ request policyは次に固定する。
 - cookies、authentication、proxy環境変数、automatic retryを使用しない。TLS certificate verificationを無効化しない。
 - User-AgentはERS public-metadata monitorであることを明示する。
 
-DNS解決後のaddress固定、DNS rebinding耐性、network egress firewallはPR E1のapplication-only boundaryでは完全保証しない。実activation前にActions側egress制御またはresolve-and-pin方針を別途監査する。redirect先は各hopでapproved originを再検査する。
+PR E1.5では各requestの直前にapproved hostnameをresolverで解決し、全A／AAAA answerがglobally routable unicastである場合だけ続行する。1件でもloopback、private、link-local、multicast、unspecified、reserved、その他non-global addressが混ざれば全answerを拒否する。DNS失敗または空answerは `source_unavailable` とし、`no_change` へ変換しない。
+
+検証後はHTTPCoreのpublic custom `NetworkBackend`で、選択した検証済みIP literalへTCP接続する。HTTP requestのHost semantics、TLS SNI、certificate hostname verificationにはapproved hostnameを維持するため、check後にOS resolverを再利用しない。requestごとにconnection poolを新規作成してresponse処理後に閉じ、別run、別redirect、別DNS validation結果を跨いだconnection reuseを禁止する。redirect先もURL／origin検査後に同じDNS検査とIP pinningを繰り返す。
+
+application側のDNS rebinding／TOCTOU境界はこれで閉じる。GitHub-hosted runnerまたは将来のself-hosted runnerにおけるegress firewallはdefense-in-depthとして別途検討する。
 
 resource limitはconnect 5秒、read 10秒、overall 15秒、response body 2 MiB、connection 1本とする。`Content-Length`が上限超過、invalid、または実bodyと矛盾する場合は成功扱いしない。許可するmedia typeは `text/html` と `application/json` だけである。charsetはUTF-8と一般的な日本語encodingをstrict decodeし、未知charset、decode replacement、JSONの非UTF-8を拒否する。
 
 generic parserが抽出するのはtitle、document ID候補、published timestamp候補、訂正marker等の最小metadataだけである。raw bodyは `SourceObservation`、monitor bundle、error detailへ保存しない。timestampがtimezoneなしまたは矛盾する場合は `timestamp_parse_error`、HTML／JSON構造または必須metadataを安全に読めない場合は `parse_error` とする。
 
-HTTP 401／403は `authentication_required`、429は `rate_limited`、408とtimeoutは `timeout`、404／5xx／transport failureは `source_unavailable`、その他の不正responseは `http_error` または `unexpected_format` へ写像する。exception本文、response本文、query、credentialをdiagnosticへ含めない。adapter自身はretryせず、retryable分類だけを返す。
+HTTP 401／403は `authentication_required`、429は `rate_limited`、408とtimeoutは `timeout`、404／5xx／transport failureは `source_unavailable`、その他の不正responseは `http_error` または `unexpected_format` へ写像する。`javascript:`、`mailto:`、`data:`等のopaque redirectでHTTPXが返す `InvalidURL` も `unexpected_format` へ変換し、adapter contract外へescapeさせない。exception本文、Location本文、response本文、query、credentialをdiagnosticへ含めない。adapter自身はretryせず、retryable分類だけを返す。
 
 adapter自身はapplication logを出さない。callerが運用logを追加する場合も、`monitor_target_id`、sanitized origin、status class、elapsed time、`error_code`に限定し、full URL、query、cookies、authorization、response bodyを記録しない。
 
 ETag、Last-Modified、Content-Length、明示的な訂正markerが前回checkpointと矛盾する場合はreplacement suspicionを立てる。fingerprint一致でも `no_change` へ落とさず、runtimeの `content_ambiguous` 経路へ送る。conditional requestは未実装である。
 
-testはHTTPX mock transportだけを使用し、実internetへ接続しない。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
+testはinjected resolver、HTTPX mock transport、HTTPCore fake network backendだけを使用し、実DNSまたは実internetへ接続しない。IP pinning testではTCP接続先が検証済みIP、TLS server hostnameがapproved hostnameであることを別々に実測する。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
 
 ## Validator Contract
 
@@ -685,7 +689,7 @@ PR Bでは最低限次のfixtureを含める。
 
 ## Remaining Implementation Decisions
 
-- live adapterのcompany固有parse contract、DNS rebinding boundary、terms再確認。
+- live adapterのcompany固有parse contract、runner egress defense、terms再確認。
 - ICECO targetのHuman activation、event identity、reviewer、monitoring dates。
 - 14日retentionに依存しないpermanent storageとmigration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。

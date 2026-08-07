@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 from typing import Dict, Mapping, Optional, Tuple
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
+import httpcore
 import httpx
 
 from earnings_research.monitoring.models import (
@@ -19,6 +20,14 @@ from earnings_research.monitoring.models import (
     ObservationFailure,
     ObservationResult,
     SourceObservation,
+)
+from earnings_research.monitoring.network import (
+    DNSResolutionError,
+    PinnedHTTPTransport,
+    Resolver,
+    UnsafeResolvedAddress,
+    resolve_public_addresses,
+    system_resolver,
 )
 
 CONNECT_TIMEOUT_SECONDS = 5.0
@@ -97,12 +106,17 @@ class LiveSourceAdapter:
         self,
         *,
         transport: Optional[httpx.BaseTransport] = None,
+        resolver: Resolver = system_resolver,
         monotonic=time.monotonic,
     ) -> None:
         self._monotonic = monotonic
-        self._client = httpx.Client(
+        self._resolver = resolver
+        self._ssl_context = ssl.create_default_context()
+        self._injected_client = self._build_client(transport) if transport is not None else None
+
+    def _build_client(self, transport: httpx.BaseTransport) -> httpx.Client:
+        return httpx.Client(
             transport=transport,
-            verify=ssl.create_default_context(),
             trust_env=False,
             follow_redirects=False,
             timeout=httpx.Timeout(
@@ -121,7 +135,8 @@ class LiveSourceAdapter:
         )
 
     def close(self) -> None:
-        self._client.close()
+        if self._injected_client is not None:
+            self._injected_client.close()
 
     def __enter__(self):
         return self
@@ -182,10 +197,41 @@ class LiveSourceAdapter:
                 write=min(CONNECT_TIMEOUT_SECONDS, remaining),
                 pool=min(CONNECT_TIMEOUT_SECONDS, remaining),
             )
-            self._client.cookies.clear()
+            parts = urlsplit(current_url)
             try:
-                with self._client.stream("GET", current_url, timeout=timeout) as response:
-                    self._client.cookies.clear()
+                addresses = resolve_public_addresses(
+                    parts.hostname or "",
+                    parts.port or 443,
+                    resolver=self._resolver,
+                )
+            except DNSResolutionError:
+                return _failure(
+                    "source_unavailable",
+                    "approved source DNS resolution failed",
+                    current_url,
+                    context.observed_at,
+                    True,
+                )
+            except UnsafeResolvedAddress:
+                return _failure(
+                    "terms_not_approved",
+                    "approved source DNS returned a non-global address",
+                    current_url,
+                    context.observed_at,
+                )
+            owns_client = self._injected_client is None
+            client = self._injected_client or self._build_client(
+                    PinnedHTTPTransport(
+                        approved_host=parts.hostname or "",
+                        approved_port=parts.port or 443,
+                        pinned_ip=addresses[0],
+                    ssl_context=self._ssl_context,
+                )
+            )
+            client.cookies.clear()
+            try:
+                with client.stream("GET", current_url, timeout=timeout) as response:
+                    client.cookies.clear()
                     if response.status_code in _REDIRECT_STATUSES:
                         location = response.headers.get("location", "")
                         if not location or _contains_control_characters(location):
@@ -233,9 +279,21 @@ class LiveSourceAdapter:
                         context,
                         deadline=started + OVERALL_BUDGET_SECONDS,
                     )
-            except httpx.TimeoutException:
+            except httpx.InvalidURL:
+                return _failure(
+                    "unexpected_format",
+                    "redirect or request URL is malformed",
+                    current_url,
+                    context.observed_at,
+                )
+            except (httpx.TimeoutException, httpcore.TimeoutException):
                 return _failure("timeout", "HTTP request timed out", current_url, context.observed_at, True)
-            except (httpx.NetworkError, httpx.ProtocolError):
+            except (
+                httpx.NetworkError,
+                httpx.ProtocolError,
+                httpcore.NetworkError,
+                httpcore.ProtocolError,
+            ):
                 return _failure(
                     "source_unavailable",
                     "HTTP transport failed",
@@ -243,8 +301,16 @@ class LiveSourceAdapter:
                     context.observed_at,
                     True,
                 )
-            except httpx.HTTPError:
+            except (
+                httpx.HTTPError,
+                httpcore.ConnectionNotAvailable,
+                httpcore.ProxyError,
+                httpcore.UnsupportedProtocol,
+            ):
                 return _failure("http_error", "HTTP request failed", current_url, context.observed_at)
+            finally:
+                if owns_client:
+                    client.close()
 
     def _parse_success(
         self,
@@ -306,9 +372,14 @@ class LiveSourceAdapter:
                     context.observed_at,
                     True,
                 )
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, httpcore.TimeoutException):
             return _failure("timeout", "HTTP response read timed out", source_url, context.observed_at, True)
-        except httpx.HTTPError:
+        except (
+            httpx.HTTPError,
+            httpcore.ConnectionNotAvailable,
+            httpcore.ProxyError,
+            httpcore.UnsupportedProtocol,
+        ):
             return _failure(
                 "source_unavailable",
                 "HTTP response stream failed",
