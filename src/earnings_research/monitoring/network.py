@@ -1,7 +1,9 @@
 """DNS validation and IP-pinned HTTP transport for approved public sources."""
 
 import ipaddress
+import queue
 import socket
+import threading
 from typing import Callable, Iterable, Optional, Sequence, Tuple, Union
 
 import httpcore
@@ -14,6 +16,10 @@ class DNSResolutionError(OSError):
     """The approved hostname could not be resolved safely."""
 
 
+class DNSResolutionTimeout(TimeoutError):
+    """The DNS worker exceeded its caller-owned time budget."""
+
+
 class UnsafeResolvedAddress(ValueError):
     """At least one DNS answer is not globally routable."""
 
@@ -22,6 +28,10 @@ def is_safe_public_address(
     address: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 ) -> bool:
     """Require globally routable unicast rather than relying on is_global alone."""
+    if isinstance(address, ipaddress.IPv6Address):
+        embedded = _embedded_ipv4(address)
+        if embedded is not None and not is_safe_public_address(embedded):
+            return False
     return bool(
         address.is_global
         and not address.is_loopback
@@ -31,6 +41,17 @@ def is_safe_public_address(
         and not address.is_unspecified
         and not address.is_reserved
     )
+
+
+def _embedded_ipv4(address: ipaddress.IPv6Address) -> Optional[ipaddress.IPv4Address]:
+    if address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    if address.sixtofour is not None:
+        return address.sixtofour
+    nat64_prefix = ipaddress.IPv6Network("64:ff9b::/96")
+    if address in nat64_prefix:
+        return ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    return None
 
 
 def system_resolver(host: str, port: int) -> Sequence[str]:
@@ -48,8 +69,47 @@ def resolve_public_addresses(
     """Return unique public IPs only; reject the whole answer set otherwise."""
     try:
         answers = resolver(host, port)
-    except (socket.gaierror, OSError) as exc:
+    except Exception as exc:
         raise DNSResolutionError("approved source DNS resolution failed") from exc
+    return _validate_public_answers(answers)
+
+
+def resolve_public_addresses_bounded(
+    host: str,
+    port: int,
+    *,
+    resolver: Resolver = system_resolver,
+    timeout: float,
+) -> Tuple[str, ...]:
+    """Run a resolver in one daemon worker and bound the caller wait time."""
+    if timeout <= 0:
+        raise DNSResolutionTimeout("approved source DNS resolution timed out")
+    results = queue.Queue(maxsize=1)
+
+    def run() -> None:
+        try:
+            value = ("result", resolver(host, port))
+        except BaseException as exc:
+            value = ("error", exc)
+        try:
+            results.put_nowait(value)
+        except queue.Full:
+            pass
+
+    worker = threading.Thread(target=run, name="ers-bounded-dns", daemon=True)
+    worker.start()
+    try:
+        kind, value = results.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise DNSResolutionTimeout("approved source DNS resolution timed out") from exc
+    if kind == "error":
+        if isinstance(value, Exception):
+            raise DNSResolutionError("approved source DNS resolution failed") from value
+        raise value
+    return _validate_public_answers(value)
+
+
+def _validate_public_answers(answers: Sequence[str]) -> Tuple[str, ...]:
     if not answers:
         raise DNSResolutionError("approved source DNS returned no addresses")
 
@@ -62,7 +122,9 @@ def resolve_public_addresses(
         if not is_safe_public_address(address):
             raise UnsafeResolvedAddress("approved source DNS returned a non-global address")
         normalized.append(address.compressed)
-    return tuple(sorted(set(normalized)))
+    unique = {ipaddress.ip_address(value) for value in normalized}
+    ordered = sorted(unique, key=lambda address: (address.version != 4, int(address)))
+    return tuple(address.compressed for address in ordered)
 
 
 class PinnedNetworkBackend(httpcore.NetworkBackend):

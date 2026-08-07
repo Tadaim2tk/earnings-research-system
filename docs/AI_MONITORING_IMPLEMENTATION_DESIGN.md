@@ -576,11 +576,15 @@ request policyは次に固定する。
 
 PR E1.5では各requestの直前にapproved hostnameをresolverで解決し、全A／AAAA answerがglobally routable unicastである場合だけ続行する。1件でもloopback、private、link-local、multicast、unspecified、reserved、その他non-global addressが混ざれば全answerを拒否する。DNS失敗または空answerは `source_unavailable` とし、`no_change` へ変換しない。
 
+PR E1.6ではresolverをdaemon workerで実行し、callerの待機時間を5秒またはoverall budget残時間の短い方へ制限する。timeout後にworkerが完了してもHTTP処理へ進めず、同じadapter instanceから新しいresolver workerを起動しない。resolverが返った直後にoverall 15秒budgetを再計算し、残時間がなければHTTPを開始しない。`UnicodeError`、`ValueError`、`RuntimeError`等の予期しないresolver exceptionもraw detailを出さず `source_unavailable` へ正規化する。
+
+A／AAAAがともに安全な場合はIPv4を優先し、同一family内では数値順で決定的に選択する。IPv6 literalのcanonical URLとauthorityにはbracketを維持する。IPv4-mapped IPv6、6to4、well-known NAT64に埋め込まれたIPv4も検査し、埋込先がnon-globalなら拒否する。
+
 検証後はHTTPCoreのpublic custom `NetworkBackend`で、選択した検証済みIP literalへTCP接続する。HTTP requestのHost semantics、TLS SNI、certificate hostname verificationにはapproved hostnameを維持するため、check後にOS resolverを再利用しない。requestごとにconnection poolを新規作成してresponse処理後に閉じ、別run、別redirect、別DNS validation結果を跨いだconnection reuseを禁止する。redirect先もURL／origin検査後に同じDNS検査とIP pinningを繰り返す。
 
 application側のDNS rebinding／TOCTOU境界はこれで閉じる。GitHub-hosted runnerまたは将来のself-hosted runnerにおけるegress firewallはdefense-in-depthとして別途検討する。
 
-resource limitはconnect 5秒、read 10秒、overall 15秒、response body 2 MiB、connection 1本とする。`Content-Length`が上限超過、invalid、または実bodyと矛盾する場合は成功扱いしない。許可するmedia typeは `text/html` と `application/json` だけである。charsetはUTF-8と一般的な日本語encodingをstrict decodeし、未知charset、decode replacement、JSONの非UTF-8を拒否する。
+resource limitはDNS 5秒、connect 5秒、read 10秒、overall 15秒、response body 2 MiB、connection 1本とする。scheduled workflowのtarget単位monitor jobには `timeout-minutes: 10` を設定し、process-levelの上限も持たせる。`Content-Length`が上限超過、invalid、または実bodyと矛盾する場合は成功扱いしない。許可するmedia typeは `text/html` と `application/json` だけである。charsetはUTF-8と一般的な日本語encodingをstrict decodeし、未知charset、decode replacement、JSONの非UTF-8を拒否する。
 
 generic parserが抽出するのはtitle、document ID候補、published timestamp候補、訂正marker等の最小metadataだけである。raw bodyは `SourceObservation`、monitor bundle、error detailへ保存しない。timestampがtimezoneなしまたは矛盾する場合は `timestamp_parse_error`、HTML／JSON構造または必須metadataを安全に読めない場合は `parse_error` とする。
 
@@ -590,7 +594,7 @@ adapter自身はapplication logを出さない。callerが運用logを追加す�
 
 ETag、Last-Modified、Content-Length、明示的な訂正markerが前回checkpointと矛盾する場合はreplacement suspicionを立てる。fingerprint一致でも `no_change` へ落とさず、runtimeの `content_ambiguous` 経路へ送る。conditional requestは未実装である。
 
-testはinjected resolver、HTTPX mock transport、HTTPCore fake network backendだけを使用し、実DNSまたは実internetへ接続しない。IP pinning testではTCP接続先が検証済みIP、TLS server hostnameがapproved hostnameであることを別々に実測する。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
+testはinjected resolver、HTTPX mock transport、HTTPCore fake network backendだけを使用し、実DNSまたは実internetへ接続しない。pinning wiring contract testは `LiveSourceAdapter` から `PinnedHTTPTransport` とHTTPCore `NetworkBackend` までの実経路を通し、TCP接続先が検証済みIP、TLS server hostnameがapproved hostname、HTTP Host authorityもapproved hostnameであることを別々に実測する。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
 
 ## Validator Contract
 

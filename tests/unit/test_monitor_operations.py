@@ -575,6 +575,7 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
 
     assert parsed
     assert 'python-version: "3.11.9"' in raw
+    assert raw.count("timeout-minutes: 10") == 1
     assert "actions: read" in raw
     assert "issues: write" in raw
     assert "contents: write" not in raw
