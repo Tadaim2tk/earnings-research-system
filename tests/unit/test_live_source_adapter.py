@@ -18,6 +18,7 @@ from earnings_research.monitoring.registry import load_registry
 from earnings_research.monitoring.runtime import MonitorRuntime
 
 JST = timezone(timedelta(hours=9))
+PUBLIC_IP = "93.184.216.34"
 REGISTRY = Path(__file__).resolve().parents[1] / "fixtures" / "monitor_operations" / "monitor_targets.csv"
 
 
@@ -63,8 +64,12 @@ def html_response(
     return httpx.Response(200, content=body, headers=response_headers)
 
 
-def observe_with(handler, *, target_row=None, source_context=None):
-    with LiveSourceAdapter(transport=httpx.MockTransport(handler)) as adapter:
+def observe_with(handler, *, target_row=None, source_context=None, resolver=None):
+    resolver = resolver or (lambda _host, _port: [PUBLIC_IP])
+    with LiveSourceAdapter(
+        transport=httpx.MockTransport(handler),
+        resolver=resolver,
+    ) as adapter:
         return adapter.observe(target_row or target(), source_context or context())
 
 
@@ -238,6 +243,8 @@ def test_userinfo_and_secret_query_are_rejected_before_network(url):
         "https://10.0.0.1/releases",
         "https://127.1/releases",
         "https://2130706433/releases",
+        "https://0177.0.0.1/releases",
+        "https://0x7f000001/releases",
         "https://metadata.google.internal/computeMetadata/v1/",
     ],
 )
@@ -268,6 +275,7 @@ def test_overall_budget_is_checked_while_reading_the_response():
     times = iter([0.0, 0.0, 16.0])
     with LiveSourceAdapter(
         transport=httpx.MockTransport(lambda _request: html_response()),
+        resolver=lambda _host, _port: [PUBLIC_IP],
         monotonic=lambda: next(times),
     ) as adapter:
         result = adapter.observe(target(), context())
