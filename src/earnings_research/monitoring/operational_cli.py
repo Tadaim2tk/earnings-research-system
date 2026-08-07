@@ -85,10 +85,12 @@ def run_offline(
         finished_at=finished,
         event_date=event_date,
     )
+    run_attempt_value = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    run_attempt = int(run_attempt_value) if run_attempt_value else None
     print(
         json.dumps(
             {
-                "artifact_name": artifact_name(bundle.manifest),
+                "artifact_name": artifact_name(bundle.manifest, run_attempt=run_attempt),
                 "run_result": bundle.latest_run["run_result"],
                 "target_state": bundle.checkpoint["target_state"],
                 "checkpoint_version": bundle.manifest.checkpoint_version,

@@ -16,7 +16,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Validation CLI for required columns, types, keys, event semantics, temporal constraints, scoring versions, evidence lineage, KPI references, NO_TRADE handling, and basic future-information contamination checks
 - Pytest coverage for the initial validation contract
 - Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
-- Approval-gated Level 2 monitor contracts, validator, network-free core, and GitHub Actions pilot infrastructure for validated temporary state artifacts, stale-gap detection, and Issue notification
+- Approval-gated Level 2 monitor contracts, validator, network-free core, temporary state persistence, stale-gap detection, Issue notification, and an inactive live-source adapter library
 
 ## Prospective Operations
 
@@ -54,11 +54,13 @@ python -m earnings_research.cli validate-file data/samples/pre_earnings_baseline
 python -m earnings_research.cli show-schema pre_earnings_baseline
 ```
 
-The monitoring core remains network-free for source observations. PR D adds a read-only Human-owned registry, operational CLI, GitHub Actions artifact transport, strict manifest verification, stale-gap detection, and Issue notification. `data/config/monitor_targets.csv` is intentionally empty, so no real company is activated and scheduled runs have no live source target.
+The monitoring core remains deterministic and can be exercised without network access. The live-source adapter is a separate library boundary: it uses HTTPX with fixed time and response-size limits, manual same-origin redirects, sanitized failures, and an approval gate that runs before any request. It is not connected to the scheduled workflow.
+
+The read-only Human-owned production registry at `data/config/monitor_targets.csv` remains header-only. Therefore no real company is activated, scheduled runs have no live source target, and adding the HTTP client does not authorize access to any provider. Live activation requires a separate Human-reviewed registry change.
 
 The fictional offline workflow can be exercised with `workflow_dispatch`. Operational entry points are available under `python -m earnings_research.cli monitor-*`; they never write the registry or push repository contents. CI is fixed to Python 3.11.9. State artifacts use 14-day retention and are temporary pilot persistence, not permanent machine truth. Missing retained state fails closed outside an exact Human-approved initialization.
 
-Live IR access, ICECO activation, permanent storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
+Real-company live IR access, ICECO activation, conditional requests, permanent storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
 
 ## Sample Data
 

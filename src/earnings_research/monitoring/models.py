@@ -22,16 +22,20 @@ class SourceObservation:
     replacement_suspected: bool
     observed_at: datetime
     stable_metadata: Mapping[str, Optional[str]] = field(default_factory=dict)
+    response_date: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ObservationFailure:
-    """An offline representation of an observation failure."""
+    """A sanitized representation of an observation failure."""
 
     error_code: str
     error_detail: str
     observed_at: datetime
     retry_count: int = 0
+    source_url: Optional[str] = None
+    retryable: bool = False
 
 
 ObservationResult = Union[SourceObservation, ObservationFailure]
@@ -44,6 +48,15 @@ class OfflineSourceInput:
     observed_at: datetime
     html_path: Optional[Path] = None
     metadata_path: Optional[Path] = None
+
+
+@dataclass(frozen=True)
+class LiveSourceContext:
+    """Caller-owned time, URL, and prior metadata for one bounded live observation."""
+
+    observed_at: datetime
+    source_url: Optional[str] = None
+    previous_checkpoint: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
