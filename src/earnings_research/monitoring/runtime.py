@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
+from earnings_research.identifiers import is_activation_authorizer
 from earnings_research.monitoring.fingerprint import FINGERPRINT_VERSION, build_metadata_fingerprint
 from earnings_research.monitoring.models import (
     MonitorTransitionResult,
@@ -71,7 +72,10 @@ class MonitorRuntime:
             resolutions=resolution_rows,
             transition_started_at=started_at,
         )
-        unresolved_change_ids = _unresolved_change_ids(runs, resolution_rows)
+        autonomous_handoff = target.get("change_response") == "autonomous_research_handoff"
+        unresolved_change_ids = (
+            [] if autonomous_handoff else _unresolved_change_ids(runs, resolution_rows)
+        )
         pending_change_id = unresolved_change_ids[-1] if unresolved_change_ids else ""
         if previous_pending_id and applied_resolution is None and previous_pending_id != pending_change_id:
             raise MonitorTransitionError("checkpoint must point to the latest unresolved change")
@@ -137,13 +141,13 @@ class MonitorRuntime:
             target.get("activation_state") != "activated"
             or target.get("enabled", "").lower() != "true"
             or target.get("automated_access_permitted", "").lower() != "true"
-            or target.get("activation_approved_by", "").startswith("human:") is False
+            or not is_activation_authorizer(target.get("activation_approved_by", ""))
             or target.get("initialization_generation") != "1"
             or target.get("initialization_run_id") != run_id
             or activated_at is None
             or activated_at > started_at
         ):
-            raise MonitorTransitionError("initialization requires matching Human-owned activation")
+            raise MonitorTransitionError("initialization requires matching authorized activation")
 
     @staticmethod
     def _effective_resolution(
@@ -238,7 +242,8 @@ class MonitorRuntime:
                 else:
                     result = "change_detected"
                     change_summary = _change_summary(previous, observation)
-                    pending_change_id = run_id
+                    if target.get("change_response") != "autonomous_research_handoff":
+                        pending_change_id = run_id
 
         is_success = result in {"initialized", "no_change", "change_detected"}
         notification_required = result in {"change_detected", "error"}

@@ -12,7 +12,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
   = machine state、状態遷移、永続化、実行・通知契約の設計
 ```
 
-[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidator、PR Cでnetwork-freeなoffline runtime、PR DでGitHub Actions、temporary artifact persistence、stale gap、Issue通知を実装した。PR E1はapproval-gated live source adapterをlibrary boundaryとして追加するが、scheduled workflowへ接続しない。production registryはheader-onlyで、自動実行対象は存在しない。ICECO activation、price adapter、実eventは未実装・未承認のままとする。
+[ERS-ADR-0022](DECISIONS.md#ers-adr-0022) は `Accepted` である。PR Bで4つのmonitor schemaとvalidator、PR Cでnetwork-freeなoffline runtime、PR DでGitHub Actions、temporary artifact persistence、stale gap、Issue通知を実装した。PR E1でlive source adapterを追加し、PR #16でpolicy-gated workflowとICECO production targetを接続する。price adapter、実event、formal evidence、baselineは未実装のままとする。
 
 ## Design Invariants
 
@@ -32,7 +32,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
 
 ### monitor_target
 
-Humanが承認する監視設定である。第1号pilotのregistry候補はGit管理された `data/config/monitor_targets.csv` とし、pull requestとHuman reviewを経て更新する。
+監視設定である。第1号pilotのregistryはGit管理された `data/config/monitor_targets.csv` とし、Human approvalまたはAccepted system policyに基づく変更をreview可能なcommitで更新する。
 
 | field | type candidate | meaning |
 | --- | --- | --- |
@@ -40,11 +40,11 @@ Humanが承認する監視設定である。第1号pilotのregistry候補はGit�
 | `company_id` | string | `company_master` reference。未登録例ではactivationしない |
 | `earnings_event_id` | string or null | event固有targetの場合のevent reference |
 | `source_name` | string | Human-readable source name |
-| `source_url` | URI | Human承認対象のsource URL |
+| `source_url` | URI | authorization対象のsource URL |
 | `source_category` | enum | calendar、news index、disclosure index等 |
 | `monitoring_level` | enum | `level_1` または `level_2`。Level 3はscope外 |
-| `automated_access_permitted` | boolean | source固有termsに基づくHuman承認 |
-| `enabled` | boolean | workflow対象に含めるHuman decision |
+| `automated_access_permitted` | boolean | source固有termsまたはsystem policyに基づく許可 |
+| `enabled` | boolean | workflow対象に含める決定 |
 | `schedule_profile` | enum | domain schedule profile identifier |
 | `timezone` | IANA timezone | scheduleとsource timestampの解釈基準 |
 | `active_from` | datetime or null | monitoring開始境界 |
@@ -52,14 +52,14 @@ Humanが承認する監視設定である。第1号pilotのregistry候補はGit�
 | `terms_review_state` | enum | operations contractのTerms Review Recordと一致 |
 | `last_terms_review_at` | datetime or null | 最終Human確認時刻 |
 | `terms_review_reference` | string | 規約URL、契約identifier、provider回答reference |
-| `automation_approved_by` | string or null | stable Human identifier |
-| `activation_state` | enum | Human-owned activation lifecycle |
-| `activated_at` | datetime or null | Human activation timestamp |
-| `activation_approved_by` | string or null | stable Human identifier |
+| `automation_approved_by` | string or null | stable Humanまたはsystem policy identifier |
+| `activation_state` | enum | governed activation lifecycle |
+| `activated_at` | datetime or null | activation timestamp |
+| `activation_approved_by` | string or null | stable Humanまたはsystem policy identifier |
 | `initialization_generation` | integer | activation generation。未activationは0 |
 | `initialization_run_id` | string or null | Human-reviewed first initialized run marker |
 
-次はHuman-only fieldである。
+次はruntimeが変更できないgovernance fieldである。
 
 ```text
 source_url
@@ -80,9 +80,9 @@ initialization_generation
 initialization_run_id
 ```
 
-workflow tokenはregistryへのwrite権限を持たず、これらを変更できない。特に `automated_access_permitted=true`、`enabled=true`、`automation_approved_by` の設定をAIが行ってはならない。設定が不完全、不整合、期限外、terms未承認ならrunは `skipped` または `error` とし、sourceへaccessしない。
+workflow tokenはregistryへのwrite権限を持たず、これらを変更できない。Human判断またはAccepted system policyを根拠にrepository変更として設定する。設定が不完全、不整合、期限外、terms未確認ならrunは `skipped` または `error` とし、sourceへaccessしない。
 
-schemaはfield typeとenum、validatorはapproval組合せと `human:<stable-id>` identifierを検査する。実際のactor authorizationは将来runtimeでregistryをread-onlyにするpermission boundaryが担う。schemaまたは文字列prefixだけでidentityを証明したとは扱わない。
+schemaはfield typeとenum、validatorはauthorization組合せと `human:<stable-id>` または `system_policy:<policy-id>` identifierを検査する。実際のactor authorizationはruntimeのread-only registryとreviewed policyが担う。schemaまたは文字列prefixだけでidentityを証明したとは扱わない。
 
 ### monitor_checkpoint
 
@@ -347,7 +347,7 @@ artifact名は `monitor_target_id + checkpoint_version + run_attempt + monitor_r
 | CSV | 現行ERSのrow-oriented data contract、diff、Human review、既存validator patternと整合 | null/boolean型、escaping、将来のnested schedule表現に注意 |
 | JSON | type、null、将来のnested structureを表現しやすい | Human diffが冗長になり、現行CSV data contractと別運用になる |
 
-第1号はflatなfieldだけで足りるため、`data/config/monitor_targets.csv` を採用する。`schedule_profile` は別の承認済みprofile定義を参照し、cronやnested設定をrowへ埋め込まない。production registryはheader-onlyで、実targetを含まない。manual dispatchだけがtest fixture registryのfictional targetを使用できる。
+第1号はflatなfieldだけで足りるため、`data/config/monitor_targets.csv` を採用する。`schedule_profile` は別の承認済みprofile定義を参照し、cronやnested設定をrowへ埋め込まない。production registryにはpolicy-gatedなICECO targetだけを記録し、manual dispatchではtest fixture registryも使用できる。
 
 registryはmain上のHuman-reviewed configurationを正本とする。GitHub Actionsは `contents: read` で読むだけとし、mainへのpush、registry自動修正、approval fieldの補完を禁止する。runtime checkpoint/runはregistry CSVへ書き込まない。
 
@@ -363,9 +363,9 @@ profileのminimum semantics:
 
 - 通常期間: business dayに1回。
 - event予定日の5営業日前から: business dayに1回以上。
-- 前日: Human-approved windowで追加確認。
+- 前日: policy profileで定めたwindowで追加確認。
 - 当日: planned session前後を確認。
-- session不明: 自動時刻を推測せずHuman review。
+- session不明: 時刻を推測せず、event-dayの保守的な複数windowを使用。
 
 exchange calendar、holiday、event-specific windows、最大許容gapはprofile定義の責務とする。GitHub Actions cronは起動機構でありdomain scheduleの正本ではない。scheduled runは厳密時刻を保証しないため、各runでprofile上のexpected previous observation windowとcheckpointの `last_success_at` を比較する。
 
@@ -558,9 +558,9 @@ network callより前に、既存 `monitor_target` の次の全条件を検査�
 - `automated_access_permitted=true`。
 - `monitoring_level=level_2`。
 - `terms_review_state=candidate_specific_review_completed`。
-- `automation_approved_by` が `human:` identifierである。
+- `automation_approved_by` が `human:` または承認済み `system_policy:` identifierである。
 - `activation_state=activated`。
-- `activation_approved_by` が `human:` identifierである。
+- `activation_approved_by` が `human:` または承認済み `system_policy:` identifierである。
 
 1条件でも欠ければ `access_not_approved` とし、transport call countは0でなければならない。AIがapproval fieldを補完、推定、更新してはならない。
 
@@ -594,7 +594,7 @@ adapter自身はapplication logを出さない。callerが運用logを追加す�
 
 ETag、Last-Modified、Content-Length、明示的な訂正markerが前回checkpointと矛盾する場合はreplacement suspicionを立てる。fingerprint一致でも `no_change` へ落とさず、runtimeの `content_ambiguous` 経路へ送る。conditional requestは未実装である。
 
-testはinjected resolver、HTTPX mock transport、HTTPCore fake network backendだけを使用し、実DNSまたは実internetへ接続しない。pinning wiring contract testは `LiveSourceAdapter` から `PinnedHTTPTransport` とHTTPCore `NetworkBackend` までの実経路を通し、TCP接続先が検証済みIP、TLS server hostnameがapproved hostname、HTTP Host authorityもapproved hostnameであることを別々に実測する。production registry、workflow、fixtureへ実企業、実ticker、実IR URLを追加しない。
+unit testはinjected resolver、HTTPX mock transport、HTTPCore fake network backendを使用する。pinning wiring contract testは `LiveSourceAdapter` から `PinnedHTTPTransport` とHTTPCore `NetworkBackend` までの実経路を通し、TCP接続先が検証済みIP、TLS server hostnameがapproved hostname、HTTP Host authorityもapproved hostnameであることを別々に実測する。production registryとworkflowはpolicy-gatedなICECO targetsを持ち、fixtureは架空targetを維持する。
 
 ## Validator Contract
 
@@ -602,8 +602,8 @@ PR BからPR Dのvalidator/persistence boundaryは最低限次を検査する。
 
 - unique `monitor_target_id`。
 - `company_id`、`earnings_event_id`、target referenceの存在とscope。
-- `monitoring_level=level_2` ではHuman-approved `automated_access_permitted=true`、`enabled=true`、`automation_approved_by`、completed terms reviewが揃う。
-- Human-only fieldがworkflow outputまたはruntime bundleに含まれない。
+- `monitoring_level=level_2` ではauthorized `automated_access_permitted=true`、`enabled=true`、`automation_approved_by`、completed terms reviewが揃う。
+- governance fieldがworkflow outputまたはruntime bundleで変更されない。
 - active periodとtimestamp ordering。
 - timezoneとschedule profileが承認済みenumである。
 - `run_result`、`error_code`、notification fieldの組合せ。
@@ -642,17 +642,9 @@ PR Bでは最低限次のfixtureを含める。
 | 2 | Run Nがunresolved `change_detected`、Run N+1が `no_change`、Human resolutionなしで `checkpoint_after=healthy` | reject |
 | 3 | `change_detected`、notification failed、`checkpoint_after=pending_human_review` | valid |
 
-## ICECO Non-Activated Examples
+## ICECO Activated Targets
 
-次はID設計例であり、正式company、event、source、terms、target registrationではない。
-
-| monitor_target_id | source category | automated_access_permitted | enabled | company_id |
-| --- | --- | --- | --- | --- |
-| `ICECO_IR_CALENDAR` | `company_ir_calendar` | `false` | `false` | `pending_formal_record` |
-| `ICECO_IR_NEWS` | `company_ir_news_index` | `false` | `false` | `pending_formal_record` |
-| `ICECO_DISCLOSURE` | `company_ir_disclosure_index` | `false` | `false` | `pending_formal_record` |
-
-`pending_formal_record` は実schemaへ投入可能な値ではなくdocumentation placeholderである。Human terms承認、formal company/event identity、reviewer、monitoring schedule、target activationが揃うまでregistry rowを作らず、有効化しない。
+`ICECO_IR_CALENDAR`、`ICECO_IR_ROOT`、`ICECO_RESULTS` を `system_policy:public-web-low-frequency-v1` によりactivationする。詳細は [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) を正本とする。
 
 ## Pull Request Sequence
 
@@ -660,8 +652,8 @@ PR Bでは最低限次のfixtureを含める。
 2. PR B: monitor target/checkpoint/run/resolution schemas、validator、positive/negative fixtures。manifestはPR Dへ延期。
 3. PR C: single-company monitor、offline fixture/dry-run tests。network activationなし。
 4. PR D: GitHub Actions、artifact temporary persistence、stale gap、Issue notification、operational CLI。live IR accessなし。
-5. PR E1: approval-gated live source adapter library。mock-only test、実target activationなし、workflow接続なし。
-6. PR E2: Human terms承認後のICECO target activation。実event採用は別のHuman gateを満たす。
+5. PR E1: approval-gated live source adapter library。mock-only test、実target activationなし。
+6. PR #16: public-web system policy、robots確認、ICECO target、live workflow、研究handoff。
 
 価格取得、price adapter、J-Quants採用はこの系列から分離する。
 
@@ -669,10 +661,10 @@ PR Bでは最低限次のfixtureを含める。
 
 次の場合はsourceへaccessしない、またはcurrent stateをadvanceせず停止する。
 
-- Human-owned approval field不足または矛盾。
+- authorization field不足または矛盾。
 - terms未承認、期限切れ、変更疑い。
 - previous committed state取得不能またはvalidation失敗。
-- current checkpoint 0件または複数件。ただしHuman-approved初回activationは別。
+- current checkpoint 0件または複数件。ただしauthorized初回activationは別。
 - run/checkpoint/manifestの部分保存、unexpected file、hash mismatch、ID不一致、version不連続。
 - fingerprint version unknown、timestamp timezone欠落、canonical input ambiguity。
 - access/parse/response formatの失敗。
@@ -694,11 +686,9 @@ PR Bでは最低限次のfixtureを含める。
 ## Remaining Implementation Decisions
 
 - live adapterのcompany固有parse contract、runner egress defense、terms再確認。
-- ICECO targetのHuman activation、event identity、reviewer、monitoring dates。
+- ICECO monitorからformal event/evidenceへ接続するdocument parserと研究contract。
 - 14日retentionに依存しないpermanent storageとmigration contract。
 - GitHub Issue以外のbackup notificationと、全notification failureを検知するwatchdog。
 - 日本の祝日を含むexchange calendarがpilot後に必要か。
 
-PR Dはfictional offline dispatchまでを実装し、production registryは空のままにする。上記を未決のまま実targetをactivationしない。
-
-PR E1で、state生成、upload後の再取得検証、notifyを同じtarget単位jobへ統合し、全処理を1つのconcurrency group内で直列化する。third-party Actionsはcommit SHAへ固定する。artifact identityには `run_attempt` を含め、workflow re-runを区別する。Human-approved intentional reinitializationはPR E2以降の別設計とし、artifact lossから自動的に入れない。実装する場合は `initialization_generation` の増加と新しいHuman approvalを必須にする。
+PR E1で、state生成、upload後の再取得検証、notifyを同じtarget単位jobへ統合し、全処理を1つのconcurrency group内で直列化した。third-party Actionsはcommit SHAへ固定し、artifact identityには `run_attempt` を含める。intentional reinitializationはartifact lossから自動的に入れず、`initialization_generation` の増加と新しいauthorization recordを必須にする。

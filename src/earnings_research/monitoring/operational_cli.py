@@ -7,20 +7,28 @@ from pathlib import Path
 from typing import Optional
 
 from earnings_research.monitoring.github_api import GitHubAPIClient
+from earnings_research.monitoring.handoff import write_research_handoff
 from earnings_research.monitoring.models import OfflineSourceInput
 from earnings_research.monitoring.notifications import (
     NotificationReceipt,
     build_issue_plan,
     deliver_issue_notification,
 )
-from earnings_research.monitoring.operations import execute_offline_run
+from earnings_research.monitoring.operations import execute_live_run, execute_offline_run
 from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
 from earnings_research.monitoring.registry import active_target_plan, find_target, load_registry
 
 
-def plan_registry(registry_path: Path, target_id: Optional[str], fixture_name: Optional[str]) -> int:
+def plan_registry(
+    registry_path: Path,
+    target_id: Optional[str],
+    fixture_name: Optional[str],
+    planned_at: Optional[str] = None,
+    force: bool = False,
+) -> int:
     rows = load_registry(registry_path)
-    targets = active_target_plan(rows)
+    planned = _aware_datetime(planned_at, "planned_at") if planned_at else None
+    targets = active_target_plan(rows, planned_at=planned, force=force)
     if target_id:
         targets = [target for target in targets if target.get("monitor_target_id") == target_id]
         if len(targets) != 1:
@@ -30,6 +38,8 @@ def plan_registry(registry_path: Path, target_id: Optional[str], fixture_name: O
             "monitor_target_id": target["monitor_target_id"],
             "registry": str(registry_path),
             "fixture_name": fixture_name or "",
+            "source_mode": "offline" if fixture_name else "live",
+            "event_date": target.get("event_date", ""),
         }
         for target in targets
     ]
@@ -101,6 +111,46 @@ def run_offline(
     return 0
 
 
+def run_live(
+    *,
+    registry_path: Path,
+    target_id: str,
+    previous_dir: Optional[Path],
+    output_dir: Path,
+    run_id: str,
+    started_at: str,
+    finished_at: str,
+) -> int:
+    target = find_target(load_registry(registry_path), target_id)
+    previous = None
+    if previous_dir is not None and (previous_dir / "manifest.json").is_file():
+        previous = verify_bundle(previous_dir, expected_target_id=target_id)
+    started = _aware_datetime(started_at, "started_at")
+    finished = _aware_datetime(finished_at, "finished_at")
+    bundle = execute_live_run(
+        target=target,
+        previous_bundle=previous,
+        output_dir=output_dir,
+        run_id=run_id,
+        started_at=started,
+        finished_at=finished,
+    )
+    run_attempt_value = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    run_attempt = int(run_attempt_value) if run_attempt_value else None
+    print(
+        json.dumps(
+            {
+                "artifact_name": artifact_name(bundle.manifest, run_attempt=run_attempt),
+                "run_result": bundle.latest_run["run_result"],
+                "target_state": bundle.checkpoint["target_state"],
+                "checkpoint_version": bundle.manifest.checkpoint_version,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
 def verify_state(bundle_dir: Path) -> int:
     bundle = verify_uploaded_bundle(bundle_dir)
     print(
@@ -113,6 +163,13 @@ def verify_state(bundle_dir: Path) -> int:
             separators=(",", ":"),
         )
     )
+    return 0
+
+
+def build_handoff(bundle_dir: Path, output_path: Path) -> int:
+    bundle = verify_bundle(bundle_dir)
+    created = write_research_handoff(bundle, output_path)
+    print(json.dumps({"handoff_required": created}, separators=(",", ":")))
     return 0
 
 

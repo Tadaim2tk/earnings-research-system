@@ -48,7 +48,7 @@
         }
       }
     ],
-    "expected_issue": "initialized run requires matching Human-owned activation record"
+    "expected_issue": "initialized run requires matching authorized activation record"
   },
   {
     "id": "monitor_invalid_state_loss_reinitialized",
@@ -78,7 +78,7 @@
         "values": {"initialization_run_id": "MRUN-HOKUTO-001"}
       }
     ],
-    "expected_issue": "initialized run requires matching Human-owned activation record"
+    "expected_issue": "initialized run requires matching authorized activation record"
   },
   {
     "id": "monitor_invalid_notification_failure_degrades",
@@ -208,7 +208,7 @@
         "values": {"automation_approved_by": "workflow:monitor-v1"}
       }
     ],
-    "expected_issue": "Human-owned approval requires human:<stable-id> identifier"
+    "expected_issue": "authorization requires human:<stable-id> or system_policy:<policy-id>"
   },
   {
     "id": "monitor_invalid_activation_approver_identifier",
@@ -220,7 +220,7 @@
         "values": {"activation_approved_by": "ai:monitor-agent"}
       }
     ],
-    "expected_issue": "Human-owned approval requires human:<stable-id> identifier"
+    "expected_issue": "authorization requires human:<stable-id> or system_policy:<policy-id>"
   },
   {
     "id": "monitor_invalid_checkpoint_version_discontinuity",
@@ -292,7 +292,7 @@
         "values": {"activated_at": "2026-08-01T10:00:00+09:00"}
       }
     ],
-    "expected_issue": "initialized run requires matching Human-owned activation record"
+    "expected_issue": "initialized run requires matching authorized activation record"
   },
   {
     "id": "monitor_invalid_resolution_before_change_finished",

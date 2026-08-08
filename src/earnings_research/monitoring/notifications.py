@@ -52,10 +52,15 @@ def build_issue_plan(bundle: VerifiedMonitorBundle) -> Optional[IssueNotificatio
     target = bundle.target
     target_id = run["monitor_target_id"]
     if result == "change_detected":
-        episode_id = _first_unresolved_change_id(bundle)
+        autonomous = target.get("change_response") == "autonomous_research_handoff"
+        episode_id = run["monitor_run_id"] if autonomous else _first_unresolved_change_id(bundle)
         category = "change"
-        summary = run.get("detected_change_summary") or "Metadata change requires Human review"
-        recommended = "Review this run and record a monitor_resolution before closing the Issue."
+        summary = run.get("detected_change_summary") or "Metadata change detected"
+        recommended = (
+            "Continue with the generated earnings-document research handoff."
+            if autonomous
+            else "Review this run and record a monitor_resolution before closing the Issue."
+        )
     else:
         episode_id = _error_episode_id(bundle.runs)
         category = "error"
@@ -67,7 +72,8 @@ def build_issue_plan(bundle: VerifiedMonitorBundle) -> Optional[IssueNotificatio
     title = "[ERS monitor] %s: %s" % (target_id, category)
     body = marker + "\n\n" + details
     update = "Additional monitor run in the same episode:\n\n" + details
-    return IssueNotificationPlan(dedup_key, title, body, update, True)
+    requires_human = result == "error" or target.get("change_response") != "autonomous_research_handoff"
+    return IssueNotificationPlan(dedup_key, title, body, update, requires_human)
 
 
 def deliver_issue_notification(
@@ -163,7 +169,11 @@ def _issue_details(
             "- what_changed_or_error: %s" % summary,
             "- source_url: %s" % target["source_url"],
             "- confidence: `metadata_only`",
-            "- requires_human_decision: `true`",
+            "- requires_human_decision: `%s`"
+            % str(
+                run.get("run_result") == "error"
+                or target.get("change_response") != "autonomous_research_handoff"
+            ).lower(),
             "- recommended_next_action: %s" % recommended,
             "- dedup_key: `%s`" % dedup_key,
             "",

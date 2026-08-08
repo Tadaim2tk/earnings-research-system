@@ -73,6 +73,14 @@ def observe_with(handler, *, target_row=None, source_context=None, resolver=None
         return adapter.observe(target_row or target(), source_context or context())
 
 
+def check_robots_with(handler, *, target_row=None):
+    with LiveSourceAdapter(
+        transport=httpx.MockTransport(handler),
+        resolver=lambda _host, _port: [PUBLIC_IP],
+    ) as adapter:
+        return adapter.check_robots(target_row or target(), context())
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -96,6 +104,51 @@ def test_approval_gate_rejects_before_network(field, value):
     assert isinstance(result, ObservationFailure)
     assert result.error_code == "terms_not_approved"
     assert calls == []
+
+
+def test_system_policy_authorization_is_accepted():
+    row = target()
+    row["automation_approved_by"] = "system_policy:public-web-low-frequency-v1"
+    row["activation_approved_by"] = "system_policy:public-web-low-frequency-v1"
+    result = observe_with(lambda _request: html_response(), target_row=row)
+    assert isinstance(result, SourceObservation)
+
+
+def test_robots_allows_approved_ir_path():
+    result = check_robots_with(
+        lambda _request: httpx.Response(
+            200,
+            content=b"User-agent: *\nDisallow: /admin/\n",
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+    )
+    assert result is None
+
+
+def test_robots_disallow_stops_before_source_request():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        return httpx.Response(
+            200,
+            content=b"User-agent: *\nDisallow: /releases\n",
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+
+    result = check_robots_with(handler)
+    assert result.error_code == "terms_not_approved"
+    assert requests == ["/robots.txt"]
+
+
+def test_absent_robots_file_does_not_create_an_unwritten_prohibition():
+    result = check_robots_with(lambda _request: httpx.Response(404))
+    assert result is None
+
+
+def test_robots_transport_failure_is_not_treated_as_permission():
+    result = check_robots_with(lambda _request: httpx.Response(503))
+    assert result.error_code == "source_unavailable"
 
 
 def test_unapproved_requested_origin_is_rejected_before_network():
@@ -145,7 +198,9 @@ def test_200_json_uses_only_recognized_generic_metadata():
     )
     assert isinstance(result, SourceObservation)
     assert result.title == "Example JSON Results"
-    assert result.stable_metadata == {"period": "FY2026"}
+    assert result.stable_metadata["period"] == "FY2026"
+    assert len(result.stable_metadata["page_content_sha256"]) == 64
+    assert "token" not in result.stable_metadata
 
 
 def test_same_origin_redirect_is_followed_without_cookie_carryover():
@@ -437,6 +492,27 @@ def test_corrected_marker_sets_replacement_suspicion():
         lambda _request: html_response(extra_meta='<meta name="corrected" content="true">')
     )
     assert result.replacement_suspected is True
+
+
+def test_page_content_digest_changes_without_persisting_response_body():
+    first = observe_with(
+        lambda _request: httpx.Response(
+            200,
+            text="<html><head><title>IR Library</title></head><body>old document</body></html>",
+            headers={"content-type": "text/html"},
+        )
+    )
+    second = observe_with(
+        lambda _request: httpx.Response(
+            200,
+            text="<html><head><title>IR Library</title></head><body>new document</body></html>",
+            headers={"content-type": "text/html"},
+        )
+    )
+
+    assert first.stable_metadata["page_content_sha256"] != (
+        second.stable_metadata["page_content_sha256"]
+    )
 
 
 def test_live_observations_flow_through_runtime_without_false_no_change():

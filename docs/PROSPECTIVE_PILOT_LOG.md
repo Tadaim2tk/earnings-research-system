@@ -149,3 +149,57 @@ stopped_at: not_applicable
 resume_requirements: not_applicable
 resume_approved_by: not_applicable
 resumed_at: not_applicable
+
+## 2026-08-09T05:26:57+09:00 - candidate_terms_review_preparation
+
+timestamp: 2026-08-09T05:26:57+09:00
+entry_id: OPLOG-20260809-005
+corrects_entry_id: none
+event_id: not_selected
+phase: candidate_terms_review_preparation
+actor_role: AI documentation support
+action: ICECOを第1号candidateとしてHumanが判断するため、公式event候補、source候補、Terms Review Record、低負荷条件、schedule、raw保存方針、CP-1を整理
+decision: pending
+monitor_target_id: not_applicable
+monitor_result: not_run
+metadata_fingerprint: not_applicable
+error_code: none
+evidence_reference: ICECO_PILOT_APPROVAL.md
+validation_result: success。sample validation成功、pytest 360件成功
+git_commit: pending
+exception_or_stop_reason: source固有の自動access許可、正確なpolicy／disclaimer URL、stable reviewer identifier、対象URL、activationがHuman未承認
+next_gate: approval packetのHuman reviewとA-F判断
+stop_reason: none
+affected_event_or_phase: ICECO candidate preparation; 2026-08-13 quarterly earnings candidate
+decision_maker: pending
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable
+
+## 2026-08-09T12:00:00+09:00 - autonomous_monitoring_activation_correction
+
+timestamp: 2026-08-09T12:00:00+09:00
+entry_id: OPLOG-20260809-006
+corrects_entry_id: OPLOG-20260809-005
+event_id: not_selected
+phase: autonomous_monitoring_activation
+actor_role: AI operations under standing Human policy
+action: 公開・認証不要・低頻度・metadata-only・明示禁止なしの恒久方針を適用し、ICECO公式IRの3 targetをproduction registryへ登録。robots確認、初回live observation、checkpoint生成、bundle validation、定期workflow、研究handoffを準備
+decision: activated_by_system_policy
+monitor_target_id: ICECO_IR_CALENDAR; ICECO_IR_ROOT; ICECO_RESULTS
+monitor_result: initial_local_observation_success
+metadata_fingerprint: target別checkpointに記録。raw responseは保存しない
+error_code: none
+evidence_reference: ICECO_PILOT_APPROVAL.md; https://www.iceco.co.jp/ir/policy/; https://www.iceco.co.jp/ir/disclaimer/; https://www.iceco.co.jp/robots.txt
+validation_result: robots許可、3 targetの取得・parse・bundle validation成功。repository全体の最終検証はcommit前に実施
+git_commit: pending
+exception_or_stop_reason: none
+next_gate: main merge後のGitHub Actions初回state作成。price、formal evidence、event、baselineは別の技術境界
+stop_reason: none
+affected_event_or_phase: ICECO public IR monitoring; 2026-08-13 quarterly earnings candidate
+decision_maker: system_policy:public-web-low-frequency-v1
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable
