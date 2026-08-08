@@ -1,6 +1,7 @@
 """Approval-gated HTTP adapter for public source metadata."""
 
 import codecs
+import hashlib
 import ipaddress
 import json
 import re
@@ -11,10 +12,12 @@ from email.message import Message
 from html.parser import HTMLParser
 from typing import Callable, Dict, Mapping, Optional, Tuple
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
+from urllib.robotparser import RobotFileParser
 
 import httpcore
 import httpx
 
+from earnings_research.identifiers import is_activation_authorizer
 from earnings_research.monitoring.models import (
     LiveSourceContext,
     ObservationFailure,
@@ -40,7 +43,6 @@ MAX_REDIRECT_HOPS = 3
 DNS_RESOLUTION_TIMEOUT_SECONDS = 5.0
 USER_AGENT = "EarningsResearchSystem-Monitor/1.0 (public-metadata-only)"
 
-_HUMAN_IDENTIFIER = re.compile(r"^human:[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _SECRET_QUERY_KEYS = {
     "access_token",
@@ -175,12 +177,43 @@ class LiveSourceAdapter:
                 context.observed_at,
             )
 
+    def check_robots(
+        self, target: Dict[str, str], context: LiveSourceContext
+    ) -> Optional[ObservationFailure]:
+        """Fail closed when robots policy cannot be checked or disallows the target path."""
+        _require_aware(context.observed_at)
+        target_url = target.get("source_url", "")
+        try:
+            self._require_approval(target)
+            approved_url, approved_origin = _validate_initial_target_url(target_url)
+            parts = urlsplit(approved_url)
+            robots_url = urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", ""))
+            result = self._fetch(
+                current_url=robots_url,
+                approved_origin=approved_origin,
+                context=LiveSourceContext(observed_at=context.observed_at),
+                robots_path=parts.path or "/",
+            )
+        except LiveSourcePolicyError as exc:
+            return _failure(exc.error_code, exc.safe_message, target_url, context.observed_at)
+        if isinstance(result, ObservationFailure):
+            return result
+        if result.stable_metadata.get("robots_allowed") != "true":
+            return _failure(
+                "terms_not_approved",
+                "robots policy disallows the approved source path",
+                target_url,
+                context.observed_at,
+            )
+        return None
+
     def _fetch(
         self,
         *,
         current_url: str,
         approved_origin: Tuple[str, str, int],
         context: LiveSourceContext,
+        robots_path: Optional[str] = None,
     ) -> ObservationResult:
         started = self._monotonic()
         visited = set()
@@ -301,6 +334,13 @@ class LiveSourceAdapter:
                             )
                         redirect_hops += 1
                         continue
+                    if robots_path is not None and response.status_code in {404, 410}:
+                        return _robots_observation(
+                            current_url,
+                            context.observed_at,
+                            allowed=True,
+                            status="absent",
+                        )
                     status_failure = _status_failure(response.status_code)
                     if status_failure is not None:
                         code, message, retryable = status_failure
@@ -318,6 +358,7 @@ class LiveSourceAdapter:
                         current_url,
                         context,
                         deadline=started + OVERALL_BUDGET_SECONDS,
+                        robots_path=robots_path,
                     )
             except httpx.InvalidURL:
                 return _failure(
@@ -359,10 +400,12 @@ class LiveSourceAdapter:
         context: LiveSourceContext,
         *,
         deadline: float,
+        robots_path: Optional[str] = None,
     ) -> ObservationResult:
         content_type_header = response.headers.get("content-type", "")
         media_type, charset = _parse_content_type(content_type_header)
-        if media_type not in {"text/html", "application/json"}:
+        allowed_media = {"text/plain"} if robots_path is not None else {"text/html", "application/json"}
+        if media_type not in allowed_media:
             return _failure(
                 "unexpected_format",
                 "response Content-Type is not approved",
@@ -431,6 +474,18 @@ class LiveSourceAdapter:
             return _failure("parse_error", "response body is empty", source_url, context.observed_at)
         try:
             text = _decode_body(bytes(body), charset, media_type)
+            if robots_path is not None:
+                parser = RobotFileParser()
+                parser.parse(text.splitlines())
+                return _robots_observation(
+                    source_url,
+                    context.observed_at,
+                    allowed=parser.can_fetch("EarningsResearchSystem-Monitor", robots_path),
+                    status="present",
+                    content_length=len(body),
+                    etag=_optional_header(response.headers.get("etag")),
+                    last_modified=_optional_header(response.headers.get("last-modified")),
+                )
             parsed = _parse_html(text) if media_type == "text/html" else _parse_json(text)
         except UnicodeError:
             return _failure("parse_error", "response charset decoding failed", source_url, context.observed_at)
@@ -445,6 +500,9 @@ class LiveSourceAdapter:
             return _failure("parse_error", "response metadata parsing failed", source_url, context.observed_at)
 
         actual_length = len(body)
+        # Keep only a digest for later comparisons; raw response content is not
+        # part of the persisted monitoring bundle.
+        parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
         length_mismatch = isinstance(declared_length, int) and declared_length != actual_length
         previous = context.previous_checkpoint
         etag = _optional_header(response.headers.get("etag"))
@@ -481,13 +539,13 @@ class LiveSourceAdapter:
             or target.get("automated_access_permitted", "").lower() != "true"
             or target.get("monitoring_level") != "level_2"
             or target.get("terms_review_state") != "candidate_specific_review_completed"
-            or not _HUMAN_IDENTIFIER.fullmatch(target.get("automation_approved_by", ""))
+            or not is_activation_authorizer(target.get("automation_approved_by", ""))
             or target.get("activation_state") != "activated"
-            or not _HUMAN_IDENTIFIER.fullmatch(target.get("activation_approved_by", ""))
+            or not is_activation_authorizer(target.get("activation_approved_by", ""))
         ):
             raise LiveSourcePolicyError(
                 "terms_not_approved",
-                "live source access is not Human-approved and activated",
+                "live source access is not authorized and activated",
             )
 
 
@@ -584,6 +642,34 @@ def _failure(
         retry_count=0,
         source_url=_safe_url(source_url),
         retryable=retryable,
+    )
+
+
+def _robots_observation(
+    source_url: str,
+    observed_at: datetime,
+    *,
+    allowed: bool,
+    status: str,
+    content_length: Optional[int] = None,
+    etag: Optional[str] = None,
+    last_modified: Optional[str] = None,
+) -> SourceObservation:
+    return SourceObservation(
+        source_url=_canonical_url(source_url),
+        title="robots.txt",
+        document_id=None,
+        published_at=None,
+        etag=etag,
+        last_modified=last_modified,
+        content_length=content_length,
+        replacement_suspected=False,
+        observed_at=observed_at,
+        stable_metadata={
+            "robots_allowed": "true" if allowed else "false",
+            "robots_status": status,
+        },
+        content_type="text/plain",
     )
 
 

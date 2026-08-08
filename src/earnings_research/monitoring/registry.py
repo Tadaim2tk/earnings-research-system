@@ -1,8 +1,9 @@
 """Read-only loading and planning for Human-owned monitor targets."""
 
 import csv
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from earnings_research.validation.validator import load_spec, validate_monitor_registry
 
@@ -26,9 +27,14 @@ def load_registry(path: Path) -> List[Dict[str, str]]:
     return rows
 
 
-def active_target_plan(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def active_target_plan(
+    rows: List[Dict[str, str]],
+    *,
+    planned_at: Optional[datetime] = None,
+    force: bool = False,
+) -> List[Dict[str, str]]:
     """Return only explicitly enabled, activated, approved Level 2 targets."""
-    return [
+    active = [
         dict(row)
         for row in rows
         if row.get("enabled", "").lower() == "true"
@@ -36,6 +42,21 @@ def active_target_plan(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
         and row.get("monitoring_level") == "level_2"
         and row.get("automated_access_permitted", "").lower() == "true"
     ]
+    if force or planned_at is None:
+        return active
+    return [row for row in active if _is_due(row, planned_at)]
+
+
+def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
+    if planned_at.tzinfo is None or planned_at.utcoffset() is None:
+        raise RegistryError("planned_at must be timezone-aware")
+    local = planned_at.astimezone(timezone(timedelta(hours=9)))
+    if local.weekday() >= 5:
+        return False
+    event_date = target.get("event_date", "")
+    if event_date and local.date().isoformat() == event_date:
+        return local.hour in {9, 15, 21}
+    return local.hour == 9
 
 
 def find_target(rows: List[Dict[str, str]], monitor_target_id: str) -> Dict[str, str]:

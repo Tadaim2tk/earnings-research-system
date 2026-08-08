@@ -41,6 +41,9 @@ def target(initialization_run_id="MRUN-EXAMPLE-001"):
         "automated_access_permitted": "true",
         "enabled": "true",
         "schedule_profile": "prospective_event_v1",
+        "change_response": "human_review",
+        "event_date": "",
+        "scheduled_session": "",
         "timezone": "Asia/Tokyo",
         "active_from": "2026-08-07T00:00:00+09:00",
         "active_until": "2026-08-31T23:59:59+09:00",
@@ -238,8 +241,8 @@ def test_offline_adapter_extracts_html_and_metadata_without_network():
     assert observation.content_length == 1024
 
 
-def test_initialization_requires_matching_human_activation():
-    with pytest.raises(MonitorTransitionError, match="Human-owned activation"):
+def test_initialization_requires_matching_authorized_activation():
+    with pytest.raises(MonitorTransitionError, match="authorized activation"):
         MonitorRuntime().transition(
             target=target("MRUN-WRONG"),
             previous_checkpoint=None,
@@ -250,6 +253,36 @@ def test_initialization_requires_matching_human_activation():
             started_at=moment(9),
             finished_at=moment(9, 1),
         )
+
+
+def test_autonomous_change_handoff_keeps_monitoring_healthy_without_resolution():
+    autonomous = target()
+    autonomous["change_response"] = "autonomous_research_handoff"
+    runtime = MonitorRuntime()
+    initial = runtime.transition(
+        target=autonomous,
+        previous_checkpoint=None,
+        prior_runs=[],
+        resolutions=[],
+        observation=observe("initial", moment(9)),
+        run_id="MRUN-EXAMPLE-001",
+        started_at=moment(9),
+        finished_at=moment(9, 1),
+    )
+    changed = runtime.transition(
+        target=autonomous,
+        previous_checkpoint=initial.checkpoint_after,
+        prior_runs=initial.monitor_runs,
+        resolutions=[],
+        observation=observe("changed", moment(10)),
+        run_id="MRUN-EXAMPLE-002",
+        started_at=moment(10),
+        finished_at=moment(10, 1),
+    )
+    assert changed.monitor_run["run_result"] == "change_detected"
+    assert changed.checkpoint_after["target_state"] == "healthy"
+    assert changed.checkpoint_after["pending_change_run_id"] == ""
+    assert changed.validation_report.ok
 
 
 def test_missing_checkpoint_does_not_reinitialize_existing_lineage():

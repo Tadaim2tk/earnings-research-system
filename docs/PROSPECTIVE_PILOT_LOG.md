@@ -176,3 +176,30 @@ stopped_at: not_applicable
 resume_requirements: not_applicable
 resume_approved_by: not_applicable
 resumed_at: not_applicable
+
+## 2026-08-09T12:00:00+09:00 - autonomous_monitoring_activation_correction
+
+timestamp: 2026-08-09T12:00:00+09:00
+entry_id: OPLOG-20260809-006
+corrects_entry_id: OPLOG-20260809-005
+event_id: not_selected
+phase: autonomous_monitoring_activation
+actor_role: AI operations under standing Human policy
+action: 公開・認証不要・低頻度・metadata-only・明示禁止なしの恒久方針を適用し、ICECO公式IRの3 targetをproduction registryへ登録。robots確認、初回live observation、checkpoint生成、bundle validation、定期workflow、研究handoffを準備
+decision: activated_by_system_policy
+monitor_target_id: ICECO_IR_CALENDAR; ICECO_IR_ROOT; ICECO_RESULTS
+monitor_result: initial_local_observation_success
+metadata_fingerprint: target別checkpointに記録。raw responseは保存しない
+error_code: none
+evidence_reference: ICECO_PILOT_APPROVAL.md; https://www.iceco.co.jp/ir/policy/; https://www.iceco.co.jp/ir/disclaimer/; https://www.iceco.co.jp/robots.txt
+validation_result: robots許可、3 targetの取得・parse・bundle validation成功。repository全体の最終検証はcommit前に実施
+git_commit: pending
+exception_or_stop_reason: none
+next_gate: main merge後のGitHub Actions初回state作成。price、formal evidence、event、baselineは別の技術境界
+stop_reason: none
+affected_event_or_phase: ICECO public IR monitoring; 2026-08-13 quarterly earnings candidate
+decision_maker: system_policy:public-web-low-frequency-v1
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable

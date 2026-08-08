@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
+from earnings_research.identifiers import (
+    is_activation_authorizer,
+    is_human_identifier as _matches_human_identifier,
+)
 from earnings_research.validation.spec import ColumnSpec, TableSpec
 
 JST = timezone(timedelta(hours=9))
@@ -99,7 +103,6 @@ PROSPECTIVE_BASELINE_FIELDS = {
 }
 BASELINE_VERSION_PATTERN = re.compile(r"^v([1-9][0-9]*)$", re.ASCII)
 LOWER_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
-HUMAN_IDENTIFIER_PATTERN = re.compile(r"^human:[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
 FATAL_MONITOR_ERROR_CODES = {"state_unavailable", "persistence_error"}
 
 
@@ -1751,8 +1754,8 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
 
         for column in ("automation_approved_by", "activation_approved_by"):
             value = _clean(row.get(column, ""))
-            if value and not _is_human_identifier(value):
-                issues.append(ValidationIssue("monitor_target", row_number, column, "Human-owned approval requires human:<stable-id> identifier"))
+            if value and not is_activation_authorizer(value):
+                issues.append(ValidationIssue("monitor_target", row_number, column, "authorization requires human:<stable-id> or system_policy:<policy-id>"))
 
         terms_state = _clean(row.get("terms_review_state", ""))
         terms_reviewed_at = _clean(row.get("last_terms_review_at", ""))
@@ -1770,9 +1773,9 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
             issues.append(ValidationIssue("monitor_target", row_number, "terms_review_reference", "completed terms review requires timestamp and reference"))
         if access_permitted and (
             terms_state != "candidate_specific_review_completed"
-            or not _is_human_identifier(automation_approved_by)
+            or not is_activation_authorizer(automation_approved_by)
         ):
-            issues.append(ValidationIssue("monitor_target", row_number, "automated_access_permitted", "automated access requires completed terms review and Human approval"))
+            issues.append(ValidationIssue("monitor_target", row_number, "automated_access_permitted", "automated access requires completed terms review and an authorized approval basis"))
 
         if activation_state == "not_activated":
             if activated_at or activation_approved_by or generation != 0 or initialization_run_id:
@@ -1780,8 +1783,8 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
             if enabled:
                 issues.append(ValidationIssue("monitor_target", row_number, "enabled", "not_activated target cannot be enabled"))
         elif activation_state in {"activated", "suspended", "retired"}:
-            if not activated_at or not _is_human_identifier(activation_approved_by) or generation is None or generation < 1:
-                issues.append(ValidationIssue("monitor_target", row_number, "activation_state", "activated lifecycle state requires Human activation timestamp and generation"))
+            if not activated_at or not is_activation_authorizer(activation_approved_by) or generation is None or generation < 1:
+                issues.append(ValidationIssue("monitor_target", row_number, "activation_state", "activated lifecycle state requires authorized activation timestamp and generation"))
             if activation_state in {"suspended", "retired"} and enabled:
                 issues.append(ValidationIssue("monitor_target", row_number, "enabled", "%s target cannot be enabled" % activation_state))
 
@@ -1997,7 +2000,7 @@ def _validate_monitor_dataset_relations(rows_by_table: Dict[str, List[Dict[str, 
                     or started_at is None
                     or activated_at > started_at
                 ):
-                    issues.append(ValidationIssue("monitor_run", row_number, "run_result", "initialized run requires matching Human-owned activation record"))
+                    issues.append(ValidationIssue("monitor_run", row_number, "run_result", "initialized run requires matching authorized activation record"))
 
             if result != "initialized" and fingerprint_before and current_fingerprint and fingerprint_before != current_fingerprint:
                 issues.append(ValidationIssue("monitor_run", row_number, "fingerprint_before", "fingerprint_before must match the last successful observation"))
@@ -2112,12 +2115,16 @@ def _validate_monitor_dataset_relations(rows_by_table: Dict[str, List[Dict[str, 
             if _clean(checkpoint.get("metadata_fingerprint", "")) != state["fingerprint"]:
                 issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "metadata_fingerprint", "checkpoint fingerprint must match the latest successful observation"))
 
+        autonomous_handoff = (
+            target is not None
+            and _clean(target.get("change_response", "")) == "autonomous_research_handoff"
+        )
         change_runs = [row for row in target_runs if _clean(row.get("run_result", "")) == "change_detected"]
         unresolved_change_ids = [
             _clean(row.get("monitor_run_id", ""))
             for row in change_runs
             if _clean(row.get("monitor_run_id", "")) not in effective_resolution_by_source
-        ]
+        ] if not autonomous_handoff else []
         # The append-only run history is the complete pending set. The current
         # checkpoint points to the newest unresolved change for Human routing.
         pending_change_id = unresolved_change_ids[-1] if unresolved_change_ids else ""
@@ -2143,7 +2150,7 @@ def _validate_monitor_dataset_relations(rows_by_table: Dict[str, List[Dict[str, 
                 source_id = _clean(resolution.get("source_monitor_run_id", ""))
                 if _clean(resolution.get("monitor_target_id", "")) != target_id or source_id not in effective_resolution_by_source:
                     issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "resolution_applied_id", "checkpoint resolution must be the effective Human resolution for this target"))
-        elif change_runs and not pending_change_id and checkpoint_state == "healthy":
+        elif change_runs and not pending_change_id and checkpoint_state == "healthy" and not autonomous_handoff:
             issues.append(ValidationIssue("monitor_checkpoint", checkpoint_number, "resolution_applied_id", "healthy checkpoint after change requires effective Human resolution"))
 
         if not _is_true(target.get("enabled", "")) and checkpoint_state not in {"disabled", "uninitialized", "stopped"}:
@@ -2216,7 +2223,7 @@ def _is_true(value: Optional[str]) -> bool:
 
 
 def _is_human_identifier(value: str) -> bool:
-    return bool(HUMAN_IDENTIFIER_PATTERN.fullmatch(value))
+    return _matches_human_identifier(value)
 
 
 def _validate_hypothesis_constraints(rows_by_table: Dict[str, List[Dict[str, str]]]) -> List[ValidationIssue]:

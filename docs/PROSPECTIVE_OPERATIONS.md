@@ -2,11 +2,11 @@
 
 ## Status
 
-第1号prospective pilotは `Conditionally ready` である。本書は運用開始条件を定義するが、event選定、実evidence登録、baseline作成、lock、post-event reviewを自動承認しない。
+第1号prospective pilotのLevel 2 monitoringは開始可能である。本書は運用条件を定義するが、実evidence登録、baseline作成、lock、post-event reviewまたは売買を自動承認しない。
 
 ## Scope And Truth Boundary
 
-第1号ではapproval-gated Level 2 monitoringとmetadata-only保存を推奨する。AIはHumanが `automated_access_permitted=true` と承認したsourceだけを定期確認し、変更候補と判断案を作る。Human approval gateは自動化しない。monitoring実装がない期間、またはsource固有の自動accessが未承認の場合は、そのsourceだけLevel 1の手動開始へ落とす。
+第1号ではpolicy-gated Level 2 monitoringとmetadata-only保存を使用する。公開、認証不要、低頻度、最小保存、明示禁止なし、外部契約・課金・個人情報・非公開情報・実売買・不可逆操作なし、の全条件を満たすsourceは `system_policy:public-web-low-frequency-v1` によりAIが定期確認できる。具体的な例外条件を検出した場合だけ停止してHuman判断を求める。
 
 本書を第1号prospective pilotの運用契約の正本とする。関連文書は要約と本書への参照だけを持ち、同一規則を複製しない。
 
@@ -25,7 +25,7 @@ ERSからTSOまたはTSO_LOGへ書き戻さない。Vaultは機械データ正�
 
 ### Terms Review Record
 
-sourceごとに次を別々にHumanが記録する。未確認項目を他の許可から推測しない。
+sourceごとに次を記録する。Humanによる個別契約判断と、事前に定めた自律運用policyによる判定を区別し、未確認項目を他の許可から推測しない。
 
 candidate固有のTerms Review Recordは、machine schemaが承認されるまで [PROSPECTIVE_PILOT_LOG.md](PROSPECTIVE_PILOT_LOG.md) のappend-only entryへ保存する。`terms_reference` にはHumanが実際に確認した規約URL、契約文書identifier、またはprovider回答referenceを記録する。
 
@@ -56,10 +56,10 @@ rejected
 
 - `policy_defined` は本書の一般方針だけが定義済みであることを示す。
 - `candidate_specific_review_pending` は具体的なsource候補があるが、利用条件のHuman確認が未完了であることを示す。
-- `candidate_specific_review_completed` は対象sourceと利用方法を特定したHuman確認が完了したことを示す。
+- `candidate_specific_review_completed` は対象sourceと利用方法を特定し、Human判断または適用可能なsystem policyによる確認が完了したことを示す。
 - `rejected` は確認結果により予定用途へ使用しない判断をHumanが記録したことを示す。
 
-現時点では会社公式IR、TDnet、具体的な価格表示元、J-Quantsのいずれも、第1号candidate固有の利用条件を確認済みまたは利用許可済みとは扱わない。
+会社公式IRのうち自律運用条件を満たす公開pageは利用可能とする。TDnet、具体的な価格表示元、J-Quantsにはこの判断を自動適用せず、個別条件を確認する。
 
 第1号のdefaultは次のとおりとする。
 
@@ -67,10 +67,10 @@ rejected
 raw_storage_permitted = false
 redistribution_permitted = false
 ai_raw_input_permitted = false
-automated_access_permitted = false
+automated_access_permitted = policy dependent
 ```
 
-`viewing_permitted` と `metadata_recording_permitted` はcandidate固有のprovider条件をHumanが確認するまで未承認とする。次の場合はterms reviewを再実施する。
+`viewing_permitted`、`metadata_recording_permitted`、`automated_access_permitted` は対象sourceと利用方法に対して判定する。次の場合はterms reviewを再実施する。
 
 - 新sourceを追加する。
 - 規約改定を認知する。
@@ -89,9 +89,10 @@ automated_access_permitted = false
 
 条件:
 
-- candidate選定時にissuerサイトの利用条件をHumanが確認する。
-- raw保存、再配布、raw documentのAI入力、自動取得をdefaultで禁止する。Humanが利用方法ごとに明示承認した項目だけを許可する。
-- 利用条件が不明なら停止する。
+- issuerサイトの利用条件、robots規則、認証・課金の有無を確認する。
+- 公開、認証不要、低頻度、metadata-only、明示禁止なしの条件を満たす場合はsystem policyで自動取得を許可できる。
+- raw保存、再配布、raw documentの恒久AI入力はdefaultで禁止する。
+- 明示禁止または実質的に判断困難な条件があれば停止する。
 
 ### TDnet Timely Disclosure Viewing Service
 
@@ -189,7 +190,7 @@ content_hash_algorithm = empty
 | baseline author | Human with AI drafting support |
 | Human reviewer | Human |
 | lock operator | Human |
-| event monitor | AI for approved sources / Human gate and Level 1 fallback |
+| event monitor | AI for authorized sources / Human exception gate |
 | post-event reviewer | Human |
 | incident owner | Human |
 
@@ -204,16 +205,15 @@ AIへ許可する作業:
 - 新資料、予定変更、延期、中止、訂正候補の検知
 - URL、資料名、公開日時、KPI、guidance変更の整理
 - evidence、event status、monitoring entryの下書き
-- Human承認済みprice sourceからの必要項目取得案
+- 利用条件を満たすprice sourceからの必要項目取得案
 - 取得失敗、矛盾、不明点の通知
 - missing itemの指摘
 
-AIがsourceへaccessし、またはraw documentを処理できるのは、該当する利用方法をHumanが個別承認した場合だけである。未承認時にAIへ渡せるのは、Humanが利用条件を確認した最小metadata、Human作成の要約、ERS内部fieldだけとし、raw document、TDnet page本文、provider raw dataを入力しない。
+AIがsourceへaccessできるのは、Humanによる個別承認または `system_policy:public-web-low-frequency-v1` の適用条件を満たす場合である。raw documentの処理・保存は別の利用条件と実装境界であり、monitoring authorizationから推測しない。TDnet page本文やprovider raw dataも個別条件なしに入力しない。
 
 AIへ委譲しない判断:
 
-- provider termsの最終判断
-- event選定承認
+- 明示禁止または実質的に判断困難なprovider termsの例外判断
 - `used_for_score`承認
 - Human review承認
 - baseline lock承認
@@ -239,7 +239,7 @@ reviewerには個人本名ではなく、pilot開始前に固定した安定iden
 
 ## Event Monitoring
 
-第1号の推奨はapproval-gated Level 2 monitoringである。Humanへ毎日の定期巡回を要求せず、AIが承認済みsourceを定期確認し、変化または判断が必要な場合だけHumanへ通知する。event選定時に次を記録する。
+第1号の推奨はpolicy-gated Level 2 monitoringである。Humanへ毎日の定期巡回を要求せず、AIが許可済みsourceを定期確認し、変化後の研究処理を継続する。例外条件または不可逆な判断が必要な場合だけHumanへ通知する。event選定時に次を記録する。
 
 ```text
 primary_calendar_source
@@ -257,7 +257,7 @@ Level 2 = AIが定期監視し、変化時に通知と判断案を作り、Human
 Level 3 = monitoringからevidence、price、post-event準備まで広範囲に自動化する
 ```
 
-第1号ではLevel 2を推奨する。ただしsourceごとに `automated_access_permitted=true` のHuman承認を必須とし、未承認sourceだけLevel 1へ落とす。Level 3は別承認とする。
+第1号ではLevel 2を使用する。sourceごとに `automated_access_permitted=true` と根拠となるHumanまたはsystem policy identifierを必須とする。Level 3は別の実装・安全条件を要する。
 
 第1号のlive monitoringでは、DNS timeout stateがadapter instanceへ保持される実装境界に合わせ、`1 target = 1 LiveSourceAdapter instance` を必須とする。1 instanceを複数targetで共有しない。複数target対応前にtimeout stateをtarget scopeへ分離し、別の実装reviewを通す。
 
@@ -335,13 +335,14 @@ IR sourceから原則保存するのはURL、資料名、公開日時、確認�
 変更あり:
 -> URL、資料名、公開日時、document identifierを整理
 -> 前回との差分を作成
--> Humanへ通知
+-> autonomous targetは研究handoffを作成して次工程へ継続
+-> 例外条件を検出した場合だけHumanへ通知
 
 決算資料公開:
 -> 利用条件が許す範囲だけ必要資料を読む
 -> KPI / guidance / evidence候補を整理
 -> occurred候補を提示
--> Human認定待ち
+-> formal event statusへ書く前に現行schemaの認定gateを適用
 
 価格:
 -> Human承認済みsourceがあれば必要項目の取得案を作る
@@ -562,11 +563,11 @@ resumed_at
 
 ## Candidate-Specific Gates Still Required
 
-本書が承認されてもpilotは自動開始しない。event選定時にHumanが次を完了する。
+公開Web監視はsystem policyの条件を満たせば自動開始できる。formal event、evidence、baselineへ進む前には、現在のschema contractに必要な次の実値を揃える。
 
-1. 候補会社IRサイトの利用条件確認
+1. 候補会社IRサイトへの適用policyまたは例外判断
 2. 具体的な価格表示元の利用条件確認
 3. reviewer identifierの記録
 4. primary calendar sourceとoccurrence sourceの指定
 5. 監視可能日程の確認
-6. candidate選定のHuman承認
+6. candidate identityとevent identityの確定

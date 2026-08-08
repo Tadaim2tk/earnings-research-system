@@ -16,7 +16,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Validation CLI for required columns, types, keys, event semantics, temporal constraints, scoring versions, evidence lineage, KPI references, NO_TRADE handling, and basic future-information contamination checks
 - Pytest coverage for the initial validation contract
 - Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
-- Approval-gated Level 2 monitor contracts, validator, network-free core, temporary state persistence, stale-gap detection, Issue notification, and an inactive live-source adapter library
+- Policy-gated Level 2 monitor contracts, validator, offline core, temporary state persistence, stale-gap detection, Issue notification, and live public-IR monitoring
 
 ## Prospective Operations
 
@@ -25,7 +25,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - [Append-only pilot log](docs/PROSPECTIVE_PILOT_LOG.md)
 - [First event selection criteria](docs/FIRST_PROSPECTIVE_EVENT_SELECTION.md)
 
-The first pilot remains conditional on candidate-specific provider terms, an approved price source and acquisition method, a stable reviewer identifier, source assignments, monitoring availability, and Human event-selection approval. AI may monitor only sources whose automated access has been explicitly approved by a Human; other sources fall back to Level 1 manual initiation.
+The first live pilot monitors ICECO public IR pages under the repository's low-frequency public-web policy. Human review remains an exception gate for explicit prohibitions, ambiguous terms, authentication, payment, private data, trading, or irreversible external actions. Price sourcing, formal evidence, event rows, and baseline lock remain separate.
 
 ## Out of Scope
 
@@ -54,13 +54,13 @@ python -m earnings_research.cli validate-file data/samples/pre_earnings_baseline
 python -m earnings_research.cli show-schema pre_earnings_baseline
 ```
 
-The monitoring core remains deterministic and can be exercised without network access. The live-source adapter is a separate library boundary: it uses HTTPX/HTTPCore with fixed DNS, request, job, and response-size limits, manual same-origin redirects, sanitized failures, resolved-IP validation, and an approval gate that runs before any request. DNS resolution is caller-bounded and the overall request deadline is rechecked before HTTP starts. Each request connects to one checked public IP while TLS SNI, certificate verification, and HTTP authority retain the approved hostname. It is not connected to the scheduled workflow.
+The monitoring core remains deterministic and can be exercised without network access. The live-source adapter uses HTTPX/HTTPCore with fixed DNS, request, job, and response-size limits, manual same-origin redirects, sanitized failures, resolved-IP validation, a robots check, and an authorization gate before page access. It is connected to the scheduled workflow for activated production targets.
 
-The read-only Human-owned production registry at `data/config/monitor_targets.csv` remains header-only. Therefore no real company is activated, scheduled runs have no live source target, and adding the HTTP client does not authorize access to any provider. Live activation requires a separate Human-reviewed registry change.
+The read-only production registry at `data/config/monitor_targets.csv` contains three activated ICECO targets authorized by `system_policy:public-web-low-frequency-v1`. Each target is processed independently and stores metadata and comparison digests, not raw page bodies.
 
 The fictional offline workflow can be exercised with `workflow_dispatch`. Operational entry points are available under `python -m earnings_research.cli monitor-*`; they never write the registry or push repository contents. CI is fixed to Python 3.11.9. State artifacts use 14-day retention and are temporary pilot persistence, not permanent machine truth. Missing retained state fails closed outside an exact Human-approved initialization.
 
-Real-company live IR access, ICECO activation, conditional requests, permanent storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
+Permanent raw storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
 
 ## Sample Data
 

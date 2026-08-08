@@ -335,3 +335,19 @@ Decision: [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) に従い、第
 Consequences: Humanへ毎日の定期巡回を要求せず、AIへ作業量を移しながら承認権限を増やさない。monitor checkpointとformal evidenceを分離し、取得失敗を `no_change` と誤認しない。価格sourceはHuman承認済みproviderから必要項目だけ取得することを目標とするが、providerの正式採用と自動取得実装は別承認になる。本ADRがAcceptedになるまで、実monitoring automation、price adapter、実event登録を開始しない。
 
 Alternatives Considered: 全sourceをHumanが毎日確認する方式は定期負荷と確認漏れriskが高い。terms未確認sourceを一律自動巡回する方式はprovider境界を破る。evidence登録やevent statusまでAIが自動確定するLevel 3は初回pilotのHuman gateを広く変更するため採用しない。
+
+## ERS-ADR-0023
+
+Date: 2026-08-09
+
+Status: Accepted
+
+Approval: Humanの恒久方針として、公開・認証不要・低頻度GET・最小保存・明示的な自動access禁止なし・外部契約なし・課金なし・実売買なし、をすべて満たす情報収集はAIが自律的に開始できることを承認した。
+
+Context: ADR-0022はsource単位のHuman approvalを前提としたため、具体的な禁止や契約判断が存在しない公開IR監視でもHuman応答待ちになり、継続監視という目的を阻害した。
+
+Decision: [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) と [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) に従い、適用条件を満たすsourceは `system_policy:public-web-low-frequency-v1` でmonitor authorizationとactivationを記録できる。明示禁止、実質的に判断困難な利用条件、login/authentication、有料契約、個人情報・非公開情報、実売買、金銭的または不可逆な外部操作を検出した場合だけfail-closedで停止し、Humanへ例外判断を求める。robots規則はpage取得前に確認する。
+
+Consequences: 通常の公開IR監視はHuman不在でも継続できる。raw page本文は保存せず、metadataと比較digestだけを保持する。価格provider、formal evidence、baseline lock、event status、売買は本ADRの承認範囲外である。
+
+Alternatives Considered: すべての新規公開URLをHuman approval待ちにする案は不要な停止を繰り返すため採用しない。公開情報なら無条件で取得する案は明示禁止、認証、課金、privacy等を見落とすため採用しない。

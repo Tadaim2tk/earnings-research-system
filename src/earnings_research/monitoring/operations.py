@@ -2,9 +2,14 @@
 
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
-from earnings_research.monitoring.models import ObservationFailure, OfflineSourceInput
+from earnings_research.monitoring.live import LiveSourceAdapter
+from earnings_research.monitoring.models import (
+    LiveSourceContext,
+    ObservationFailure,
+    OfflineSourceInput,
+)
 from earnings_research.monitoring.offline import OfflineSourceAdapter
 from earnings_research.monitoring.persistence import (
     BundleError,
@@ -87,6 +92,95 @@ def execute_offline_run(
         transition=transition,
         created_at=finished_at,
     )
+
+
+def execute_live_run(
+    *,
+    target: Dict[str, str],
+    previous_bundle: Optional[VerifiedMonitorBundle],
+    output_dir: Path,
+    run_id: str,
+    started_at: datetime,
+    finished_at: datetime,
+    adapter_factory: Callable[[], LiveSourceAdapter] = LiveSourceAdapter,
+) -> VerifiedMonitorBundle:
+    """Check robots, observe one live source, then persist one validated transition."""
+    _require_operational_target(target, started_at)
+    event_date = date.fromisoformat(target["event_date"]) if target.get("event_date") else None
+    if previous_bundle is None:
+        if (
+            target.get("activation_state") != "activated"
+            or target.get("initialization_run_id") != run_id
+            or target.get("initialization_generation") != "1"
+        ):
+            raise StateUnavailable("previous artifact missing outside authorized initialization")
+        previous_checkpoint = None
+        runs = []
+        resolutions = []
+    else:
+        if previous_bundle.manifest.monitor_target_id != target.get("monitor_target_id"):
+            raise StateUnavailable("previous artifact belongs to another monitor target")
+        previous_checkpoint = previous_bundle.checkpoint
+        runs = previous_bundle.runs
+        resolutions = previous_bundle.resolutions
+
+    if previous_checkpoint is not None:
+        assessment = assess_stale_gap(
+            last_success_at=_parse_optional_aware(previous_checkpoint.get("last_success_at", "")),
+            reference_time=started_at,
+            schedule_profile=target.get("schedule_profile", ""),
+            event_date=event_date,
+            event_date_required=bool(event_date),
+        )
+        if assessment.is_stale:
+            observation = ObservationFailure(
+                error_code="state_unavailable",
+                error_detail="stale gap exceeded %s-hour %s threshold"
+                % (int(assessment.threshold.total_seconds() // 3600), assessment.window),
+                observed_at=started_at,
+            )
+        else:
+            observation = _observe_live(target, previous_checkpoint, started_at, adapter_factory)
+    else:
+        observation = _observe_live(target, {}, started_at, adapter_factory)
+
+    transition = MonitorRuntime().transition(
+        target=target,
+        previous_checkpoint=previous_checkpoint,
+        prior_runs=runs,
+        resolutions=resolutions,
+        observation=observation,
+        run_id=run_id,
+        started_at=started_at,
+        finished_at=finished_at,
+        self_validate=True,
+        recorded_by="workflow:github-actions-live-monitor-v1",
+    )
+    if not transition.validation_report.ok:
+        raise MonitorTransitionError("validation hard gate rejected generated live bundle")
+    return write_committed_bundle(
+        output_dir=output_dir,
+        target=target,
+        transition=transition,
+        created_at=finished_at,
+    )
+
+
+def _observe_live(
+    target: Dict[str, str],
+    previous_checkpoint: Dict[str, str],
+    observed_at: datetime,
+    adapter_factory: Callable[[], LiveSourceAdapter],
+):
+    context = LiveSourceContext(
+        observed_at=observed_at,
+        previous_checkpoint=previous_checkpoint,
+    )
+    with adapter_factory() as adapter:
+        robots_failure = adapter.check_robots(target, context)
+        if robots_failure is not None:
+            return robots_failure
+        return adapter.observe(target, context)
 
 
 def _parse_optional_aware(value: str) -> Optional[datetime]:

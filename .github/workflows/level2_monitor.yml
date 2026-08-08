@@ -2,16 +2,24 @@ name: ERS Level 2 Monitor
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 0,6,12 * * 1-5"
   workflow_dispatch:
     inputs:
+      source_mode:
+        description: Offline fixture or authorized live target
+        required: true
+        type: choice
+        default: offline
+        options:
+          - offline
+          - live
       target_id:
-        description: Fictional offline target ID
+        description: Monitor target ID
         required: true
         default: MON-EXAMPLE-CALENDAR
       fixture_name:
         description: Offline fixture name
-        required: true
+        required: false
         type: choice
         options:
           - initial
@@ -43,17 +51,27 @@ jobs:
       - id: plan
         env:
           EVENT_NAME: ${{ github.event_name }}
+          SOURCE_MODE: ${{ github.event.inputs.source_mode }}
           TARGET_ID: ${{ github.event.inputs.target_id }}
           FIXTURE_NAME: ${{ github.event.inputs.fixture_name }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            matrix=$(python -m earnings_research.cli monitor-plan \
-              tests/fixtures/monitor_operations/monitor_targets.csv \
-              --target-id "$TARGET_ID" \
-              --fixture-name "$FIXTURE_NAME")
+            if [ "$SOURCE_MODE" = "live" ]; then
+              matrix=$(python -m earnings_research.cli monitor-plan \
+                data/config/monitor_targets.csv \
+                --target-id "$TARGET_ID" \
+                --force)
+            else
+              matrix=$(python -m earnings_research.cli monitor-plan \
+                tests/fixtures/monitor_operations/monitor_targets.csv \
+                --target-id "$TARGET_ID" \
+                --fixture-name "$FIXTURE_NAME" \
+                --force)
+            fi
           else
             matrix=$(python -m earnings_research.cli monitor-plan \
-              data/config/monitor_targets.csv)
+              data/config/monitor_targets.csv \
+              --planned-at "$(date --iso-8601=seconds)")
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -103,16 +121,27 @@ jobs:
           started_at=$(date --iso-8601=seconds)
           finished_at=$(date --iso-8601=seconds --date='+1 second')
           run_id=${DISPATCH_RUN_ID:-MRUN-${GITHUB_RUN_ID_VALUE}-${GITHUB_RUN_ATTEMPT_VALUE}}
-          result=$(python -m earnings_research.cli monitor-run \
-            --registry "$REGISTRY" \
-            --target-id "$TARGET_ID" \
-            --fixture-dir tests/fixtures/monitor_offline \
-            --fixture-name "$FIXTURE_NAME" \
-            --previous-dir .monitor/previous \
-            --output .monitor/current \
-            --run-id "$run_id" \
-            --started-at "$started_at" \
-            --finished-at "$finished_at")
+          if [ "${{ matrix.source_mode }}" = "live" ]; then
+            result=$(python -m earnings_research.cli monitor-run-live \
+              --registry "$REGISTRY" \
+              --target-id "$TARGET_ID" \
+              --previous-dir .monitor/previous \
+              --output .monitor/current \
+              --run-id "$run_id" \
+              --started-at "$started_at" \
+              --finished-at "$finished_at")
+          else
+            result=$(python -m earnings_research.cli monitor-run \
+              --registry "$REGISTRY" \
+              --target-id "$TARGET_ID" \
+              --fixture-dir tests/fixtures/monitor_offline \
+              --fixture-name "$FIXTURE_NAME" \
+              --previous-dir .monitor/previous \
+              --output .monitor/current \
+              --run-id "$run_id" \
+              --started-at "$started_at" \
+              --finished-at "$finished_at")
+          fi
           artifact_name=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
       - id: upload
@@ -130,6 +159,22 @@ jobs:
           path: .monitor/reread
       - name: Verify re-downloaded committed state
         run: python -m earnings_research.cli monitor-verify-bundle .monitor/reread
+      - id: handoff
+        name: Build autonomous research handoff
+        run: |
+          result=$(python -m earnings_research.cli monitor-build-handoff \
+            .monitor/reread \
+            --output .monitor/handoff/research_handoff.json)
+          required=$(printf '%s' "$result" | python -c 'import json,sys; print(str(json.load(sys.stdin)["handoff_required"]).lower())')
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+      - name: Preserve autonomous research handoff
+        if: steps.handoff.outputs.required == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ers-research-handoff-${{ matrix.monitor_target_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .monitor/handoff/research_handoff.json
+          if-no-files-found: error
+          retention-days: 14
       - id: notify
         continue-on-error: true
         env:

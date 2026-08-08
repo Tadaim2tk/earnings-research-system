@@ -11,13 +11,14 @@ import pytest
 import yaml
 
 from earnings_research.monitoring.github_api import GitHubAPIClient, GitHubAPIError
-from earnings_research.monitoring.models import OfflineSourceInput
+from earnings_research.monitoring.handoff import build_research_handoff, write_research_handoff
+from earnings_research.monitoring.models import ObservationFailure, OfflineSourceInput, SourceObservation
 from earnings_research.monitoring.notifications import (
     build_issue_plan,
     deliver_issue_notification,
 )
 from earnings_research.monitoring.offline import OfflineSourceAdapter
-from earnings_research.monitoring.operations import StateUnavailable, execute_offline_run
+from earnings_research.monitoring.operations import StateUnavailable, execute_live_run, execute_offline_run
 from earnings_research.monitoring.persistence import (
     BundleError,
     PersistenceError,
@@ -26,7 +27,7 @@ from earnings_research.monitoring.persistence import (
     verify_uploaded_bundle,
     write_committed_bundle,
 )
-from earnings_research.monitoring.registry import RegistryError, load_registry
+from earnings_research.monitoring.registry import RegistryError, active_target_plan, load_registry
 from earnings_research.monitoring.runtime import MonitorRuntime, MonitorTransitionError
 from earnings_research.monitoring.stale import assess_stale_gap
 from earnings_research.validation.validator import ValidationIssue, ValidationReport
@@ -598,3 +599,117 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert "monitor-verify-bundle" in raw
     assert "tests/fixtures/monitor_operations/monitor_targets.csv" in raw
     assert "data/config/monitor_targets.csv" in raw
+    assert "monitor-run-live" in raw
+    assert "monitor-build-handoff" in raw
+    assert 'cron: "17 0,6,12 * * 1-5"' in raw
+
+
+def test_schedule_is_daily_except_three_event_day_windows():
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(9, day=12)) == [row]
+    assert active_target_plan([row], planned_at=moment(15, day=12)) == []
+    assert active_target_plan([row], planned_at=moment(9, day=13)) == [row]
+    assert active_target_plan([row], planned_at=moment(15, day=13)) == [row]
+    assert active_target_plan([row], planned_at=moment(21, day=13)) == [row]
+
+
+class StubLiveAdapter:
+    def __init__(self, observation, robots_failure=None):
+        self.observation = observation
+        self.robots_failure = robots_failure
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        pass
+
+    def check_robots(self, _target, _context):
+        self.calls.append("robots")
+        return self.robots_failure
+
+    def observe(self, _target, _context):
+        self.calls.append("source")
+        return self.observation
+
+
+def test_live_operation_checks_robots_and_commits_valid_initial_state(tmp_path):
+    row = target()
+    row["automation_approved_by"] = "system_policy:public-web-low-frequency-v1"
+    row["activation_approved_by"] = "system_policy:public-web-low-frequency-v1"
+    observation = SourceObservation(
+        source_url=row["source_url"],
+        title="Initial live metadata",
+        document_id=None,
+        published_at=None,
+        etag="etag-live-1",
+        last_modified=None,
+        content_length=100,
+        replacement_suspected=False,
+        observed_at=moment(9),
+    )
+    adapter = StubLiveAdapter(observation)
+    bundle = execute_live_run(
+        target=row,
+        previous_bundle=None,
+        output_dir=tmp_path / "live-v1",
+        run_id="MRUN-EXAMPLE-001",
+        started_at=moment(9),
+        finished_at=moment(9, 1),
+        adapter_factory=lambda: adapter,
+    )
+    assert adapter.calls == ["robots", "source"]
+    assert bundle.latest_run["run_result"] == "initialized"
+    assert bundle.validation_report.ok
+
+
+def test_live_operation_does_not_fetch_source_when_robots_check_fails(tmp_path):
+    row = target()
+    failure = ObservationFailure(
+        error_code="terms_not_approved",
+        error_detail="robots policy disallows the approved source path",
+        observed_at=moment(9),
+    )
+    adapter = StubLiveAdapter(None, failure)
+    with pytest.raises(MonitorTransitionError, match="initialization requires a successful"):
+        execute_live_run(
+            target=row,
+            previous_bundle=None,
+            output_dir=tmp_path / "blocked",
+            run_id="MRUN-EXAMPLE-001",
+            started_at=moment(9),
+            finished_at=moment(9, 1),
+            adapter_factory=lambda: adapter,
+        )
+    assert adapter.calls == ["robots"]
+
+
+def test_autonomous_change_creates_machine_readable_research_handoff(tmp_path):
+    row = target()
+    row["change_response"] = "autonomous_research_handoff"
+    initial = execute_offline_run(
+        target=row,
+        source_input=source_input("initial", moment(9)),
+        previous_bundle=None,
+        output_dir=tmp_path / "auto-v1",
+        run_id="MRUN-EXAMPLE-001",
+        started_at=moment(9),
+        finished_at=moment(9, 1),
+    )
+    changed = execute_offline_run(
+        target=row,
+        source_input=source_input("changed", moment(10)),
+        previous_bundle=initial,
+        output_dir=tmp_path / "auto-v2",
+        run_id="MRUN-EXAMPLE-002",
+        started_at=moment(10),
+        finished_at=moment(10, 1),
+    )
+    payload = build_research_handoff(changed)
+    assert payload["status"] == "ready_for_document_discovery"
+    assert payload["raw_content_included"] is False
+    output = tmp_path / "handoff.json"
+    assert write_research_handoff(changed, output) is True
+    assert json.loads(output.read_text())["monitor_run_id"] == "MRUN-EXAMPLE-002"
