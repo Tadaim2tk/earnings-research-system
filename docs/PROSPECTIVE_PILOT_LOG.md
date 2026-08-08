@@ -203,3 +203,30 @@ stopped_at: not_applicable
 resume_requirements: not_applicable
 resume_approved_by: not_applicable
 resumed_at: not_applicable
+
+## 2026-08-09T06:36:00+09:00 - production_monitor_initialization
+
+timestamp: 2026-08-09T06:36:00+09:00
+entry_id: OPLOG-20260809-007
+corrects_entry_id: OPLOG-20260809-006
+event_id: not_selected
+phase: production_monitor_initialization
+actor_role: GitHub Actions under standing system policy
+action: PR #16 merge後、ICECO 3 targetの初回live monitorをmain上で実行し、各targetのversion 1 state artifactとnotification receiptを作成
+decision: monitoring_active
+monitor_target_id: ICECO_IR_CALENDAR; ICECO_IR_ROOT; ICECO_RESULTS
+monitor_result: initialized; initialized; initialized
+metadata_fingerprint: 各state artifactのcheckpointに記録。raw responseは保存していない
+error_code: none
+evidence_reference: GitHub Actions runs 31279040743; 31279041787; 31279042702
+validation_result: 3 runs success。各runでrobots確認、live取得、bundle validation、upload、再取得検証、notification処理が成功
+git_commit: 24046f43cc0c9d9f75a030c2d534fb25ea5c6eb0
+exception_or_stop_reason: OPLOG-20260809-006のtimestampは実行前の予定時刻を誤記したため、本entryの実時刻とActions runを有効な運用記録とする
+next_gate: 定期監視を継続し、変更検知時にautonomous research handoffを生成
+stop_reason: none
+affected_event_or_phase: ICECO public IR monitoring; 2026-08-13 quarterly earnings candidate
+decision_maker: system_policy:public-web-low-frequency-v1
+stopped_at: not_applicable
+resume_requirements: not_applicable
+resume_approved_by: not_applicable
+resumed_at: not_applicable
