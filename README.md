@@ -54,7 +54,7 @@ python -m earnings_research.cli validate-file data/samples/pre_earnings_baseline
 python -m earnings_research.cli show-schema pre_earnings_baseline
 ```
 
-The monitoring core remains deterministic and can be exercised without network access. The live-source adapter is a separate library boundary: it uses HTTPX/HTTPCore with fixed time and response-size limits, manual same-origin redirects, sanitized failures, resolved-IP validation, and an approval gate that runs before any request. Each request connects to one checked public IP while TLS SNI and certificate verification retain the approved hostname. It is not connected to the scheduled workflow.
+The monitoring core remains deterministic and can be exercised without network access. The live-source adapter is a separate library boundary: it uses HTTPX/HTTPCore with fixed DNS, request, job, and response-size limits, manual same-origin redirects, sanitized failures, resolved-IP validation, and an approval gate that runs before any request. DNS resolution is caller-bounded and the overall request deadline is rechecked before HTTP starts. Each request connects to one checked public IP while TLS SNI, certificate verification, and HTTP authority retain the approved hostname. It is not connected to the scheduled workflow.
 
 The read-only Human-owned production registry at `data/config/monitor_targets.csv` remains header-only. Therefore no real company is activated, scheduled runs have no live source target, and adding the HTTP client does not authorize access to any provider. Live activation requires a separate Human-reviewed registry change.
 

@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from email.message import Message
 from html.parser import HTMLParser
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Callable, Dict, Mapping, Optional, Tuple
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 import httpcore
@@ -23,10 +23,12 @@ from earnings_research.monitoring.models import (
 )
 from earnings_research.monitoring.network import (
     DNSResolutionError,
+    DNSResolutionTimeout,
     PinnedHTTPTransport,
     Resolver,
     UnsafeResolvedAddress,
-    resolve_public_addresses,
+    is_safe_public_address,
+    resolve_public_addresses_bounded,
     system_resolver,
 )
 
@@ -35,6 +37,7 @@ READ_TIMEOUT_SECONDS = 10.0
 OVERALL_BUDGET_SECONDS = 15.0
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_REDIRECT_HOPS = 3
+DNS_RESOLUTION_TIMEOUT_SECONDS = 5.0
 USER_AGENT = "EarningsResearchSystem-Monitor/1.0 (public-metadata-only)"
 
 _HUMAN_IDENTIFIER = re.compile(r"^human:[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -107,10 +110,15 @@ class LiveSourceAdapter:
         *,
         transport: Optional[httpx.BaseTransport] = None,
         resolver: Resolver = system_resolver,
+        resolver_timeout_seconds: float = DNS_RESOLUTION_TIMEOUT_SECONDS,
+        network_backend_factory: Optional[Callable[[], httpcore.NetworkBackend]] = None,
         monotonic=time.monotonic,
     ) -> None:
         self._monotonic = monotonic
         self._resolver = resolver
+        self._resolver_timeout_seconds = resolver_timeout_seconds
+        self._resolver_timed_out = False
+        self._network_backend_factory = network_backend_factory
         self._ssl_context = ssl.create_default_context()
         self._injected_client = self._build_client(transport) if transport is not None else None
 
@@ -190,19 +198,30 @@ class LiveSourceAdapter:
             remaining = OVERALL_BUDGET_SECONDS - (self._monotonic() - started)
             if remaining <= 0:
                 return _failure("timeout", "overall request budget exceeded", current_url, context.observed_at, True)
-            timeout = httpx.Timeout(
-                min(READ_TIMEOUT_SECONDS, remaining),
-                connect=min(CONNECT_TIMEOUT_SECONDS, remaining),
-                read=min(READ_TIMEOUT_SECONDS, remaining),
-                write=min(CONNECT_TIMEOUT_SECONDS, remaining),
-                pool=min(CONNECT_TIMEOUT_SECONDS, remaining),
-            )
             parts = urlsplit(current_url)
+            if self._resolver_timed_out:
+                return _failure(
+                    "timeout",
+                    "approved source DNS resolution timed out",
+                    current_url,
+                    context.observed_at,
+                    True,
+                )
             try:
-                addresses = resolve_public_addresses(
+                addresses = resolve_public_addresses_bounded(
                     parts.hostname or "",
                     parts.port or 443,
                     resolver=self._resolver,
+                    timeout=min(self._resolver_timeout_seconds, remaining),
+                )
+            except DNSResolutionTimeout:
+                self._resolver_timed_out = True
+                return _failure(
+                    "timeout",
+                    "approved source DNS resolution timed out",
+                    current_url,
+                    context.observed_at,
+                    True,
                 )
             except DNSResolutionError:
                 return _failure(
@@ -219,13 +238,34 @@ class LiveSourceAdapter:
                     current_url,
                     context.observed_at,
                 )
+            remaining = OVERALL_BUDGET_SECONDS - (self._monotonic() - started)
+            if remaining <= 0:
+                return _failure(
+                    "timeout",
+                    "overall request budget exceeded after DNS resolution",
+                    current_url,
+                    context.observed_at,
+                    True,
+                )
+            timeout = httpx.Timeout(
+                min(READ_TIMEOUT_SECONDS, remaining),
+                connect=min(CONNECT_TIMEOUT_SECONDS, remaining),
+                read=min(READ_TIMEOUT_SECONDS, remaining),
+                write=min(CONNECT_TIMEOUT_SECONDS, remaining),
+                pool=min(CONNECT_TIMEOUT_SECONDS, remaining),
+            )
             owns_client = self._injected_client is None
             client = self._injected_client or self._build_client(
-                    PinnedHTTPTransport(
-                        approved_host=parts.hostname or "",
-                        approved_port=parts.port or 443,
-                        pinned_ip=addresses[0],
+                PinnedHTTPTransport(
+                    approved_host=parts.hostname or "",
+                    approved_port=parts.port or 443,
+                    pinned_ip=addresses[0],
                     ssl_context=self._ssl_context,
+                    network_backend=(
+                        self._network_backend_factory()
+                        if self._network_backend_factory is not None
+                        else None
+                    ),
                 )
             )
             client.cookies.clear()
@@ -508,13 +548,14 @@ def _is_local_or_private_literal(hostname: str) -> bool:
         address = ipaddress.ip_address(hostname.strip("[]"))
     except ValueError:
         return bool(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9.]+)", hostname))
-    return not address.is_global
+    return not is_safe_public_address(address)
 
 
 def _canonical_url(url: str) -> str:
     parts = urlsplit(url)
     hostname = (parts.hostname or "").lower().rstrip(".")
-    netloc = hostname if parts.port in (None, 443) else "%s:%s" % (hostname, parts.port)
+    authority = "[%s]" % hostname if ":" in hostname else hostname
+    netloc = authority if parts.port in (None, 443) else "%s:%s" % (authority, parts.port)
     return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", parts.query, ""))
 
 
@@ -522,8 +563,9 @@ def _safe_url(url: str) -> str:
     try:
         parts = urlsplit(str(url))
         hostname = (parts.hostname or "unavailable").lower()
+        authority = "[%s]" % hostname if ":" in hostname else hostname
         port = "" if parts.port in (None, 443) else ":%s" % parts.port
-        return urlunsplit((parts.scheme.lower() or "https", hostname + port, parts.path or "/", "", ""))
+        return urlunsplit((parts.scheme.lower() or "https", authority + port, parts.path or "/", "", ""))
     except (TypeError, ValueError):
         return "https://unavailable/"
 

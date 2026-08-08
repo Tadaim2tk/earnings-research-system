@@ -65,6 +65,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: ers-level2-monitor-${{ matrix.monitor_target_id }}
       cancel-in-progress: false
