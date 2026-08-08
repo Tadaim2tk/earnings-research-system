@@ -259,6 +259,8 @@ Level 3 = monitoringからevidence、price、post-event準備まで広範囲に�
 
 第1号ではLevel 2を推奨する。ただしsourceごとに `automated_access_permitted=true` のHuman承認を必須とし、未承認sourceだけLevel 1へ落とす。Level 3は別承認とする。
 
+第1号のlive monitoringでは、DNS timeout stateがadapter instanceへ保持される実装境界に合わせ、`1 target = 1 LiveSourceAdapter instance` を必須とする。1 instanceを複数targetで共有しない。複数target対応前にtimeout stateをtarget scopeへ分離し、別の実装reviewを通す。
+
 通常は全文を再読込せず、前回確認結果との差分を中心に監視する。
 
 - 毎回確認: IR calendar、IR news／disclosure index、event関係metadata、monitor checkpoint
