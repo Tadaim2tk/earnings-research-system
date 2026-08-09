@@ -175,6 +175,21 @@ jobs:
           path: .monitor/handoff/research_handoff.json
           if-no-files-found: error
           retention-days: 14
+      - name: Analyze target earnings documents
+        if: steps.handoff.outputs.required == 'true'
+        run: |
+          python -m earnings_research.cli analyze-earnings-handoff \
+            .monitor/handoff/research_handoff.json \
+            --output-dir .monitor/analysis \
+            --acquired-at "$(date --iso-8601=seconds)"
+      - name: Preserve structured earnings analysis
+        if: steps.handoff.outputs.required == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ers-earnings-analysis-${{ matrix.monitor_target_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .monitor/analysis/
+          if-no-files-found: error
+          retention-days: 14
       - id: notify
         continue-on-error: true
         env:
