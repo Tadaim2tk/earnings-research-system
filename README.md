@@ -17,6 +17,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Pytest coverage for the initial validation contract
 - Proposed reference-based integration with the existing Obsidian Research Lab, without automatic synchronization or schema changes
 - Policy-gated Level 2 monitor contracts, validator, offline core, temporary state persistence, stale-gap detection, Issue notification, and live public-IR monitoring
+- Temporary earnings-document acquisition, text extraction, normalized financial and narrative analysis, consistency checks, and structured handoff to pre-event comparison
 
 ## Prospective Operations
 
@@ -24,6 +25,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - [AI monitoring implementation design](docs/AI_MONITORING_IMPLEMENTATION_DESIGN.md)
 - [Append-only pilot log](docs/PROSPECTIVE_PILOT_LOG.md)
 - [First event selection criteria](docs/FIRST_PROSPECTIVE_EVENT_SELECTION.md)
+- [Earnings document analysis](docs/EARNINGS_DOCUMENT_ANALYSIS.md)
 
 The first live pilot monitors ICECO public IR pages under the repository's low-frequency public-web policy. Human review remains an exception gate for explicit prohibitions, ambiguous terms, authentication, payment, private data, trading, or irreversible external actions. Price sourcing, formal evidence, event rows, and baseline lock remain separate.
 
@@ -61,6 +63,8 @@ The read-only production registry at `data/config/monitor_targets.csv` contains 
 The fictional offline workflow can be exercised with `workflow_dispatch`. Operational entry points are available under `python -m earnings_research.cli monitor-*`; they never write the registry or push repository contents. CI is fixed to Python 3.11.9. State artifacts use 14-day retention and are temporary pilot persistence, not permanent machine truth. Missing retained state fails closed outside an exact Human-approved initialization.
 
 Permanent raw storage, price retrieval, Level 3 automation, event creation, evidence creation, and baseline creation remain out of scope.
+
+Earnings PDFs are processed in temporary storage. Only structured results with source URL, hash, page provenance, units, periods, confidence, and consistency checks are retained. The ICECO historical proof is stored at `data/research/iceco/EDA-7698-20250212.json`; no source PDF is stored in the repository.
 
 ## Sample Data
 

@@ -1,0 +1,477 @@
+{
+  "$defs": {
+    "CompanySpecificMetric": {
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/MetricValue"
+        }
+      },
+      "required": [
+        "category",
+        "name",
+        "value"
+      ],
+      "title": "CompanySpecificMetric",
+      "type": "object"
+    },
+    "ConsistencyCheck": {
+      "properties": {
+        "check_type": {
+          "title": "Check Type",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "related_metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Metrics",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "review_required",
+            "not_applicable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_type",
+        "status",
+        "message"
+      ],
+      "title": "ConsistencyCheck",
+      "type": "object"
+    },
+    "DocumentIdentity": {
+      "properties": {
+        "accounting_period": {
+          "title": "Accounting Period",
+          "type": "string"
+        },
+        "acquired_at": {
+          "format": "date-time",
+          "title": "Acquired At",
+          "type": "string"
+        },
+        "announcement_date": {
+          "title": "Announcement Date",
+          "type": "string"
+        },
+        "company_name": {
+          "title": "Company Name",
+          "type": "string"
+        },
+        "document_title": {
+          "title": "Document Title",
+          "type": "string"
+        },
+        "document_type": {
+          "enum": [
+            "earnings_release",
+            "earnings_presentation"
+          ],
+          "title": "Document Type",
+          "type": "string"
+        },
+        "page_count": {
+          "minimum": 0,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "reporting_scope": {
+          "title": "Reporting Scope",
+          "type": "string"
+        },
+        "source_sha256": {
+          "title": "Source Sha256",
+          "type": "string"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "ticker": {
+          "title": "Ticker",
+          "type": "string"
+        }
+      },
+      "required": [
+        "company_name",
+        "ticker",
+        "accounting_period",
+        "reporting_scope",
+        "announcement_date",
+        "document_type",
+        "document_title",
+        "source_url",
+        "source_sha256",
+        "acquired_at",
+        "page_count"
+      ],
+      "title": "DocumentIdentity",
+      "type": "object"
+    },
+    "MetricValue": {
+      "properties": {
+        "confidence": {
+          "enum": [
+            "table_explicit",
+            "text_explicit",
+            "calculated",
+            "unclear"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "displayed_unit": {
+          "title": "Displayed Unit",
+          "type": "string"
+        },
+        "displayed_value": {
+          "title": "Displayed Value",
+          "type": "string"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formula"
+        },
+        "input_metric_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Metric Names",
+          "type": "array"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "normalized_unit": {
+          "title": "Normalized Unit",
+          "type": "string"
+        },
+        "normalized_value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Normalized Value"
+        },
+        "origin": {
+          "enum": [
+            "reported",
+            "calculated"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "period": {
+          "$ref": "#/$defs/PeriodReference"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        },
+        "value_kind": {
+          "enum": [
+            "actual",
+            "prior_actual",
+            "company_forecast",
+            "derived"
+          ],
+          "title": "Value Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "label",
+        "value_kind",
+        "displayed_value",
+        "displayed_unit",
+        "normalized_value",
+        "normalized_unit",
+        "period",
+        "origin",
+        "confidence",
+        "source"
+      ],
+      "title": "MetricValue",
+      "type": "object"
+    },
+    "NarrativeFinding": {
+      "properties": {
+        "confidence": {
+          "enum": [
+            "text_explicit",
+            "unclear"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "finding_type": {
+          "enum": [
+            "revenue_driver",
+            "profit_driver",
+            "positive_factor",
+            "negative_factor",
+            "forecast_change",
+            "dividend_change",
+            "business_environment",
+            "outlook"
+          ],
+          "title": "Finding Type",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        },
+        "statement": {
+          "title": "Statement",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "positive",
+            "negative",
+            "mixed",
+            "unchanged",
+            "changed",
+            "not_stated"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_type",
+        "subject",
+        "statement",
+        "status",
+        "confidence",
+        "source"
+      ],
+      "title": "NarrativeFinding",
+      "type": "object"
+    },
+    "PeriodReference": {
+      "properties": {
+        "comparison": {
+          "enum": [
+            "current",
+            "prior_corresponding",
+            "company_forecast",
+            "prior_year_end"
+          ],
+          "title": "Comparison",
+          "type": "string"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Date"
+        },
+        "fiscal_year": {
+          "title": "Fiscal Year",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "quarter_only",
+            "q1_cumulative",
+            "half_year_cumulative",
+            "nine_month_cumulative",
+            "full_year",
+            "point_in_time"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Date"
+        }
+      },
+      "required": [
+        "fiscal_year",
+        "scope",
+        "comparison"
+      ],
+      "title": "PeriodReference",
+      "type": "object"
+    },
+    "SourceReference": {
+      "properties": {
+        "acquired_at": {
+          "format": "date-time",
+          "title": "Acquired At",
+          "type": "string"
+        },
+        "document_title": {
+          "title": "Document Title",
+          "type": "string"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "text_anchor": {
+          "title": "Text Anchor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "document_title",
+        "text_anchor",
+        "acquired_at"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "analysis_id": {
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "company_specific_metrics": {
+      "items": {
+        "$ref": "#/$defs/CompanySpecificMetric"
+      },
+      "title": "Company Specific Metrics",
+      "type": "array"
+    },
+    "consistency_checks": {
+      "items": {
+        "$ref": "#/$defs/ConsistencyCheck"
+      },
+      "title": "Consistency Checks",
+      "type": "array"
+    },
+    "document": {
+      "$ref": "#/$defs/DocumentIdentity"
+    },
+    "financial_metrics": {
+      "items": {
+        "$ref": "#/$defs/MetricValue"
+      },
+      "title": "Financial Metrics",
+      "type": "array"
+    },
+    "narrative_findings": {
+      "items": {
+        "$ref": "#/$defs/NarrativeFinding"
+      },
+      "title": "Narrative Findings",
+      "type": "array"
+    },
+    "next_stage": {
+      "enum": [
+        "ready_for_pre_event_comparison",
+        "analysis_not_available",
+        "not_applicable"
+      ],
+      "title": "Next Stage",
+      "type": "string"
+    },
+    "raw_document_retained": {
+      "const": false,
+      "default": false,
+      "title": "Raw Document Retained",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "earnings_document_analysis_v1",
+      "default": "earnings_document_analysis_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "analyzed",
+        "unparseable",
+        "not_target"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "unresolved_items": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "analysis_id",
+    "status",
+    "document",
+    "next_stage"
+  ],
+  "title": "EarningsDocumentAnalysis",
+  "type": "object"
+}

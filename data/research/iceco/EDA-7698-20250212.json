@@ -1,0 +1,1242 @@
+{
+  "analysis_id": "EDA-7698-20250212",
+  "company_specific_metrics": [
+    {
+      "category": "フローズン事業",
+      "name": "売上高",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "37,097",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "売上高",
+        "metric_name": "segment_revenue",
+        "normalized_unit": "JPY",
+        "normalized_value": 37097000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2024-12-31",
+          "fiscal_year": "2025",
+          "scope": "nine_month_cumulative",
+          "start_date": "2024-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-10T07:30:00+09:00",
+          "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "フローズン事業",
+      "name": "セグメント利益",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "474",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "セグメント利益",
+        "metric_name": "segment_profit",
+        "normalized_unit": "JPY",
+        "normalized_value": 474000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2024-12-31",
+          "fiscal_year": "2025",
+          "scope": "nine_month_cumulative",
+          "start_date": "2024-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-10T07:30:00+09:00",
+          "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "スーパーマーケット事業",
+      "name": "売上高",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "5,318",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "売上高",
+        "metric_name": "segment_revenue",
+        "normalized_unit": "JPY",
+        "normalized_value": 5318000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2024-12-31",
+          "fiscal_year": "2025",
+          "scope": "nine_month_cumulative",
+          "start_date": "2024-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-10T07:30:00+09:00",
+          "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "スーパーマーケット事業",
+      "name": "セグメント利益",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "68",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "セグメント利益",
+        "metric_name": "segment_profit",
+        "normalized_unit": "JPY",
+        "normalized_value": 68000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2024-12-31",
+          "fiscal_year": "2025",
+          "scope": "nine_month_cumulative",
+          "start_date": "2024-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-10T07:30:00+09:00",
+          "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    }
+  ],
+  "consistency_checks": [
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "revenue:actual",
+        "revenue:prior_actual",
+        "revenue_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "operating_profit:actual",
+        "operating_profit:prior_actual",
+        "operating_profit_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "ordinary_profit:actual",
+        "ordinary_profit:prior_actual",
+        "ordinary_profit_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "net_income:actual",
+        "net_income:prior_actual",
+        "net_income_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "operating_margin_sanity",
+      "message": "operating margin 1.28% is within the configured sanity range",
+      "related_metrics": [
+        "revenue:actual",
+        "operating_profit:actual"
+      ],
+      "status": "passed"
+    }
+  ],
+  "document": {
+    "accounting_period": "2025年3月期第3四半期",
+    "acquired_at": "2026-08-10T07:30:00+09:00",
+    "announcement_date": "2025-02-12",
+    "company_name": "株式会社アイスコ",
+    "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+    "document_type": "earnings_release",
+    "page_count": 10,
+    "reporting_scope": "nine_month_cumulative",
+    "source_sha256": "abb608e61cdc3b18c14e152d8bacc7c1a230f929df5accdfad8208c6b0c01e18",
+    "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+    "ticker": "7698"
+  },
+  "financial_metrics": [
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "42,415",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 42415000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "38,912",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 38912000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "nine_month_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "9.0",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高前年同期比",
+      "metric_name": "revenue_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": 9.0,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "542",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 542000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "524",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 524000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "nine_month_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "3.6",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益前年同期比",
+      "metric_name": "operating_profit_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": 3.6,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "589",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 589000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "567",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 567000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "nine_month_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "3.9",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益前年同期比",
+      "metric_name": "ordinary_profit_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": 3.9,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "383",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 383000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "366",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 366000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "nine_month_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "4.7",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益前年同期比",
+      "metric_name": "net_income_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": 4.7,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "98.44",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 98.44,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "94.78",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 94.78,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "nine_month_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "17,854",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "総資産",
+      "metric_name": "total_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 17854000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "16,756",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "総資産",
+      "metric_name": "total_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 16756000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "3,742",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純資産",
+      "metric_name": "net_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 3742000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "3,431",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純資産",
+      "metric_name": "net_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 3431000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "21.0",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "自己資本比率",
+      "metric_name": "equity_ratio",
+      "normalized_unit": "percent",
+      "normalized_value": 21.0,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "20.5",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "自己資本比率",
+      "metric_name": "equity_ratio",
+      "normalized_unit": "percent",
+      "normalized_value": 20.5,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2024",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "54,000",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 54000000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "500",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 500000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "550",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 550000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "355",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 355000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "91.26",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 91.26,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "9.5",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "期末配当",
+      "metric_name": "dividend_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 9.5,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2025",
+        "scope": "full_year",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "9.0",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "revenue:actual",
+        "revenue:prior_actual"
+      ],
+      "label": "売上高前年同期比(計算値)",
+      "metric_name": "revenue_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": 9.0,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "3.44",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "operating_profit:actual",
+        "operating_profit:prior_actual"
+      ],
+      "label": "営業利益前年同期比(計算値)",
+      "metric_name": "operating_profit_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": 3.44,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "3.88",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "ordinary_profit:actual",
+        "ordinary_profit:prior_actual"
+      ],
+      "label": "経常利益前年同期比(計算値)",
+      "metric_name": "ordinary_profit_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": 3.88,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "4.64",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "net_income:actual",
+        "net_income:prior_actual"
+      ],
+      "label": "純利益前年同期比(計算値)",
+      "metric_name": "net_income_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": 4.64,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "78.55",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "revenue:actual",
+        "revenue:company_forecast"
+      ],
+      "label": "売上高会社予想進捗率",
+      "metric_name": "revenue_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 78.55,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "108.4",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "operating_profit:actual",
+        "operating_profit:company_forecast"
+      ],
+      "label": "営業利益会社予想進捗率",
+      "metric_name": "operating_profit_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 108.4,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "107.09",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "ordinary_profit:actual",
+        "ordinary_profit:company_forecast"
+      ],
+      "label": "経常利益会社予想進捗率",
+      "metric_name": "ordinary_profit_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 107.09,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "107.89",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "net_income:actual",
+        "net_income:company_forecast"
+      ],
+      "label": "純利益会社予想進捗率",
+      "metric_name": "net_income_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 107.89,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2024-12-31",
+        "fiscal_year": "2025",
+        "scope": "nine_month_cumulative",
+        "start_date": "2024-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    }
+  ],
+  "narrative_findings": [
+    {
+      "confidence": "text_explicit",
+      "finding_type": "business_environment",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "当社が身を置く食品流通業及びスーパーマーケット業につきましては、円安の進行や原材料価格の高騰に伴う食品の値上げにより、節約志向がより一層進行することで、消費マインドが冷え込む厳しい経営環境となっております。",
+      "status": "negative",
+      "subject": "食品流通・スーパーマーケット市場"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "revenue_driver",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "昨年の猛暑の反動があった一方で、主要得意先との取引が堅調に推移したことにより",
+      "status": "positive",
+      "subject": "全社売上"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "profit_driver",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "人事制度の改定や、採用を強化した結果、人件費や採用費が増加したことにより、前年同期を下回りました。",
+      "status": "negative",
+      "subject": "フローズン事業"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "positive_factor",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "スーパー生鮮館TAIGA藤が丘店を出店したことにより増加しております。",
+      "status": "positive",
+      "subject": "スーパーマーケット事業"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "outlook",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 5,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "業績予想などの将来予測情報"
+      },
+      "statement": "2025年3月期の業績は、計画どおりに推移しております。",
+      "status": "unchanged",
+      "subject": "全社業績"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "forecast_change",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "通期会社予想"
+      },
+      "statement": "直近に公表されている業績予想からの修正の有無:無",
+      "status": "unchanged",
+      "subject": "通期会社予想"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "dividend_change",
+      "source": {
+        "acquired_at": "2026-08-10T07:30:00+09:00",
+        "document_title": "2025年3月期第3四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://www2.jpx.co.jp/disc/76980/140120250210568369.pdf",
+        "text_anchor": "配当予想"
+      },
+      "statement": "直近に公表されている配当予想からの修正の有無:無",
+      "status": "unchanged",
+      "subject": "配当予想"
+    }
+  ],
+  "next_stage": "ready_for_pre_event_comparison",
+  "raw_document_retained": false,
+  "schema_version": "earnings_document_analysis_v1",
+  "status": "analyzed",
+  "unresolved_items": []
+}

@@ -5,6 +5,12 @@ import json
 import sys
 from pathlib import Path
 
+from earnings_research.document_analysis.pipeline import (
+    analyze_document_url,
+    analyze_handoff,
+    write_analysis,
+)
+
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
     fetch_state,
@@ -77,6 +83,23 @@ def main(argv=None) -> int:
     notify_parser.add_argument("--receipt", required=True, type=Path)
     notify_parser.add_argument("--recorded-at", required=True)
 
+    analysis_parser = subparsers.add_parser(
+        "analyze-earnings-document",
+        help="Temporarily fetch and convert one earnings PDF into structured research data.",
+    )
+    analysis_parser.add_argument("--url", required=True)
+    analysis_parser.add_argument("--title", required=True)
+    analysis_parser.add_argument("--acquired-at")
+    analysis_parser.add_argument("--output", required=True, type=Path)
+
+    dispatch_parser = subparsers.add_parser(
+        "analyze-earnings-handoff",
+        help="Discover and analyze target earnings documents from a monitor handoff.",
+    )
+    dispatch_parser.add_argument("handoff", type=Path)
+    dispatch_parser.add_argument("--output-dir", required=True, type=Path)
+    dispatch_parser.add_argument("--acquired-at")
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -94,6 +117,25 @@ def main(argv=None) -> int:
         spec = load_spec(args.table)
         print(json.dumps(spec.model_dump(), ensure_ascii=False, indent=2))
         return 0
+    if args.command == "analyze-earnings-document":
+        try:
+            result = analyze_document_url(args.url, args.title, args.acquired_at)
+            write_analysis(result, args.output)
+            print(json.dumps({"status": result.status, "analysis_id": result.analysis_id, "output": str(args.output)}))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Document analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "analyze-earnings-handoff":
+        try:
+            result = analyze_handoff(args.handoff, args.output_dir, args.acquired_at)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Document analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
     try:
         if args.command == "monitor-plan":
             return plan_registry(
