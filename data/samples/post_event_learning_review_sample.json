@@ -1,0 +1,115 @@
+{
+  "baseline_id": "BASE-FICTIONAL-LEARNING-001",
+  "baseline_modified": false,
+  "company_guidance_outcomes": [],
+  "company_name": "架空学習株式会社",
+  "earnings_assessment": "positive",
+  "earnings_event_id": "EVT-FICTIONAL-LEARNING-001",
+  "evaluation_id": "EE-FICTIONAL-LEARNING-001",
+  "hypothesis_verifications": [
+    {
+      "contradicting_findings": [],
+      "explanation": "架空fixtureの決算結果が事前仮説を支持しました。",
+      "hypothesis_id": "HYP-FICTIONAL-LEARNING-001",
+      "hypothesis_text": "主要指標は改善する。",
+      "invalidation_condition_status": "not_recorded",
+      "invalidation_record_ids": [],
+      "result": "supported",
+      "source_record_ids": ["HYP-FICTIONAL-LEARNING-001", "EE-FICTIONAL-LEARNING-001"],
+      "supporting_findings": ["架空の改善を確認"]
+    }
+  ],
+  "learning_record": {
+    "additional_indicators": [],
+    "maintain_criteria": ["主要指標は改善する。"],
+    "next_event_checks": [],
+    "note": "観測結果と改善候補の記録であり、本番ルールへの自動反映ではありません。",
+    "production_rules_modified": false,
+    "recurring_errors_to_prevent": [],
+    "rejected_assumptions": [],
+    "scoring_weights_modified": false,
+    "supported_but_not_generalized": ["主要指標は改善する。"],
+    "weaken_candidates": []
+  },
+  "limitations": [],
+  "market_stage_assessments": [
+    {
+      "direction": "positive",
+      "observation_id": "PX-FICTIONAL-IMMEDIATE",
+      "return_pct": 3.0,
+      "source_record_id": "MR-FICTIONAL-LEARNING-001",
+      "stage": "immediate_post_announcement",
+      "status": "complete"
+    },
+    {
+      "direction": "positive",
+      "observation_id": "PX-FICTIONAL-NEXT",
+      "return_pct": 4.0,
+      "source_record_id": "MR-FICTIONAL-LEARNING-001",
+      "stage": "next_business_day",
+      "status": "complete"
+    },
+    {
+      "direction": "positive",
+      "observation_id": "PX-FICTIONAL-FIFTH",
+      "return_pct": 6.0,
+      "source_record_id": "MR-FICTIONAL-LEARNING-001",
+      "stage": "fifth_business_day",
+      "status": "complete"
+    }
+  ],
+  "next_stage": "learning_record_ready",
+  "numeric_expectation_outcomes": [],
+  "overall_forecast_result": "success",
+  "pre_event_hypotheses_modified": false,
+  "reason_analysis": {
+    "above_expectation_metrics": [],
+    "below_expectation_metrics": [],
+    "company_guidance_read_result": "not_recorded",
+    "explanation": "架空sampleで事前仮説、決算評価、市場反応を分離して照合しました。",
+    "guidance_revisions": [],
+    "market_expectation_interpretation": "earnings_and_market_aligned",
+    "missing_or_blocked_reasons": [],
+    "pending_hypothesis_ids": [],
+    "reaction_transition": "same_direction",
+    "rejected_hypothesis_ids": [],
+    "supported_hypothesis_ids": ["HYP-FICTIONAL-LEARNING-001"],
+    "triggered_invalidation_record_ids": []
+  },
+  "review_id": "PEL-FICTIONAL-LEARNING-001",
+  "review_version": 1,
+  "reviewed_at": "2027-05-17T18:00:00+09:00",
+  "schema_version": "post_event_learning_review_v1",
+  "source_records": [
+    {
+      "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "declared_record_hash": "fixture-baseline-hash",
+      "record_id": "BASE-FICTIONAL-LEARNING-001",
+      "record_type": "pre_event_baseline",
+      "recorded_at": "2027-05-09T18:05:00+09:00"
+    },
+    {
+      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "record_id": "HYP-FICTIONAL-LEARNING-001",
+      "record_type": "pre_event_hypothesis",
+      "recorded_at": "2027-05-09T17:00:00+09:00"
+    },
+    {
+      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "record_id": "EE-FICTIONAL-LEARNING-001",
+      "record_type": "earnings_evaluation",
+      "recorded_at": "2027-05-10T17:00:00+09:00"
+    },
+    {
+      "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "record_id": "MR-FICTIONAL-LEARNING-001",
+      "record_type": "market_reaction_tracking",
+      "recorded_at": "2027-05-17T17:00:00+09:00"
+    }
+  ],
+  "status": "complete",
+  "supersedes_review_id": null,
+  "ticker": "9999",
+  "tracking_id": "MR-FICTIONAL-LEARNING-001",
+  "trade_decision_included": false
+}

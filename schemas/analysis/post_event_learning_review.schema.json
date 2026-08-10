@@ -1,0 +1,680 @@
+{
+  "$defs": {
+    "CompanyGuidanceOutcome": {
+      "properties": {
+        "announced_guidance": {
+          "title": "Announced Guidance",
+          "type": "number"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "pre_event_guidance": {
+          "title": "Pre Event Guidance",
+          "type": "number"
+        },
+        "revision": {
+          "enum": [
+            "up",
+            "unchanged",
+            "down"
+          ],
+          "title": "Revision",
+          "type": "string"
+        },
+        "revision_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision Pct"
+        },
+        "source_record_id": {
+          "title": "Source Record Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "pre_event_guidance",
+        "announced_guidance",
+        "revision_pct",
+        "revision",
+        "source_record_id"
+      ],
+      "title": "CompanyGuidanceOutcome",
+      "type": "object"
+    },
+    "HypothesisVerification": {
+      "properties": {
+        "contradicting_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicting Findings",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_text": {
+          "title": "Hypothesis Text",
+          "type": "string"
+        },
+        "invalidation_condition_status": {
+          "enum": [
+            "triggered",
+            "not_triggered",
+            "not_recorded",
+            "insufficient_evidence"
+          ],
+          "title": "Invalidation Condition Status",
+          "type": "string"
+        },
+        "invalidation_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Invalidation Record Ids",
+          "type": "array"
+        },
+        "result": {
+          "enum": [
+            "supported",
+            "partially_supported",
+            "rejected",
+            "pending"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "source_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Source Record Ids",
+          "type": "array"
+        },
+        "supporting_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Findings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "hypothesis_text",
+        "result",
+        "explanation",
+        "invalidation_condition_status",
+        "source_record_ids"
+      ],
+      "title": "HypothesisVerification",
+      "type": "object"
+    },
+    "LearningRecord": {
+      "properties": {
+        "additional_indicators": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional Indicators",
+          "type": "array"
+        },
+        "maintain_criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Maintain Criteria",
+          "type": "array"
+        },
+        "next_event_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Next Event Checks",
+          "type": "array"
+        },
+        "note": {
+          "default": "観測結果と改善候補の記録であり、本番ルールへの自動反映ではありません。",
+          "title": "Note",
+          "type": "string"
+        },
+        "production_rules_modified": {
+          "const": false,
+          "default": false,
+          "title": "Production Rules Modified",
+          "type": "boolean"
+        },
+        "recurring_errors_to_prevent": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Recurring Errors To Prevent",
+          "type": "array"
+        },
+        "rejected_assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rejected Assumptions",
+          "type": "array"
+        },
+        "scoring_weights_modified": {
+          "const": false,
+          "default": false,
+          "title": "Scoring Weights Modified",
+          "type": "boolean"
+        },
+        "supported_but_not_generalized": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported But Not Generalized",
+          "type": "array"
+        },
+        "weaken_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Weaken Candidates",
+          "type": "array"
+        }
+      },
+      "title": "LearningRecord",
+      "type": "object"
+    },
+    "MarketStageAssessment": {
+      "properties": {
+        "direction": {
+          "enum": [
+            "positive",
+            "negative",
+            "muted",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "observation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observation Id"
+        },
+        "return_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Pct"
+        },
+        "source_record_id": {
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "stage": {
+          "enum": [
+            "immediate_post_announcement",
+            "next_business_day",
+            "fifth_business_day"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "status",
+        "direction",
+        "source_record_id"
+      ],
+      "title": "MarketStageAssessment",
+      "type": "object"
+    },
+    "NumericExpectationOutcome": {
+      "properties": {
+        "actual_value": {
+          "title": "Actual Value",
+          "type": "number"
+        },
+        "difference": {
+          "title": "Difference",
+          "type": "number"
+        },
+        "difference_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Difference Pct"
+        },
+        "expected_value": {
+          "title": "Expected Value",
+          "type": "number"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "normalized_unit": {
+          "title": "Normalized Unit",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "above",
+            "in_line",
+            "below"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "source_record_id": {
+          "title": "Source Record Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_name",
+        "expected_value",
+        "actual_value",
+        "normalized_unit",
+        "difference",
+        "difference_pct",
+        "result",
+        "source_record_id"
+      ],
+      "title": "NumericExpectationOutcome",
+      "type": "object"
+    },
+    "ReasonAnalysis": {
+      "properties": {
+        "above_expectation_metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Above Expectation Metrics",
+          "type": "array"
+        },
+        "below_expectation_metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Below Expectation Metrics",
+          "type": "array"
+        },
+        "company_guidance_read_result": {
+          "enum": [
+            "supported",
+            "contradicted",
+            "mixed",
+            "insufficient_evidence",
+            "not_recorded"
+          ],
+          "title": "Company Guidance Read Result",
+          "type": "string"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "guidance_revisions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Guidance Revisions",
+          "type": "array"
+        },
+        "market_expectation_interpretation": {
+          "enum": [
+            "possible_higher_hurdle_than_recorded",
+            "possible_lower_hurdle_than_recorded",
+            "earnings_and_market_aligned",
+            "insufficient_evidence",
+            "not_comparable"
+          ],
+          "title": "Market Expectation Interpretation",
+          "type": "string"
+        },
+        "missing_or_blocked_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Or Blocked Reasons",
+          "type": "array"
+        },
+        "pending_hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pending Hypothesis Ids",
+          "type": "array"
+        },
+        "reaction_transition": {
+          "enum": [
+            "same_direction",
+            "changed_by_next_business_day",
+            "reversed_by_fifth_business_day",
+            "mixed",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Reaction Transition",
+          "type": "string"
+        },
+        "rejected_hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rejected Hypothesis Ids",
+          "type": "array"
+        },
+        "supported_hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Hypothesis Ids",
+          "type": "array"
+        },
+        "triggered_invalidation_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Triggered Invalidation Record Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "company_guidance_read_result",
+        "market_expectation_interpretation",
+        "reaction_transition",
+        "explanation"
+      ],
+      "title": "ReasonAnalysis",
+      "type": "object"
+    },
+    "SourceRecordReference": {
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "declared_record_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declared Record Hash"
+        },
+        "record_id": {
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "record_type": {
+          "enum": [
+            "pre_event_baseline",
+            "pre_event_hypothesis",
+            "hypothesis_invalidation",
+            "earnings_evaluation",
+            "market_reaction_tracking"
+          ],
+          "title": "Record Type",
+          "type": "string"
+        },
+        "recorded_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recorded At"
+        }
+      },
+      "required": [
+        "record_type",
+        "record_id",
+        "content_sha256"
+      ],
+      "title": "SourceRecordReference",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "baseline_id": {
+      "title": "Baseline Id",
+      "type": "string"
+    },
+    "baseline_modified": {
+      "const": false,
+      "default": false,
+      "title": "Baseline Modified",
+      "type": "boolean"
+    },
+    "company_guidance_outcomes": {
+      "items": {
+        "$ref": "#/$defs/CompanyGuidanceOutcome"
+      },
+      "title": "Company Guidance Outcomes",
+      "type": "array"
+    },
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "earnings_assessment": {
+      "enum": [
+        "positive",
+        "mixed",
+        "negative",
+        "in_line",
+        "inconclusive"
+      ],
+      "title": "Earnings Assessment",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "evaluation_id": {
+      "title": "Evaluation Id",
+      "type": "string"
+    },
+    "hypothesis_verifications": {
+      "items": {
+        "$ref": "#/$defs/HypothesisVerification"
+      },
+      "title": "Hypothesis Verifications",
+      "type": "array"
+    },
+    "learning_record": {
+      "$ref": "#/$defs/LearningRecord"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "market_stage_assessments": {
+      "items": {
+        "$ref": "#/$defs/MarketStageAssessment"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "title": "Market Stage Assessments",
+      "type": "array"
+    },
+    "next_stage": {
+      "enum": [
+        "learning_record_ready",
+        "awaiting_market_milestones",
+        "comparison_blocked"
+      ],
+      "title": "Next Stage",
+      "type": "string"
+    },
+    "numeric_expectation_outcomes": {
+      "items": {
+        "$ref": "#/$defs/NumericExpectationOutcome"
+      },
+      "title": "Numeric Expectation Outcomes",
+      "type": "array"
+    },
+    "overall_forecast_result": {
+      "enum": [
+        "success",
+        "partial_success",
+        "failure",
+        "pending"
+      ],
+      "title": "Overall Forecast Result",
+      "type": "string"
+    },
+    "pre_event_hypotheses_modified": {
+      "const": false,
+      "default": false,
+      "title": "Pre Event Hypotheses Modified",
+      "type": "boolean"
+    },
+    "reason_analysis": {
+      "$ref": "#/$defs/ReasonAnalysis"
+    },
+    "review_id": {
+      "title": "Review Id",
+      "type": "string"
+    },
+    "review_version": {
+      "minimum": 1,
+      "title": "Review Version",
+      "type": "integer"
+    },
+    "reviewed_at": {
+      "format": "date-time",
+      "title": "Reviewed At",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "post_event_learning_review_v1",
+      "default": "post_event_learning_review_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_records": {
+      "items": {
+        "$ref": "#/$defs/SourceRecordReference"
+      },
+      "minItems": 3,
+      "title": "Source Records",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "provisional",
+        "blocked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "supersedes_review_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Review Id"
+    },
+    "ticker": {
+      "title": "Ticker",
+      "type": "string"
+    },
+    "tracking_id": {
+      "title": "Tracking Id",
+      "type": "string"
+    },
+    "trade_decision_included": {
+      "const": false,
+      "default": false,
+      "title": "Trade Decision Included",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "review_id",
+    "review_version",
+    "earnings_event_id",
+    "baseline_id",
+    "evaluation_id",
+    "tracking_id",
+    "company_name",
+    "ticker",
+    "reviewed_at",
+    "status",
+    "overall_forecast_result",
+    "earnings_assessment",
+    "market_stage_assessments",
+    "reason_analysis",
+    "learning_record",
+    "source_records",
+    "next_stage"
+  ],
+  "title": "PostEventLearningReview",
+  "type": "object"
+}

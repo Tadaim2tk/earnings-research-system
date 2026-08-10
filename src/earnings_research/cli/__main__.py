@@ -18,6 +18,7 @@ from earnings_research.earnings_evaluation import (
     write_evaluation,
 )
 from earnings_research.market_reaction import track_files, write_reaction
+from earnings_research.post_event_learning import review_files, write_review
 
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
@@ -132,6 +133,19 @@ def main(argv=None) -> int:
     reaction_parser.add_argument("--companies", required=True, type=Path)
     reaction_parser.add_argument("--output", required=True, type=Path)
 
+    learning_parser = subparsers.add_parser(
+        "review-earnings-outcome",
+        help="Validate a pre-event forecast against earnings and market-reaction snapshots.",
+    )
+    learning_parser.add_argument("--baseline", required=True, type=Path)
+    learning_parser.add_argument("--baseline-id", required=True)
+    learning_parser.add_argument("--hypotheses", required=True, type=Path)
+    learning_parser.add_argument("--evaluation", required=True, type=Path)
+    learning_parser.add_argument("--market-reaction", required=True, type=Path)
+    learning_parser.add_argument("--reviewed-at", required=True)
+    learning_parser.add_argument("--previous-review", type=Path)
+    learning_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -212,6 +226,29 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Market reaction tracking failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "review-earnings-outcome":
+        try:
+            result = review_files(
+                args.baseline,
+                args.baseline_id,
+                args.hypotheses,
+                args.evaluation,
+                args.market_reaction,
+                datetime.fromisoformat(args.reviewed_at),
+                args.previous_review,
+            )
+            write_review(result, args.output)
+            print(json.dumps({
+                "status": result.status,
+                "review_id": result.review_id,
+                "overall_forecast_result": result.overall_forecast_result,
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Post-event learning review failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:

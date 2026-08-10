@@ -20,6 +20,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Temporary earnings-document acquisition, text extraction, normalized financial and narrative analysis, consistency checks, and structured handoff to pre-event comparison
 - Locked pre-event expectation comparison, company-guidance revision checks, hypothesis review, and price-independent earnings evaluation
 - Source-neutral tracking of pre-event close, immediate reaction, next-business-day close, and fifth-business-day close
+- Append-only validation of pre-event forecasts with separated earnings, market-reaction, reason, and learning records
 
 ## Prospective Operations
 
@@ -30,6 +31,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - [Earnings document analysis](docs/EARNINGS_DOCUMENT_ANALYSIS.md)
 - [Earnings expectation evaluation](docs/EARNINGS_EXPECTATION_EVALUATION.md)
 - [Market reaction tracking](docs/MARKET_REACTION_TRACKING.md)
+- [Post-event learning review](docs/POST_EVENT_LEARNING_REVIEW.md)
 
 The first live pilot monitors ICECO public IR pages under the repository's low-frequency public-web policy. Human review remains an exception gate for explicit prohibitions, ambiguous terms, authentication, payment, private data, trading, or irreversible external actions. Price sourcing, formal evidence, event rows, and baseline lock remain separate.
 
@@ -73,6 +75,8 @@ Earnings PDFs are processed in temporary storage. Only structured results with s
 Locked baseline rows can be compared with structured results through `evaluate-earnings`. The event quarter fixes the expected reporting period, cumulative results remain separate from mismatched periods, company forecasts remain separate from actuals, ERS calculations are labeled, and hypotheses without an unambiguous document link remain pending. The output deliberately excludes market reaction and trade decisions.
 
 Approved, normalized price observations can be processed through `track-market-reaction`. It keeps the four requested price milestones, uses a separate pre-announcement minute reference for intraday events, verifies actual occurrence and company identity, preserves pending milestones, and blocks return calculation while corporate actions remain unresolved. It retrieves no prices and retains no raw market-data files.
+
+`review-earnings-outcome` joins an immutable baseline and pre-event hypotheses with the earnings evaluation and market-reaction snapshot. It records forecast success, evidence-backed reasons, and next-event learning candidates without rewriting source records or changing production scoring rules.
 
 ## Sample Data
 
