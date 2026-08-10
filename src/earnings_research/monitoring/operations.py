@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence
 
 from earnings_research.monitoring.live import LiveSourceAdapter
 from earnings_research.monitoring.models import (
@@ -18,6 +18,7 @@ from earnings_research.monitoring.persistence import (
 )
 from earnings_research.monitoring.runtime import MonitorRuntime, MonitorTransitionError
 from earnings_research.monitoring.stale import assess_stale_gap
+from earnings_research.validation.validator import validate_monitor_bundle
 
 
 class StateUnavailable(BundleError):
@@ -34,6 +35,7 @@ def execute_offline_run(
     started_at: datetime,
     finished_at: datetime,
     event_date: Optional[date] = None,
+    gap_acknowledgements: Sequence[Dict[str, str]] = (),
 ) -> VerifiedMonitorBundle:
     """Run one fixture observation and atomically materialize verified state."""
     _require_operational_target(target, started_at)
@@ -47,6 +49,7 @@ def execute_offline_run(
         previous_checkpoint = None
         runs = []
         resolutions = []
+        acknowledgements = []
         observation = OfflineSourceAdapter().observe(target, source_input)
     else:
         if previous_bundle.manifest.monitor_target_id != target.get("monitor_target_id"):
@@ -54,7 +57,14 @@ def execute_offline_run(
         previous_checkpoint = previous_bundle.checkpoint
         runs = previous_bundle.runs
         resolutions = previous_bundle.resolutions
-        last_success_at = _parse_optional_aware(previous_checkpoint.get("last_success_at", ""))
+        acknowledgements = previous_bundle.gap_acknowledgements + [
+            dict(row) for row in gap_acknowledgements
+        ]
+        _validate_gap_acknowledgements(
+            target, previous_checkpoint, runs, resolutions, acknowledgements,
+            gap_acknowledgements, started_at
+        )
+        last_success_at = _stale_reference(previous_checkpoint, acknowledgements, started_at)
         assessment = assess_stale_gap(
             last_success_at=last_success_at,
             reference_time=started_at,
@@ -77,6 +87,7 @@ def execute_offline_run(
         previous_checkpoint=previous_checkpoint,
         prior_runs=runs,
         resolutions=resolutions,
+        gap_acknowledgements=acknowledgements,
         observation=observation,
         run_id=run_id,
         started_at=started_at,
@@ -103,6 +114,7 @@ def execute_live_run(
     started_at: datetime,
     finished_at: datetime,
     adapter_factory: Callable[[], LiveSourceAdapter] = LiveSourceAdapter,
+    gap_acknowledgements: Sequence[Dict[str, str]] = (),
 ) -> VerifiedMonitorBundle:
     """Check robots, observe one live source, then persist one validated transition."""
     _require_operational_target(target, started_at)
@@ -117,16 +129,24 @@ def execute_live_run(
         previous_checkpoint = None
         runs = []
         resolutions = []
+        acknowledgements = []
     else:
         if previous_bundle.manifest.monitor_target_id != target.get("monitor_target_id"):
             raise StateUnavailable("previous artifact belongs to another monitor target")
         previous_checkpoint = previous_bundle.checkpoint
         runs = previous_bundle.runs
         resolutions = previous_bundle.resolutions
+        acknowledgements = previous_bundle.gap_acknowledgements + [
+            dict(row) for row in gap_acknowledgements
+        ]
+        _validate_gap_acknowledgements(
+            target, previous_checkpoint, runs, resolutions, acknowledgements,
+            gap_acknowledgements, started_at
+        )
 
     if previous_checkpoint is not None:
         assessment = assess_stale_gap(
-            last_success_at=_parse_optional_aware(previous_checkpoint.get("last_success_at", "")),
+            last_success_at=_stale_reference(previous_checkpoint, acknowledgements, started_at),
             reference_time=started_at,
             schedule_profile=target.get("schedule_profile", ""),
             event_date=event_date,
@@ -149,6 +169,7 @@ def execute_live_run(
         previous_checkpoint=previous_checkpoint,
         prior_runs=runs,
         resolutions=resolutions,
+        gap_acknowledgements=acknowledgements,
         observation=observation,
         run_id=run_id,
         started_at=started_at,
@@ -190,6 +211,68 @@ def _parse_optional_aware(value: str) -> Optional[datetime]:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise StateUnavailable("previous checkpoint timestamp is invalid")
     return parsed
+
+
+def _stale_reference(
+    checkpoint: Dict[str, str],
+    acknowledgements: Sequence[Dict[str, str]],
+    transition_started_at: datetime,
+) -> Optional[datetime]:
+    last_success = _parse_optional_aware(checkpoint.get("last_success_at", ""))
+    target_id = checkpoint.get("monitor_target_id", "")
+    rows = [row for row in acknowledgements if row.get("monitor_target_id") == target_id]
+    superseded = {row.get("supersedes_acknowledgement_id", "") for row in rows}
+    tails = [row for row in rows if row.get("acknowledgement_id", "") not in superseded]
+    eligible = []
+    for row in tails:
+        gap_end = _parse_optional_aware(row.get("acknowledged_gap_end", ""))
+        acknowledged_at = _parse_optional_aware(row.get("acknowledged_at", ""))
+        if (
+            gap_end is not None
+            and acknowledged_at is not None
+            and gap_end <= acknowledged_at <= transition_started_at
+            and (last_success is None or gap_end >= last_success)
+        ):
+            eligible.append(gap_end)
+    return max([last_success] + eligible) if last_success is not None else (max(eligible) if eligible else None)
+
+
+def _validate_gap_acknowledgements(
+    target: Dict[str, str],
+    checkpoint: Dict[str, str],
+    runs: Sequence[Dict[str, str]],
+    resolutions: Sequence[Dict[str, str]],
+    acknowledgements: Sequence[Dict[str, str]],
+    new_acknowledgements: Sequence[Dict[str, str]],
+    transition_started_at: datetime,
+) -> None:
+    if new_acknowledgements and (
+        checkpoint.get("target_state") != "stopped"
+        or checkpoint.get("last_error_code") != "state_unavailable"
+    ):
+        raise StateUnavailable("gap acknowledgement requires a stale stopped checkpoint")
+    report = validate_monitor_bundle(
+        {
+            "monitor_target": [dict(target)],
+            "monitor_run": [dict(row) for row in runs],
+            "monitor_resolution": [dict(row) for row in resolutions],
+            "monitor_gap_acknowledgement": [dict(row) for row in acknowledgements],
+            "monitor_checkpoint": [dict(checkpoint)],
+        }
+    )
+    if not report.ok:
+        raise StateUnavailable(
+            "gap acknowledgement history is invalid:\n%s"
+            % "\n".join(issue.format() for issue in report.issues)
+        )
+    last_success = _parse_optional_aware(checkpoint.get("last_success_at", ""))
+    for row in new_acknowledgements:
+        gap_end = _parse_optional_aware(row.get("acknowledged_gap_end", ""))
+        acknowledged_at = _parse_optional_aware(row.get("acknowledged_at", ""))
+        if acknowledged_at is None or acknowledged_at > transition_started_at:
+            raise StateUnavailable("gap acknowledgement is future-dated for this run")
+        if gap_end is None or (last_success is not None and gap_end < last_success):
+            raise StateUnavailable("acknowledged gap was already resolved by the latest success")
 
 
 def _require_operational_target(target: Dict[str, str], reference_time: datetime) -> None:

@@ -11,7 +11,13 @@ from earnings_research.validation.validator import load_spec, validate_dataset, 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SAMPLES = PROJECT_ROOT / "data" / "samples"
 INVALID_CASES_PATH = PROJECT_ROOT / "tests" / "fixtures" / "monitor_invalid_cases.json"
-MONITOR_TABLES = ("monitor_target", "monitor_run", "monitor_resolution", "monitor_checkpoint")
+MONITOR_TABLES = (
+    "monitor_target",
+    "monitor_run",
+    "monitor_resolution",
+    "monitor_gap_acknowledgement",
+    "monitor_checkpoint",
+)
 
 
 def read_rows(path):
@@ -85,6 +91,7 @@ def test_monitor_schemas_are_registered():
         ("monitor_target", "monitor_target_id"),
         ("monitor_run", "monitor_run_id"),
         ("monitor_resolution", "resolution_id"),
+        ("monitor_gap_acknowledgement", "acknowledgement_id"),
         ("monitor_checkpoint", "monitor_target_id"),
     ],
 )
@@ -160,6 +167,57 @@ def test_resolution_correction_is_append_only_and_valid(tmp_path):
 
     report = validate_dataset(samples)
     assert report.ok, issue_text(report)
+
+
+def test_gap_acknowledgement_append_only_violations_are_rejected(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "monitor_gap_acknowledgement_sample.csv"
+    fieldnames, rows = read_rows(path)
+    first = rows[0]
+    correction = dict(first)
+    correction.update(
+        {
+            "acknowledgement_id": "MGACK-MINATO-002",
+            "acknowledged_at": "2026-08-01T11:00:00+09:00",
+            "reason": "First correction",
+            "supersedes_acknowledgement_id": first["acknowledgement_id"],
+        }
+    )
+    branch = dict(correction)
+    branch.update(
+        {
+            "acknowledgement_id": "MGACK-MINATO-003",
+            "acknowledged_at": "2026-08-01T11:30:00+09:00",
+            "reason": "Invalid second correction of the same record",
+        }
+    )
+    rows.extend([correction, branch])
+    write_rows(path, fieldnames, rows)
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "gap acknowledgement cannot be superseded twice" in issue_text(report)
+
+
+@pytest.mark.parametrize(
+    ("supersedes_id", "expected"),
+    [
+        ("MGACK-SELF", "cannot supersede itself"),
+        ("MGACK-MISSING", "foreign key not found"),
+    ],
+)
+def test_gap_acknowledgement_rejects_invalid_supersession_reference(
+    tmp_path, supersedes_id, expected
+):
+    samples = copy_samples(tmp_path)
+    path = samples / "monitor_gap_acknowledgement_sample.csv"
+    fieldnames, rows = read_rows(SAMPLES / "monitor_gap_acknowledgement_sample.csv")
+    row = dict(rows[0])
+    row["acknowledgement_id"] = "MGACK-SELF"
+    row["supersedes_acknowledgement_id"] = supersedes_id
+    write_rows(path, fieldnames, [row])
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert expected in issue_text(report)
 
 
 def test_partial_monitor_bundle_is_rejected(tmp_path):

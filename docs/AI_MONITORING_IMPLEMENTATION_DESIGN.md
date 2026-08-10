@@ -17,7 +17,7 @@ AI_MONITORING_IMPLEMENTATION_DESIGN.md
 ## Design Invariants
 
 1. `monitor_target` はHuman-owned configurationであり、workflowはread-onlyで扱う。
-2. `monitor_checkpoint` はtargetごとの現在状態、`monitor_run` は1回ごとのappend-only監査記録、`monitor_resolution` はHuman判断のappend-only記録である。
+2. `monitor_checkpoint` はtargetごとの現在状態、`monitor_run` は1回ごとのappend-only監査記録、`monitor_resolution` はchangeに対するHuman判断、`monitor_gap_acknowledgement` はstale gapに対するHumanまたは承認済みsystem policyのappend-only記録である。
 3. `error != no_change`、`change_detected != formal evidence`、`initialized != no_change` とする。
 4. 前回の有効stateを取得できない場合は再初期化せず、`state_unavailable` で停止する。
 5. runとcheckpointの片方だけをcommit済みstateとして公開しない。
@@ -163,6 +163,12 @@ targetごとの最後にcommitされたmachine stateである。過去runの代�
 
 訂正は元recordを上書きせず、同じtargetとsource runを維持した新recordでcurrent resolutionをsupersedeする。
 
+### monitor_gap_acknowledgement
+
+stale停止後に過去の監視途切れを認識し、次回runのstale基準時刻だけを進めるappend-only recordである。新規適用は `target_state=stopped` かつ `last_error_code=state_unavailable` のcheckpointに限定する。gap範囲と認識時刻はtimezone-awareとし、`acknowledged_gap_end <= acknowledged_at` を必須にする。`acknowledged_by` は `human:<stable-id>` または `system_policy:<policy-id>`、`reason` は必須である。訂正は `supersedes_acknowledgement_id` を持つ新rowを追加し、self、missing parent、同じrowの二重supersedeを拒否する。
+
+acknowledgement後も次回runはrobots確認とsource observationを通常どおり実行する。`pending_change_run_id` と `monitor_resolution` には作用せず、formal evidence、baseline、event status、scoring、売買判断へ昇格しない。`acknowledged_gap_end` がcurrent `last_success_at` より前なら新規入力を拒否し、保存済み履歴が後続成功より古くなった場合はstale基準として無効にする。
+
 ## Enumerations
 
 ### run_result
@@ -278,6 +284,7 @@ monitor_state_bundle/
   run.json
   run_history.json
   resolution_history.json
+  gap_acknowledgement_history.json
   manifest.json
 ```
 
@@ -297,6 +304,7 @@ checkpoint_sha256
 run_sha256
 run_history_sha256
 resolution_history_sha256
+gap_acknowledgement_history_sha256
 bundle_status = committed
 ```
 
@@ -369,7 +377,7 @@ profileのminimum semantics:
 
 exchange calendar、holiday、event-specific windows、最大許容gapはprofile定義の責務とする。GitHub Actions cronは起動機構でありdomain scheduleの正本ではない。scheduled runは厳密時刻を保証しないため、各runでprofile上のexpected previous observation windowとcheckpointの `last_success_at` を比較する。
 
-stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。PR Dでは通常時36時間、event 5営業日前から前日24時間、event当日12時間を上限とする。休日calendarを増設せず平日だけを数えるpilot最小実装とし、event dateが必要なのに不明なら最も厳しい12時間を使う。閾値超過は `ObservationFailure(state_unavailable)`、`target_state=stopped`、Human通知へ進む。
+stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。通常時36時間、event 5営業日前から前日24時間、event当日12時間を上限とする。経過時間から土曜・日曜を除き、休日calendarを増設しないpilot最小実装とする。event windowとevent当日はJST 9:17、15:17、21:17の3 slot、通常日は朝slotだけをdueとする。event dateが必要なのに不明なら最も厳しい12時間を使う。閾値超過は `ObservationFailure(state_unavailable)`、`target_state=stopped`、Human通知へ進む。有効なgap acknowledgementがあれば、その `acknowledged_gap_end` を次回stale評価の基準にできるが、観測自体は省略しない。
 
 ## GitHub Actions Contract
 

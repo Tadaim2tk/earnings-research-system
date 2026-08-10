@@ -25,6 +25,7 @@ TABLE_ORDER = [
     "monitor_target",
     "monitor_run",
     "monitor_resolution",
+    "monitor_gap_acknowledgement",
     "monitor_checkpoint",
     "score_definition",
     "pre_earnings_baseline",
@@ -39,6 +40,7 @@ MONITOR_TABLES = {
     "monitor_checkpoint",
     "monitor_run",
     "monitor_resolution",
+    "monitor_gap_acknowledgement",
 }
 
 BASELINE_LOCK_HASH_FIELDS_V1 = (
@@ -1724,6 +1726,11 @@ def _validate_monitor_constraints(
     issues.extend(_validate_monitor_target_rows(rows_by_table.get("monitor_target", [])))
     issues.extend(_validate_monitor_run_rows(rows_by_table.get("monitor_run", [])))
     issues.extend(_validate_monitor_resolution_rows(rows_by_table.get("monitor_resolution", [])))
+    issues.extend(
+        _validate_monitor_gap_acknowledgement_rows(
+            rows_by_table.get("monitor_gap_acknowledgement", [])
+        )
+    )
     issues.extend(_validate_monitor_checkpoint_rows(rows_by_table.get("monitor_checkpoint", [])))
     if not require_dataset_relations or not any(rows_by_table.get(table, []) for table in MONITOR_TABLES):
         return issues
@@ -1918,6 +1925,59 @@ def _validate_monitor_resolution_rows(rows: List[Dict[str, str]]) -> List[Valida
             issues.append(ValidationIssue("monitor_resolution", row_number, "resolved_by", "Human resolution requires human:<stable-id> identifier"))
         if _clean(row.get("supersedes_resolution_id", "")) == _clean(row.get("resolution_id", "")):
             issues.append(ValidationIssue("monitor_resolution", row_number, "supersedes_resolution_id", "resolution cannot supersede itself"))
+    return issues
+
+
+def _validate_monitor_gap_acknowledgement_rows(
+    rows: List[Dict[str, str]],
+) -> List[ValidationIssue]:
+    issues = []
+    by_id = {
+        _clean(row.get("acknowledgement_id", "")): row
+        for row in rows
+        if _clean(row.get("acknowledgement_id", ""))
+    }
+    row_number_by_id = {
+        _clean(row.get("acknowledgement_id", "")): number
+        for number, row in enumerate(rows, start=2)
+    }
+    superseded = set()
+    current_by_target = {}
+    for row_number, row in enumerate(rows, start=2):
+        start = _monitor_datetime(
+            "monitor_gap_acknowledgement", row_number, "acknowledged_gap_start", row, issues
+        )
+        end = _monitor_datetime(
+            "monitor_gap_acknowledgement", row_number, "acknowledged_gap_end", row, issues
+        )
+        acknowledged_at = _monitor_datetime(
+            "monitor_gap_acknowledgement", row_number, "acknowledged_at", row, issues
+        )
+        if start and end and end < start:
+            issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "acknowledged_gap_end", "acknowledged gap end must not be before gap start"))
+        if end and acknowledged_at and end > acknowledged_at:
+            issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "acknowledged_gap_end", "future monitoring gap cannot be acknowledged"))
+        if not is_activation_authorizer(_clean(row.get("acknowledged_by", ""))):
+            issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "acknowledged_by", "gap acknowledgement requires human:<stable-id> or system_policy:<policy-id> identifier"))
+        acknowledgement_id = _clean(row.get("acknowledgement_id", ""))
+        target_id = _clean(row.get("monitor_target_id", ""))
+        supersedes_id = _clean(row.get("supersedes_acknowledgement_id", ""))
+        if supersedes_id == acknowledgement_id:
+            issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "supersedes_acknowledgement_id", "gap acknowledgement cannot supersede itself"))
+        if supersedes_id:
+            parent = by_id.get(supersedes_id)
+            if parent is not None:
+                if row_number_by_id.get(supersedes_id, row_number) >= row_number:
+                    issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "supersedes_acknowledgement_id", "gap acknowledgement correction must reference an earlier row"))
+                if _clean(parent.get("monitor_target_id", "")) != target_id:
+                    issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "supersedes_acknowledgement_id", "gap acknowledgement correction must preserve target"))
+            if supersedes_id in superseded:
+                issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "supersedes_acknowledgement_id", "gap acknowledgement cannot be superseded twice"))
+            superseded.add(supersedes_id)
+        gap_key = (target_id, _clean(row.get("acknowledged_gap_start", "")), _clean(row.get("acknowledged_gap_end", "")))
+        if not supersedes_id and gap_key in current_by_target:
+            issues.append(ValidationIssue("monitor_gap_acknowledgement", row_number, "supersedes_acknowledgement_id", "one monitoring gap may be acknowledged only once"))
+        current_by_target[gap_key] = acknowledgement_id
     return issues
 
 

@@ -52,7 +52,7 @@ def assess_stale_gap(
         window = "normal"
         threshold = NORMAL_THRESHOLD
 
-    age = None if last_success_at is None else reference_time - last_success_at
+    age = None if last_success_at is None else _business_elapsed(last_success_at, reference_time)
     return StaleAssessment(window, threshold, age, age is None or age > threshold)
 
 
@@ -64,6 +64,22 @@ def _business_days_until(start: date, end: date) -> int:
         if current.weekday() < 5:
             count += 1
     return count
+
+
+def _business_elapsed(start: datetime, end: datetime) -> timedelta:
+    """Return elapsed wall time excluding Saturday and Sunday."""
+    local_start = start.astimezone(end.tzinfo)
+    current = local_start
+    elapsed = timedelta()
+    while current < end:
+        next_midnight = datetime.combine(
+            current.date() + timedelta(days=1), datetime.min.time(), tzinfo=end.tzinfo
+        )
+        segment_end = min(next_midnight, end)
+        if current.weekday() < 5:
+            elapsed += segment_end - current
+        current = segment_end
+    return elapsed
 
 
 def _require_aware(value: datetime, name: str) -> None:

@@ -36,6 +36,7 @@ class MonitorRuntime:
         run_id: str,
         started_at: datetime,
         finished_at: datetime,
+        gap_acknowledgements: Sequence[Dict[str, str]] = (),
         recorded_by: str = "workflow:offline-monitor-v1",
         self_validate: bool = True,
     ) -> MonitorTransitionResult:
@@ -56,6 +57,7 @@ class MonitorRuntime:
         previous = dict(previous_checkpoint) if previous_checkpoint is not None else None
         runs = [dict(row) for row in prior_runs]
         resolution_rows = [dict(row) for row in resolutions]
+        acknowledgement_rows = [dict(row) for row in gap_acknowledgements]
         self._validate_resolution_times(runs, resolution_rows, started_at)
         if previous is None:
             self._require_initial_activation(target, runs, run_id, started_at)
@@ -98,6 +100,7 @@ class MonitorRuntime:
                 "monitor_target": [dict(target)],
                 "monitor_run": all_runs,
                 "monitor_resolution": resolution_rows,
+                "monitor_gap_acknowledgement": acknowledgement_rows,
                 "monitor_checkpoint": [checkpoint],
             }
         )
@@ -106,7 +109,9 @@ class MonitorRuntime:
                 "generated monitor bundle failed validation:\n%s"
                 % "\n".join(issue.format() for issue in report.issues)
             )
-        return MonitorTransitionResult(run, checkpoint, report, all_runs, resolution_rows)
+        return MonitorTransitionResult(
+            run, checkpoint, report, all_runs, resolution_rows, acknowledgement_rows
+        )
 
     @staticmethod
     def _validate_resolution_times(

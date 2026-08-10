@@ -1,0 +1,20 @@
+{
+  "table": "monitor_gap_acknowledgement",
+  "file": "monitor_gap_acknowledgement_sample.csv",
+  "primary_key": ["acknowledgement_id"],
+  "unique": [],
+  "foreign_keys": [
+    {"columns": ["monitor_target_id"], "ref_table": "monitor_target", "ref_columns": ["monitor_target_id"]},
+    {"columns": ["supersedes_acknowledgement_id"], "ref_table": "monitor_gap_acknowledgement", "ref_columns": ["acknowledgement_id"], "nullable": true}
+  ],
+  "columns": [
+    {"name": "acknowledgement_id", "type": "string", "required": true},
+    {"name": "monitor_target_id", "type": "string", "required": true},
+    {"name": "acknowledged_gap_start", "type": "datetime", "required": true},
+    {"name": "acknowledged_gap_end", "type": "datetime", "required": true},
+    {"name": "acknowledged_at", "type": "datetime", "required": true},
+    {"name": "acknowledged_by", "type": "string", "required": true},
+    {"name": "reason", "type": "string", "required": true},
+    {"name": "supersedes_acknowledgement_id", "type": "string", "required": false}
+  ]
+}

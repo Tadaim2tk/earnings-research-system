@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from earnings_research.monitoring.stale import _business_days_until
 from earnings_research.validation.validator import load_spec, validate_monitor_registry
 
 
@@ -57,8 +58,12 @@ def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
     # The workflow fires at 09:17, 15:17, and 21:17 JST, but a scheduled run can
     # start hours late. Matching the hour exactly meant a delayed run never
     # became due, so each cron slot owns the window that follows it instead.
-    if event_date and local.date().isoformat() == event_date:
-        return local.hour >= 9
+    if event_date:
+        parsed_event_date = datetime.fromisoformat(event_date).date()
+        if local.date() == parsed_event_date:
+            return local.hour >= 9
+        if local.date() < parsed_event_date and _business_days_until(local.date(), parsed_event_date) <= 5:
+            return local.hour >= 9
     return 9 <= local.hour < 15
 
 

@@ -1,0 +1,2 @@
+acknowledgement_id,monitor_target_id,acknowledged_gap_start,acknowledged_gap_end,acknowledged_at,acknowledged_by,reason,supersedes_acknowledgement_id
+MGACK-MINATO-001,MON-MINATO-DISCLOSURE,2026-08-01T09:00:00+09:00,2026-08-01T10:00:00+09:00,2026-08-01T10:30:00+09:00,human:reviewer-alpha,Reviewed a temporary monitoring interruption,

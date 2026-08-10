@@ -23,6 +23,7 @@ BUNDLE_FILES = {
     "run.json",
     "run_history.json",
     "resolution_history.json",
+    "gap_acknowledgement_history.json",
     "manifest.json",
 }
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -52,6 +53,9 @@ class MonitorBundleManifest(BaseModel):
     run_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     run_history_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     resolution_history_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    gap_acknowledgement_history_sha256: Optional[str] = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     bundle_status: str = Field(pattern=r"^committed$")
 
 
@@ -66,6 +70,7 @@ class VerifiedMonitorBundle:
     latest_run: Dict[str, str]
     runs: List[Dict[str, str]]
     resolutions: List[Dict[str, str]]
+    gap_acknowledgements: List[Dict[str, str]]
     validation_report: ValidationReport
 
 
@@ -116,6 +121,7 @@ def write_committed_bundle(
             "run.json": transition.monitor_run,
             "run_history.json": transition.monitor_runs,
             "resolution_history.json": transition.monitor_resolutions,
+            "gap_acknowledgement_history.json": transition.monitor_gap_acknowledgements,
         }
         for filename, payload in payloads.items():
             _write_json(stage / filename, payload)
@@ -133,6 +139,9 @@ def write_committed_bundle(
             run_sha256=_sha256_file(stage / "run.json"),
             run_history_sha256=_sha256_file(stage / "run_history.json"),
             resolution_history_sha256=_sha256_file(stage / "resolution_history.json"),
+            gap_acknowledgement_history_sha256=_sha256_file(
+                stage / "gap_acknowledgement_history.json"
+            ),
             bundle_status="committed",
         )
         _write_json(stage / "manifest.json", manifest.model_dump())
@@ -155,7 +164,8 @@ def verify_bundle(
     if not bundle_dir.is_dir():
         raise BundleError("monitor state bundle directory is unavailable")
     actual_files = {path.name for path in bundle_dir.iterdir() if path.is_file()}
-    if actual_files != BUNDLE_FILES:
+    legacy_files = BUNDLE_FILES - {"gap_acknowledgement_history.json"}
+    if actual_files not in (BUNDLE_FILES, legacy_files):
         raise BundleError("monitor state bundle file set is incomplete or unexpected")
 
     try:
@@ -169,6 +179,9 @@ def verify_bundle(
         raise BundleError("manifest target does not match requested target")
     if expected_checkpoint_version is not None and manifest.checkpoint_version != expected_checkpoint_version:
         raise BundleError("manifest checkpoint version does not match artifact identity")
+    acknowledgement_file_present = (bundle_dir / "gap_acknowledgement_history.json").is_file()
+    if acknowledgement_file_present != bool(manifest.gap_acknowledgement_history_sha256):
+        raise BundleError("gap acknowledgement history must be covered by the manifest")
 
     expected_hashes = {
         "target.json": manifest.target_sha256,
@@ -177,6 +190,10 @@ def verify_bundle(
         "run_history.json": manifest.run_history_sha256,
         "resolution_history.json": manifest.resolution_history_sha256,
     }
+    if manifest.gap_acknowledgement_history_sha256 is not None:
+        expected_hashes["gap_acknowledgement_history.json"] = (
+            manifest.gap_acknowledgement_history_sha256
+        )
     for filename, expected_hash in expected_hashes.items():
         if _sha256_file(bundle_dir / filename) != expected_hash:
             raise BundleError("bundle hash mismatch for %s" % filename)
@@ -187,6 +204,14 @@ def verify_bundle(
     runs = _require_dict_list(_read_json(bundle_dir / "run_history.json"), "run_history.json")
     resolutions = _require_dict_list(
         _read_json(bundle_dir / "resolution_history.json"), "resolution_history.json"
+    )
+    gap_acknowledgements = (
+        _require_dict_list(
+            _read_json(bundle_dir / "gap_acknowledgement_history.json"),
+            "gap_acknowledgement_history.json",
+        )
+        if (bundle_dir / "gap_acknowledgement_history.json").is_file()
+        else []
     )
     if not runs or runs[-1] != latest_run:
         raise BundleError("run.json must equal the final run_history record")
@@ -208,6 +233,7 @@ def verify_bundle(
             "monitor_target": [target],
             "monitor_run": runs,
             "monitor_resolution": resolutions,
+            "monitor_gap_acknowledgement": gap_acknowledgements,
             "monitor_checkpoint": [checkpoint],
         }
     )
@@ -224,6 +250,7 @@ def verify_bundle(
         latest_run,
         runs,
         resolutions,
+        gap_acknowledgements,
         report,
     )
 

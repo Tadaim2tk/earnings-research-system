@@ -68,3 +68,4 @@ class MonitorTransitionResult:
     validation_report: ValidationReport
     monitor_runs: List[Dict[str, str]]
     monitor_resolutions: List[Dict[str, str]]
+    monitor_gap_acknowledgements: List[Dict[str, str]]

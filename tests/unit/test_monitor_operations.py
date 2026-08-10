@@ -24,6 +24,7 @@ from earnings_research.monitoring.notifications import (
 )
 from earnings_research.monitoring.offline import OfflineSourceAdapter
 from earnings_research.monitoring.operations import StateUnavailable, execute_live_run, execute_offline_run
+from earnings_research.monitoring.operational_cli import record_gap_acknowledgement
 from earnings_research.monitoring.persistence import (
     BundleError,
     PersistenceError,
@@ -227,7 +228,7 @@ def test_stale_gap_thresholds_are_fixed_and_fail_closed():
     )
     event_window = assess_stale_gap(
         last_success_at=moment(9),
-        reference_time=moment(10, day=8),
+        reference_time=moment(10, day=10),
         schedule_profile="prospective_event_v1",
         event_date=date(2026, 8, 12),
     )
@@ -255,12 +256,12 @@ def test_stale_previous_state_produces_fatal_stopped_bundle(tmp_path):
     previous = initial_bundle(tmp_path)
     stale = execute_offline_run(
         target=target(),
-        source_input=source_input("same", moment(22, day=9)),
+        source_input=source_input("same", moment(22, day=11)),
         previous_bundle=previous,
         output_dir=tmp_path / "stale",
         run_id="MRUN-EXAMPLE-002",
-        started_at=moment(22, day=9),
-        finished_at=moment(22, 1, day=9),
+        started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
     )
 
     assert stale.latest_run["run_result"] == "error"
@@ -633,11 +634,12 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert 'cron: "17 0,6,12 * * 1-5"' in raw
 
 
-def test_schedule_is_daily_except_three_event_day_windows():
+def test_schedule_uses_three_slots_in_event_window_and_on_event_day():
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(9, day=12)) == [row]
-    assert active_target_plan([row], planned_at=moment(15, day=12)) == []
+    assert active_target_plan([row], planned_at=moment(15, day=12)) == [row]
+    assert active_target_plan([row], planned_at=moment(21, day=12)) == [row]
     assert active_target_plan([row], planned_at=moment(9, day=13)) == [row]
     assert active_target_plan([row], planned_at=moment(15, day=13)) == [row]
     assert active_target_plan([row], planned_at=moment(21, day=13)) == [row]
@@ -650,11 +652,38 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
 
 
-@pytest.mark.parametrize("hour", [0, 8, 15, 21])
-def test_slots_outside_the_morning_window_are_not_due(hour):
+@pytest.mark.parametrize("hour", [0, 8])
+def test_event_window_before_first_slot_is_not_due(hour):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, day=12)) == []
+
+
+@pytest.mark.parametrize("hour", [9, 15, 21])
+def test_normal_day_more_than_five_business_days_before_event_uses_morning_only(hour):
+    row = target()
+    row["event_date"] = "2026-08-21"
+    expected = [row] if hour == 9 else []
+    assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
+
+
+def test_stale_elapsed_excludes_weekend_but_preserves_weekday_hours():
+    weekend = assess_stale_gap(
+        last_success_at=datetime(2026, 8, 7, 9, tzinfo=JST),
+        reference_time=datetime(2026, 8, 10, 9, tzinfo=JST),
+        schedule_profile="prospective_event_v1",
+        event_date=date(2026, 8, 13),
+    )
+    weekday = assess_stale_gap(
+        last_success_at=datetime(2026, 8, 10, 9, tzinfo=JST),
+        reference_time=datetime(2026, 8, 11, 10, tzinfo=JST),
+        schedule_profile="prospective_event_v1",
+        event_date=date(2026, 8, 13),
+    )
+    assert weekend.age == timedelta(hours=24)
+    assert weekend.is_stale is False
+    assert weekday.age == timedelta(hours=25)
+    assert weekday.is_stale is True
 
 
 @pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (15, 17), (17, 5), (21, 17), (23, 30)])
@@ -741,6 +770,123 @@ def test_live_operation_does_not_fetch_source_when_robots_check_fails(tmp_path):
             adapter_factory=lambda: adapter,
         )
     assert adapter.calls == ["robots"]
+
+
+def test_gap_acknowledgement_recovers_stopped_state_without_skipping_observation(tmp_path):
+    previous = initial_bundle(tmp_path)
+    stopped = execute_offline_run(
+        target=target(),
+        source_input=source_input("same", moment(22, day=11)),
+        previous_bundle=previous,
+        output_dir=tmp_path / "stopped",
+        run_id="MRUN-EXAMPLE-002",
+        started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    acknowledgement = {
+        "acknowledgement_id": "MGACK-EXAMPLE-001",
+        "monitor_target_id": target()["monitor_target_id"],
+        "acknowledged_gap_start": moment(9, day=7).isoformat(),
+        "acknowledged_gap_end": moment(22, 15, day=11).isoformat(),
+        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_by": "human:reviewer-alpha",
+        "reason": "Artifact interruption reviewed; normal observation may resume",
+        "supersedes_acknowledgement_id": "",
+    }
+    observation = SourceObservation(
+        source_url=target()["source_url"],
+        title="Initial fixture title",
+        document_id="doc-initial",
+        published_at=moment(8, day=7),
+        etag="etag-initial",
+        last_modified="Fri, 07 Aug 2026 00:00:00 GMT",
+        content_length=100,
+        replacement_suspected=False,
+        observed_at=moment(23, day=11),
+    )
+    adapter = StubLiveAdapter(observation)
+    recovered = execute_live_run(
+        target=target(),
+        previous_bundle=stopped,
+        output_dir=tmp_path / "recovered",
+        run_id="MRUN-EXAMPLE-003",
+        started_at=moment(23, day=11),
+        finished_at=moment(23, 1, day=11),
+        adapter_factory=lambda: adapter,
+        gap_acknowledgements=[acknowledgement],
+    )
+    assert adapter.calls == ["robots", "source"]
+    assert recovered.latest_run["observation_status"] == "succeeded"
+    assert recovered.checkpoint["target_state"] != "stopped"
+    assert recovered.gap_acknowledgements == [acknowledgement]
+
+
+def test_gap_acknowledgement_does_not_clear_pending_change(tmp_path):
+    initial = initial_bundle(tmp_path)
+    changed = next_bundle(tmp_path, initial, "changed", "MRUN-EXAMPLE-002", 10, "changed")
+    stopped = execute_offline_run(
+        target=target(),
+        source_input=source_input("changed", moment(22, day=11)),
+        previous_bundle=changed,
+        output_dir=tmp_path / "pending-stopped",
+        run_id="MRUN-EXAMPLE-003",
+        started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    acknowledgement = {
+        "acknowledgement_id": "MGACK-EXAMPLE-PENDING",
+        "monitor_target_id": target()["monitor_target_id"],
+        "acknowledged_gap_start": moment(10, day=7).isoformat(),
+        "acknowledged_gap_end": moment(22, 15, day=11).isoformat(),
+        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_by": "system_policy:monitor-gap-recovery-v1",
+        "reason": "Policy-reviewed infrastructure interruption",
+        "supersedes_acknowledgement_id": "",
+    }
+    recovered = execute_offline_run(
+        target=target(),
+        source_input=source_input("changed", moment(23, day=11)),
+        previous_bundle=stopped,
+        output_dir=tmp_path / "pending-recovered",
+        run_id="MRUN-EXAMPLE-004",
+        started_at=moment(23, day=11),
+        finished_at=moment(23, 1, day=11),
+        gap_acknowledgements=[acknowledgement],
+    )
+    assert recovered.checkpoint["pending_change_run_id"] == "MRUN-EXAMPLE-002"
+    assert recovered.checkpoint["target_state"] == "pending_human_review"
+
+
+def test_gap_acknowledgement_cli_rejects_future_and_already_resolved_gaps(tmp_path):
+    previous = initial_bundle(tmp_path)
+    stopped = execute_offline_run(
+        target=target(),
+        source_input=source_input("same", moment(22, day=11)),
+        previous_bundle=previous,
+        output_dir=tmp_path / "cli-stopped",
+        run_id="MRUN-EXAMPLE-002",
+        started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    common = {
+        "previous_dir": stopped.path,
+        "output_path": tmp_path / "ack.json",
+        "acknowledgement_id": "MGACK-INVALID",
+        "gap_start": moment(8, day=7).isoformat(),
+        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_by": "human:reviewer-alpha",
+        "reason": "Reviewed interruption",
+    }
+    with pytest.raises(ValueError, match="future monitoring gap"):
+        record_gap_acknowledgement(
+            **common,
+            gap_end=moment(23, day=11).isoformat(),
+        )
+    with pytest.raises(ValueError, match="already resolved"):
+        record_gap_acknowledgement(
+            **common,
+            gap_end=moment(8, 30, day=7).isoformat(),
+        )
 
 
 def test_autonomous_change_creates_machine_readable_research_handoff(tmp_path):
