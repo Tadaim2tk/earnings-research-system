@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "CarryoverItem": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {"minLength": 1, "type": "string"},
+        "occurrence_count": {"minimum": 1, "type": "integer"},
+        "source_review_ids": {"items": {"minLength": 1, "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true}
+      },
+      "required": ["text", "occurrence_count", "source_review_ids"],
+      "type": "object"
+    },
+    "SourceReviewReference": {
+      "additionalProperties": false,
+      "properties": {
+        "review_id": {"minLength": 1, "type": "string"},
+        "earnings_event_id": {"minLength": 1, "type": "string"},
+        "reviewed_at": {"format": "date-time", "type": "string"},
+        "content_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+      },
+      "required": ["review_id", "earnings_event_id", "reviewed_at", "content_sha256"],
+      "type": "object"
+    },
+    "MarketEarningsDivergence": {
+      "additionalProperties": false,
+      "properties": {
+        "earnings_assessment": {"enum": ["positive", "mixed", "negative", "in_line", "inconclusive"], "type": "string"},
+        "market_expectation_interpretation": {"enum": ["possible_higher_hurdle_than_recorded", "possible_lower_hurdle_than_recorded"], "type": "string"},
+        "reaction_transition": {"enum": ["same_direction", "changed_by_next_business_day", "reversed_by_fifth_business_day", "mixed", "pending", "not_comparable"], "type": "string"},
+        "occurrence_count": {"minimum": 1, "type": "integer"},
+        "source_review_ids": {"items": {"minLength": 1, "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true},
+        "source_event_ids": {"items": {"minLength": 1, "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true}
+      },
+      "required": ["earnings_assessment", "market_expectation_interpretation", "reaction_transition", "occurrence_count", "source_review_ids", "source_event_ids"],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "baseline_carryover_context_v1", "type": "string"},
+    "target_event_id": {"minLength": 1, "type": "string"},
+    "prepared_at": {"format": "date-time", "type": "string"},
+    "source_event_ids": {"items": {"minLength": 1, "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true},
+    "source_reviews": {"items": {"$ref": "#/$defs/SourceReviewReference"}, "minItems": 1, "type": "array"},
+    "maintain_criteria": {"items": {"$ref": "#/$defs/CarryoverItem"}, "type": "array"},
+    "weaken_candidates": {"items": {"$ref": "#/$defs/CarryoverItem"}, "type": "array"},
+    "next_event_checks": {"items": {"$ref": "#/$defs/CarryoverItem"}, "type": "array"},
+    "rejected_assumptions": {"items": {"$ref": "#/$defs/CarryoverItem"}, "type": "array"},
+    "recurring_errors_to_prevent": {"items": {"$ref": "#/$defs/CarryoverItem"}, "type": "array"},
+    "market_earnings_divergence_history": {"items": {"$ref": "#/$defs/MarketEarningsDivergence"}, "type": "array"},
+    "production_rules_modified": {"const": false, "type": "boolean"},
+    "scoring_weights_modified": {"const": false, "type": "boolean"},
+    "trade_decision_included": {"const": false, "type": "boolean"}
+  },
+  "required": ["schema_version", "target_event_id", "prepared_at", "source_event_ids", "source_reviews", "maintain_criteria", "weaken_candidates", "next_event_checks", "rejected_assumptions", "recurring_errors_to_prevent", "market_earnings_divergence_history", "production_rules_modified", "scoring_weights_modified", "trade_decision_included"],
+  "title": "BaselineCarryoverContext",
+  "type": "object"
+}
