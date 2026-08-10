@@ -5,8 +5,10 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from pydantic import ValidationError
 
 from earnings_research.baseline_carryover.builder import canonical_json_sha256
+from earnings_research.baseline_carryover.models import BaselineCarryoverContext
 from earnings_research.baseline_carryover.pipeline import prepare_files, write_carryover
 from earnings_research.cli.__main__ import main
 
@@ -15,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REVIEW_SAMPLE = ROOT / "data/samples/post_event_learning_review_sample.json"
 SCHEMA = ROOT / "schemas/analysis/baseline_carryover_context.schema.json"
 PREPARED_AT = datetime.fromisoformat("2027-06-01T09:00:00+09:00")
+CANONICAL_DIGEST = "1984ce0157340be219299982c10111645698c4eabf655d3d3327cf4ae4180976"
 
 
 def review_data():
@@ -33,6 +36,7 @@ def test_one_review_is_carried_with_source_and_canonical_hash():
     assert result.target_event_id == "EVT-FICTIONAL-NEXT-001"
     assert result.source_event_ids == [raw["earnings_event_id"]]
     assert result.source_reviews[0].content_sha256 == canonical_json_sha256(raw)
+    assert result.source_reviews[0].content_sha256 == CANONICAL_DIGEST
     assert result.maintain_criteria[0].occurrence_count == 1
     assert result.maintain_criteria[0].source_review_ids == [raw["review_id"]]
     assert result.production_rules_modified is False
@@ -97,12 +101,34 @@ def test_empty_learning_record_stays_empty(tmp_path):
     assert result.recurring_errors_to_prevent == []
 
 
-@pytest.mark.parametrize("field", ["production_rules_modified", "scoring_weights_modified"])
+GOVERNANCE_FLAGS = ["production_rules_modified", "scoring_weights_modified", "trade_decision_included"]
+
+
+@pytest.mark.parametrize("field", GOVERNANCE_FLAGS)
 def test_schema_rejects_true_governance_flags(field):
     instance = prepare_files([REVIEW_SAMPLE], "EVT-FICTIONAL-NEXT-001", PREPARED_AT).model_dump(mode="json")
     instance[field] = True
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance, json.loads(SCHEMA.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize("field", GOVERNANCE_FLAGS)
+def test_model_rejects_true_governance_flags(field):
+    payload = prepare_files([REVIEW_SAMPLE], "EVT-FICTIONAL-NEXT-001", PREPARED_AT).model_dump(mode="json")
+    payload[field] = True
+    with pytest.raises(ValidationError):
+        BaselineCarryoverContext.model_validate(payload)
+
+
+def test_canonical_hash_is_key_order_independent():
+    assert canonical_json_sha256({"b": 1, "a": {"d": 2, "c": 3}}) == canonical_json_sha256(
+        {"a": {"c": 3, "d": 2}, "b": 1}
+    )
+
+
+def test_naive_prepared_at_is_rejected():
+    with pytest.raises(ValueError, match="timezone"):
+        prepare_files([REVIEW_SAMPLE], "EVT-FICTIONAL-NEXT-001", datetime.fromisoformat("2027-06-01T09:00:00"))
 
 
 def test_cli_writes_append_only_context(tmp_path):
