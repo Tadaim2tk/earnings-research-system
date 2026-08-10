@@ -3,12 +3,19 @@
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from earnings_research.document_analysis.pipeline import (
     analyze_document_url,
     analyze_handoff,
     write_analysis,
+)
+from earnings_research.earnings_evaluation import (
+    evaluate_earnings,
+    load_evaluation_context,
+    load_evaluation_inputs,
+    write_evaluation,
 )
 
 from earnings_research.monitoring.operational_cli import (
@@ -100,6 +107,19 @@ def main(argv=None) -> int:
     dispatch_parser.add_argument("--output-dir", required=True, type=Path)
     dispatch_parser.add_argument("--acquired-at")
 
+    evaluation_parser = subparsers.add_parser(
+        "evaluate-earnings", help="Compare one locked pre-event baseline with analyzed earnings results."
+    )
+    evaluation_parser.add_argument("--baseline", required=True, type=Path)
+    evaluation_parser.add_argument("--baseline-id", required=True)
+    evaluation_parser.add_argument("--hypotheses", required=True, type=Path)
+    evaluation_parser.add_argument("--events", required=True, type=Path)
+    evaluation_parser.add_argument("--companies", required=True, type=Path)
+    evaluation_parser.add_argument("--analysis", required=True, type=Path)
+    evaluation_parser.add_argument("--evaluated-at")
+    evaluation_parser.add_argument("--baseline-unit-multiplier", type=float, default=1_000_000)
+    evaluation_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -134,6 +154,31 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Document analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "evaluate-earnings":
+        try:
+            baseline, hypotheses, analysis = load_evaluation_inputs(
+                args.baseline, args.hypotheses, args.analysis, args.baseline_id
+            )
+            period_scope, ticker = load_evaluation_context(
+                args.events, args.companies, baseline, analysis
+            )
+            evaluated_at = datetime.fromisoformat(args.evaluated_at) if args.evaluated_at else None
+            result = evaluate_earnings(
+                baseline,
+                hypotheses,
+                analysis,
+                evaluated_at,
+                args.baseline_unit_multiplier,
+                expected_ticker=ticker,
+                expected_period_scope=period_scope,
+            )
+            write_evaluation(result, args.output)
+            print(json.dumps({"status": result.status, "evaluation_id": result.evaluation_id, "output": str(args.output)}))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Earnings evaluation failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:
