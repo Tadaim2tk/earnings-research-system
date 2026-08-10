@@ -2,6 +2,7 @@ import io
 import json
 import re
 import shutil
+import urllib.request
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -10,7 +11,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from earnings_research.monitoring.github_api import GitHubAPIClient, GitHubAPIError
+from earnings_research.monitoring.github_api import (
+    CredentialStrippingRedirectHandler,
+    GitHubAPIClient,
+    GitHubAPIError,
+)
 from earnings_research.monitoring.handoff import build_research_handoff, write_research_handoff
 from earnings_research.monitoring.models import ObservationFailure, OfflineSourceInput, SourceObservation
 from earnings_research.monitoring.notifications import (
@@ -476,6 +481,29 @@ def test_github_artifact_lookup_uses_injected_transport_only(tmp_path):
     assert len(requests) == 1
     assert requests[0].full_url.startswith("https://api.github.com/repos/owner/repository/actions/artifacts")
     assert "secret-token" not in requests[0].full_url
+
+
+def redirected_request(new_url, original_url="https://api.github.com/repos/owner/repository/actions/artifacts/1/zip"):
+    original = urllib.request.Request(
+        original_url,
+        method="GET",
+        headers={"Authorization": "Bearer secret-token", "Accept": "application/vnd.github+json"},
+    )
+    handler = CredentialStrippingRedirectHandler()
+    return handler.redirect_request(original, io.BytesIO(b""), 302, "Found", {}, new_url)
+
+
+def test_artifact_download_drops_the_credential_when_redirected_off_github():
+    redirected = redirected_request("https://productionresultssa0.blob.core.windows.net/actions-results/abc?sig=xyz")
+    assert redirected is not None
+    assert redirected.get_header("Authorization") is None
+    assert redirected.get_header("Accept") == "application/vnd.github+json"
+
+
+def test_artifact_download_keeps_the_credential_on_the_same_host():
+    redirected = redirected_request("https://api.github.com/repos/owner/repository/actions/artifacts/2/zip")
+    assert redirected is not None
+    assert redirected.get_header("Authorization") == "Bearer secret-token"
 
 
 def test_github_artifact_lookup_selects_and_verifies_highest_main_bundle(tmp_path):

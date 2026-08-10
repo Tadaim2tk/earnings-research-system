@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -15,6 +16,29 @@ from earnings_research.monitoring.persistence import BundleError, VerifiedMonito
 
 class GitHubAPIError(RuntimeError):
     """Raised when the bounded GitHub API operation fails."""
+
+
+class CredentialStrippingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Drop the GitHub credential when a download redirects to another host.
+
+    Artifact downloads answer with a redirect to pre-signed blob storage. That
+    URL carries its own signature and rejects an extra Authorization header, so
+    the credential must not follow the redirect off api.github.com.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None and _host(newurl) != _host(req.full_url):
+            redirected.remove_header("Authorization")
+        return redirected
+
+
+def _host(url: str) -> str:
+    return urllib.parse.urlsplit(url).hostname or ""
+
+
+def _default_opener(request):
+    return urllib.request.build_opener(CredentialStrippingRedirectHandler).open(request)
 
 
 class GitHubAPIClient:
@@ -33,7 +57,7 @@ class GitHubAPIClient:
         self.repository = repository
         self.token = token
         self.api_url = api_url.rstrip("/")
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or _default_opener
 
     def fetch_previous_bundle(
         self, *, monitor_target_id: str, output_dir: Path
