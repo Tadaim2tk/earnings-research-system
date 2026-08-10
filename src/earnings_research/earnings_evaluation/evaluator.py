@@ -107,6 +107,8 @@ def load_evaluation_context(
         raise ValueError("event quarter does not define a comparison period") from exc
     if company.get("ticker") != analysis.document.ticker:
         raise ValueError("event company ticker does not match analysis ticker")
+    if company.get("company_name") != analysis.document.company_name:
+        raise ValueError("event company name does not match analysis company name")
     if event.get("announcement_date") != analysis.document.announcement_date:
         raise ValueError("event announcement date does not match analysis announcement date")
     return scope, company["ticker"]

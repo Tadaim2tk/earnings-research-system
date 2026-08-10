@@ -16,6 +16,7 @@ from earnings_research.document_analysis.models import (
 )
 from earnings_research.earnings_evaluation import (
     evaluate_earnings,
+    load_evaluation_context,
     load_evaluation_inputs,
 )
 
@@ -280,6 +281,7 @@ def test_cli_runs_locked_baseline_to_evaluation(tmp_path):
     write_csv(companies_path, [{
         "company_id": "CMP-FICTIONAL",
         "ticker": "9999",
+        "company_name": "架空食品株式会社",
     }])
     analysis_path.write_text(analysis().model_dump_json(indent=2), encoding="utf-8")
     exit_code = main([
@@ -298,6 +300,25 @@ def test_cli_runs_locked_baseline_to_evaluation(tmp_path):
     assert payload["baseline_id"] == base["baseline_id"]
     assert payload["ticker"] == "9999"
     assert payload["next_stage"] == "ready_for_market_reaction_tracking"
+
+
+def test_context_rejects_company_name_mismatch(tmp_path):
+    base = baseline()
+    events_path = tmp_path / "events.csv"
+    companies_path = tmp_path / "companies.csv"
+    write_csv(events_path, [{
+        "earnings_event_id": base["earnings_event_id"],
+        "company_id": "CMP-FICTIONAL",
+        "quarter": "FY",
+        "announcement_date": "2027-05-10",
+    }])
+    write_csv(companies_path, [{
+        "company_id": "CMP-FICTIONAL",
+        "ticker": "9999",
+        "company_name": "別会社株式会社",
+    }])
+    with pytest.raises(ValueError, match="company name"):
+        load_evaluation_context(events_path, companies_path, base, analysis())
 
 
 def test_loader_rejects_unlocked_or_post_event_baseline(tmp_path):
