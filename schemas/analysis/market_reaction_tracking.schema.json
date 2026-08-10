@@ -1,0 +1,473 @@
+{
+  "$defs": {
+    "EventWindowReaction": {
+      "properties": {
+        "calculation_origin": {
+          "anyOf": [
+            {
+              "const": "ers_calculated",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation Origin"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formula"
+        },
+        "immediate_observation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Immediate Observation Id"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "reference_observation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference Observation Id"
+        },
+        "reference_role": {
+          "enum": [
+            "pre_event_close",
+            "pre_announcement_reference"
+          ],
+          "title": "Reference Role",
+          "type": "string"
+        },
+        "return_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Pct"
+        },
+        "status": {
+          "enum": [
+            "calculated",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reference_role",
+        "note"
+      ],
+      "title": "EventWindowReaction",
+      "type": "object"
+    },
+    "MarketReactionSummary": {
+      "properties": {
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "fifth_business_day_direction": {
+          "enum": [
+            "positive",
+            "negative",
+            "muted",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Fifth Business Day Direction",
+          "type": "string"
+        },
+        "immediate_direction": {
+          "enum": [
+            "positive",
+            "negative",
+            "muted",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Immediate Direction",
+          "type": "string"
+        },
+        "next_business_day_direction": {
+          "enum": [
+            "positive",
+            "negative",
+            "muted",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Next Business Day Direction",
+          "type": "string"
+        },
+        "reaction_path": {
+          "enum": [
+            "extended",
+            "sustained",
+            "reversed",
+            "muted",
+            "mixed",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Reaction Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "immediate_direction",
+        "next_business_day_direction",
+        "fifth_business_day_direction",
+        "reaction_path",
+        "explanation"
+      ],
+      "title": "MarketReactionSummary",
+      "type": "object"
+    },
+    "PriceSourceReference": {
+      "properties": {
+        "recorded_by": {
+          "title": "Recorded By",
+          "type": "string"
+        },
+        "source_checked_at": {
+          "format": "date-time",
+          "title": "Source Checked At",
+          "type": "string"
+        },
+        "source_name": {
+          "minLength": 1,
+          "title": "Source Name",
+          "type": "string"
+        },
+        "source_url_or_identifier": {
+          "minLength": 1,
+          "title": "Source Url Or Identifier",
+          "type": "string"
+        },
+        "terms_basis": {
+          "minLength": 1,
+          "title": "Terms Basis",
+          "type": "string"
+        },
+        "terms_status": {
+          "enum": [
+            "approved",
+            "system_policy",
+            "manual_fallback"
+          ],
+          "title": "Terms Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_name",
+        "source_url_or_identifier",
+        "source_checked_at",
+        "recorded_by",
+        "terms_status",
+        "terms_basis"
+      ],
+      "title": "PriceSourceReference",
+      "type": "object"
+    },
+    "ReactionMilestone": {
+      "properties": {
+        "calculation_origin": {
+          "anyOf": [
+            {
+              "const": "ers_calculated",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation Origin"
+        },
+        "expected_trading_date": {
+          "format": "date",
+          "title": "Expected Trading Date",
+          "type": "string"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formula"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "observation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observation Id"
+        },
+        "price": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price"
+        },
+        "price_datetime": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Datetime"
+        },
+        "return_from_pre_event_close_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return From Pre Event Close Pct"
+        },
+        "role": {
+          "enum": [
+            "pre_event_close",
+            "immediate_post_announcement",
+            "next_business_day_close",
+            "fifth_business_day_close"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PriceSourceReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "pending",
+            "not_comparable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "status",
+        "expected_trading_date",
+        "note"
+      ],
+      "title": "ReactionMilestone",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "announcement_datetime": {
+      "format": "date-time",
+      "title": "Announcement Datetime",
+      "type": "string"
+    },
+    "announcement_session": {
+      "enum": [
+        "before_open",
+        "intraday",
+        "after_close"
+      ],
+      "title": "Announcement Session",
+      "type": "string"
+    },
+    "calendar_name": {
+      "title": "Calendar Name",
+      "type": "string"
+    },
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "corporate_action_status": {
+      "enum": [
+        "none_detected",
+        "present",
+        "unknown"
+      ],
+      "title": "Corporate Action Status",
+      "type": "string"
+    },
+    "currency": {
+      "title": "Currency",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "evaluation_id": {
+      "title": "Evaluation Id",
+      "type": "string"
+    },
+    "event_window_reaction": {
+      "$ref": "#/$defs/EventWindowReaction"
+    },
+    "milestones": {
+      "items": {
+        "$ref": "#/$defs/ReactionMilestone"
+      },
+      "title": "Milestones",
+      "type": "array"
+    },
+    "next_stage": {
+      "enum": [
+        "ready_for_post_event_validation",
+        "awaiting_price_milestones",
+        "manual_review_required"
+      ],
+      "title": "Next Stage",
+      "type": "string"
+    },
+    "raw_price_data_retained": {
+      "const": false,
+      "default": false,
+      "title": "Raw Price Data Retained",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "market_reaction_tracking_v1",
+      "default": "market_reaction_tracking_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "tracking",
+        "not_comparable"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/MarketReactionSummary"
+    },
+    "ticker": {
+      "title": "Ticker",
+      "type": "string"
+    },
+    "tracking_id": {
+      "title": "Tracking Id",
+      "type": "string"
+    },
+    "trade_decision_included": {
+      "const": false,
+      "default": false,
+      "title": "Trade Decision Included",
+      "type": "boolean"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracking_id",
+    "earnings_event_id",
+    "evaluation_id",
+    "company_name",
+    "ticker",
+    "currency",
+    "status",
+    "announcement_datetime",
+    "announcement_session",
+    "calendar_name",
+    "corporate_action_status",
+    "milestones",
+    "event_window_reaction",
+    "summary",
+    "next_stage"
+  ],
+  "title": "MarketReactionTracking",
+  "type": "object"
+}

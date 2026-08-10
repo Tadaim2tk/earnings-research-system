@@ -1,0 +1,304 @@
+{
+  "$defs": {
+    "PriceObservation": {
+      "properties": {
+        "bar_interval_minutes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bar Interval Minutes"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "is_unadjusted": {
+          "const": true,
+          "default": true,
+          "title": "Is Unadjusted",
+          "type": "boolean"
+        },
+        "observation_id": {
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "price": {
+          "exclusiveMinimum": 0.0,
+          "title": "Price",
+          "type": "number"
+        },
+        "price_datetime": {
+          "format": "date-time",
+          "title": "Price Datetime",
+          "type": "string"
+        },
+        "price_kind": {
+          "enum": [
+            "official_close",
+            "official_open",
+            "minute_bar_close",
+            "vwap_after_announcement",
+            "manual_trade_price"
+          ],
+          "title": "Price Kind",
+          "type": "string"
+        },
+        "raw_data_retained": {
+          "const": false,
+          "default": false,
+          "title": "Raw Data Retained",
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "pre_event_close",
+            "pre_announcement_reference",
+            "immediate_post_announcement",
+            "next_business_day_close",
+            "fifth_business_day_close"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "selection_rule": {
+          "minLength": 1,
+          "title": "Selection Rule",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/PriceSourceReference"
+        },
+        "trading_date": {
+          "format": "date",
+          "title": "Trading Date",
+          "type": "string"
+        },
+        "vwap_window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vwap Window"
+        }
+      },
+      "required": [
+        "observation_id",
+        "role",
+        "price",
+        "currency",
+        "price_datetime",
+        "trading_date",
+        "price_kind",
+        "selection_rule",
+        "source"
+      ],
+      "title": "PriceObservation",
+      "type": "object"
+    },
+    "PriceSourceReference": {
+      "properties": {
+        "recorded_by": {
+          "title": "Recorded By",
+          "type": "string"
+        },
+        "source_checked_at": {
+          "format": "date-time",
+          "title": "Source Checked At",
+          "type": "string"
+        },
+        "source_name": {
+          "minLength": 1,
+          "title": "Source Name",
+          "type": "string"
+        },
+        "source_url_or_identifier": {
+          "minLength": 1,
+          "title": "Source Url Or Identifier",
+          "type": "string"
+        },
+        "terms_basis": {
+          "minLength": 1,
+          "title": "Terms Basis",
+          "type": "string"
+        },
+        "terms_status": {
+          "enum": [
+            "approved",
+            "system_policy",
+            "manual_fallback"
+          ],
+          "title": "Terms Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_name",
+        "source_url_or_identifier",
+        "source_checked_at",
+        "recorded_by",
+        "terms_status",
+        "terms_basis"
+      ],
+      "title": "PriceSourceReference",
+      "type": "object"
+    },
+    "VerifiedTradingSession": {
+      "properties": {
+        "regular_close": {
+          "format": "date-time",
+          "title": "Regular Close",
+          "type": "string"
+        },
+        "regular_open": {
+          "format": "date-time",
+          "title": "Regular Open",
+          "type": "string"
+        },
+        "trading_date": {
+          "format": "date",
+          "title": "Trading Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trading_date",
+        "regular_open",
+        "regular_close"
+      ],
+      "title": "VerifiedTradingSession",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "announcement_datetime": {
+      "format": "date-time",
+      "title": "Announcement Datetime",
+      "type": "string"
+    },
+    "announcement_session": {
+      "enum": [
+        "before_open",
+        "intraday",
+        "after_close"
+      ],
+      "title": "Announcement Session",
+      "type": "string"
+    },
+    "calendar_name": {
+      "title": "Calendar Name",
+      "type": "string"
+    },
+    "calendar_source": {
+      "$ref": "#/$defs/PriceSourceReference"
+    },
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "corporate_action_status": {
+      "enum": [
+        "none_detected",
+        "present",
+        "unknown"
+      ],
+      "title": "Corporate Action Status",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "evaluation_id": {
+      "title": "Evaluation Id",
+      "type": "string"
+    },
+    "market_timezone": {
+      "const": "Asia/Tokyo",
+      "default": "Asia/Tokyo",
+      "title": "Market Timezone",
+      "type": "string"
+    },
+    "next_five_session_dates": {
+      "items": {
+        "format": "date",
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 5,
+      "title": "Next Five Session Dates",
+      "type": "array"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/PriceObservation"
+      },
+      "minItems": 1,
+      "title": "Observations",
+      "type": "array"
+    },
+    "pre_event_close_date": {
+      "format": "date",
+      "title": "Pre Event Close Date",
+      "type": "string"
+    },
+    "recorded_at": {
+      "format": "date-time",
+      "title": "Recorded At",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "market_reaction_observations_v1",
+      "default": "market_reaction_observations_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "ticker": {
+      "title": "Ticker",
+      "type": "string"
+    },
+    "tracking_id": {
+      "title": "Tracking Id",
+      "type": "string"
+    },
+    "verified_sessions": {
+      "items": {
+        "$ref": "#/$defs/VerifiedTradingSession"
+      },
+      "maxItems": 7,
+      "minItems": 6,
+      "title": "Verified Sessions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "tracking_id",
+    "earnings_event_id",
+    "evaluation_id",
+    "company_name",
+    "ticker",
+    "announcement_datetime",
+    "announcement_session",
+    "calendar_name",
+    "calendar_source",
+    "verified_sessions",
+    "pre_event_close_date",
+    "next_five_session_dates",
+    "corporate_action_status",
+    "observations",
+    "recorded_at"
+  ],
+  "title": "MarketReactionObservationBundle",
+  "type": "object"
+}

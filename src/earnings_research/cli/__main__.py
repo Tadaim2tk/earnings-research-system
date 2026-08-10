@@ -17,6 +17,7 @@ from earnings_research.earnings_evaluation import (
     load_evaluation_inputs,
     write_evaluation,
 )
+from earnings_research.market_reaction import track_files, write_reaction
 
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
@@ -120,6 +121,17 @@ def main(argv=None) -> int:
     evaluation_parser.add_argument("--baseline-unit-multiplier", type=float, default=1_000_000)
     evaluation_parser.add_argument("--output", required=True, type=Path)
 
+    reaction_parser = subparsers.add_parser(
+        "track-market-reaction",
+        help="Calculate immediate, next-session, and fifth-session earnings reactions.",
+    )
+    reaction_parser.add_argument("--observations", required=True, type=Path)
+    reaction_parser.add_argument("--evaluation", required=True, type=Path)
+    reaction_parser.add_argument("--events", required=True, type=Path)
+    reaction_parser.add_argument("--event-status-history", required=True, type=Path)
+    reaction_parser.add_argument("--companies", required=True, type=Path)
+    reaction_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -179,6 +191,27 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Earnings evaluation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "track-market-reaction":
+        try:
+            result = track_files(
+                args.observations,
+                args.evaluation,
+                args.events,
+                args.event_status_history,
+                args.companies,
+            )
+            write_reaction(result, args.output)
+            print(json.dumps({
+                "status": result.status,
+                "tracking_id": result.tracking_id,
+                "reaction_path": result.summary.reaction_path,
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Market reaction tracking failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:
