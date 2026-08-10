@@ -132,6 +132,8 @@ def _validate_identity_and_time(baseline, evaluation, reaction, reviewed_at, pre
     for actual, expected, label in pairs:
         if actual != expected:
             raise ValueError(f"market reaction {label} does not match earnings evaluation")
+    if locked_at >= reaction.announcement_datetime:
+        raise ValueError("baseline lock must predate the announcement")
     if locked_at > evaluation.evaluated_at:
         raise ValueError("baseline lock must predate earnings evaluation")
     if previous is not None:
@@ -285,6 +287,9 @@ def _has_explicit_invalidation_condition(text: str) -> bool:
 
 def _market_stages(reaction):
     milestones = {item.role: item for item in reaction.milestones}
+    for role in ("next_business_day_close", "fifth_business_day_close"):
+        if role not in milestones:
+            raise ValueError(f"market reaction tracking is missing the {role} milestone")
     definitions = (
         (
             "immediate_post_announcement",

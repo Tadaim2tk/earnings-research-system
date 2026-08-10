@@ -369,6 +369,36 @@ def test_post_event_hypothesis_cannot_be_recast_as_pre_event():
         build(rows=rows)
 
 
+@pytest.mark.parametrize("locked_at", ["2027-05-10T16:00:00+09:00", "2027-05-10T15:00:00+09:00"])
+def test_baseline_locked_at_or_after_announcement_is_rejected(locked_at):
+    base = baseline()
+    base["locked_at"] = locked_at
+    with pytest.raises(ValueError, match="predate the announcement"):
+        build_post_event_review(
+            base,
+            hypothesis_rows(("supported",)),
+            evaluation(),
+            reaction(),
+            datetime.fromisoformat("2027-05-17T18:00:00+09:00"),
+        )
+
+
+@pytest.mark.parametrize("role", ["fifth_business_day_close", "next_business_day_close"])
+def test_missing_market_milestone_role_is_rejected(role):
+    tracking = reaction()
+    trimmed = tracking.model_copy(
+        update={"milestones": [item for item in tracking.milestones if item.role != role]}
+    )
+    with pytest.raises(ValueError, match=f"missing the {role} milestone"):
+        build_post_event_review(
+            baseline(),
+            hypothesis_rows(("supported",)),
+            evaluation(),
+            trimmed,
+            datetime.fromisoformat("2027-05-17T18:00:00+09:00"),
+        )
+
+
 def test_hypothesis_text_rewrite_is_rejected():
     rows = hypothesis_rows(("supported",))
     ev = evaluation()
