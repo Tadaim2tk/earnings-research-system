@@ -615,6 +615,34 @@ def test_schedule_is_daily_except_three_event_day_windows():
     assert active_target_plan([row], planned_at=moment(21, day=13)) == [row]
 
 
+@pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (14, 59)])
+def test_delayed_morning_run_is_still_due(hour, minute):
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
+
+
+@pytest.mark.parametrize("hour", [0, 8, 15, 21])
+def test_slots_outside_the_morning_window_are_not_due(hour):
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(hour, day=12)) == []
+
+
+@pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (15, 17), (17, 5), (21, 17), (23, 30)])
+def test_delayed_event_day_runs_are_due(hour, minute):
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == [row]
+
+
+@pytest.mark.parametrize("hour,minute", [(0, 0), (8, 59)])
+def test_event_day_before_the_first_window_is_not_due(hour, minute):
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == []
+
+
 class StubLiveAdapter:
     def __init__(self, observation, robots_failure=None):
         self.observation = observation

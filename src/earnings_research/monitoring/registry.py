@@ -54,9 +54,12 @@ def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
     if local.weekday() >= 5:
         return False
     event_date = target.get("event_date", "")
+    # The workflow fires at 09:17, 15:17, and 21:17 JST, but a scheduled run can
+    # start hours late. Matching the hour exactly meant a delayed run never
+    # became due, so each cron slot owns the window that follows it instead.
     if event_date and local.date().isoformat() == event_date:
-        return local.hour in {9, 15, 21}
-    return local.hour == 9
+        return local.hour >= 9
+    return 9 <= local.hour < 15
 
 
 def find_target(rows: List[Dict[str, str]], monitor_target_id: str) -> Dict[str, str]:
