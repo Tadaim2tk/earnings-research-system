@@ -24,6 +24,25 @@ class PriceSourceReference(BaseModel):
     terms_basis: str = Field(min_length=1)
 
 
+class VerifiedTradingSession(BaseModel):
+    trading_date: date
+    regular_open: datetime
+    regular_close: datetime
+
+    @model_validator(mode="after")
+    def validate_session(self):
+        if self.trading_date.weekday() >= 5:
+            raise ValueError("verified trading session cannot be Saturday or Sunday")
+        for value in (self.regular_open, self.regular_close):
+            if value.tzinfo is None or value.utcoffset() != timedelta(hours=9):
+                raise ValueError("trading session times must use Asia/Tokyo offset")
+            if value.date() != self.trading_date:
+                raise ValueError("trading session times must match trading_date")
+        if self.regular_open >= self.regular_close:
+            raise ValueError("regular_open must be before regular_close")
+        return self
+
+
 class PriceObservation(BaseModel):
     observation_id: str
     role: ObservationRole
@@ -85,6 +104,8 @@ class MarketReactionObservationBundle(BaseModel):
     announcement_session: Literal["before_open", "intraday", "after_close"]
     market_timezone: Literal["Asia/Tokyo"] = "Asia/Tokyo"
     calendar_name: str
+    calendar_source: PriceSourceReference
+    verified_sessions: List[VerifiedTradingSession] = Field(min_length=6, max_length=7)
     pre_event_close_date: date
     next_five_session_dates: List[date] = Field(min_length=5, max_length=5)
     corporate_action_status: Literal["none_detected", "present", "unknown"]
@@ -101,6 +122,16 @@ class MarketReactionObservationBundle(BaseModel):
             raise ValueError("next_five_session_dates must contain five unique ascending dates")
         if self.next_five_session_dates[0] <= self.announcement_datetime.date():
             raise ValueError("next business-day sessions must be after announcement date")
+        session_dates = [item.trading_date for item in self.verified_sessions]
+        if session_dates != sorted(set(session_dates)):
+            raise ValueError("verified_sessions must contain unique ascending dates")
+        required_dates = {
+            self.pre_event_close_date,
+            self.announcement_datetime.date(),
+            *self.next_five_session_dates,
+        }
+        if set(session_dates) != required_dates:
+            raise ValueError("verified_sessions must exactly cover the event price window")
         roles = [item.role for item in self.observations]
         if len(roles) != len(set(roles)):
             raise ValueError("observation roles must be unique")
@@ -112,6 +143,8 @@ class MarketReactionObservationBundle(BaseModel):
             raise ValueError("all price observations must use one currency")
         if any(item.source.source_checked_at > self.recorded_at for item in self.observations):
             raise ValueError("recorded_at must not be before source_checked_at")
+        if self.calendar_source.source_checked_at > self.recorded_at:
+            raise ValueError("recorded_at must not be before calendar source check")
         return self
 
 

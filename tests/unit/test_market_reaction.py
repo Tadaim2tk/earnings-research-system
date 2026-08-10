@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from earnings_research.cli.__main__ import main
 from earnings_research.earnings_evaluation.models import EarningsEvaluation
 from earnings_research.market_reaction.models import MarketReactionObservationBundle
-from earnings_research.market_reaction.pipeline import _validate_dataset_context
+from earnings_research.market_reaction.pipeline import _validate_dataset_context, write_reaction
 from earnings_research.market_reaction.tracker import track_market_reaction
 
 
@@ -87,6 +87,11 @@ def bundle_payload(session="before_open"):
             "minute_bar_close",
             bar_interval=1,
         ))
+    session_dates = sorted(set([
+        pre_close_date,
+        "2027-05-10",
+        "2027-05-11", "2027-05-12", "2027-05-13", "2027-05-14", "2027-05-17",
+    ]))
     return {
         "tracking_id": "MR-FICTIONAL-001",
         "earnings_event_id": "EVT-FICTIONAL-001",
@@ -97,6 +102,19 @@ def bundle_payload(session="before_open"):
         "announcement_session": session,
         "market_timezone": "Asia/Tokyo",
         "calendar_name": "JPX-fictional-calendar",
+        "calendar_source": {
+            "source_name": "Approved JPX Calendar Fixture",
+            "source_url_or_identifier": "calendar://jpx/2027",
+            "source_checked_at": "2027-05-17T16:30:00+09:00",
+            "recorded_by": "system_policy:test-fixture",
+            "terms_status": "system_policy",
+            "terms_basis": "架空fixtureの取引calendar検証",
+        },
+        "verified_sessions": [{
+            "trading_date": day,
+            "regular_open": day + "T09:00:00+09:00",
+            "regular_close": day + "T15:30:00+09:00",
+        } for day in session_dates],
         "pre_event_close_date": pre_close_date,
         "next_five_session_dates": [
             "2027-05-11", "2027-05-12", "2027-05-13", "2027-05-14", "2027-05-17"
@@ -261,6 +279,7 @@ def test_intraday_requires_pre_announcement_reference():
 def test_bundle_cannot_predate_earnings_evaluation():
     payload = bundle_payload()
     payload["recorded_at"] = "2027-05-10T16:00:00+09:00"
+    payload["calendar_source"]["source_checked_at"] = "2027-05-10T16:00:00+09:00"
     for item in payload["observations"]:
         item["source"]["source_checked_at"] = min(
             item["price_datetime"], "2027-05-10T16:00:00+09:00"
@@ -297,6 +316,36 @@ def test_wrong_fifth_business_day_is_rejected():
     fifth["trading_date"] = "2027-05-16"
     with pytest.raises(ValueError, match="fifth-business-day"):
         track_market_reaction(MarketReactionObservationBundle.model_validate(payload), evaluation())
+
+
+def test_weekends_cannot_be_declared_verified_sessions():
+    payload = bundle_payload()
+    payload["next_five_session_dates"] = [
+        "2027-05-15", "2027-05-16", "2027-05-22", "2027-05-23", "2027-05-29"
+    ]
+    payload["verified_sessions"] = [{
+        "trading_date": day,
+        "regular_open": day + "T09:00:00+09:00",
+        "regular_close": day + "T15:30:00+09:00",
+    } for day in ["2027-05-07", "2027-05-10", *payload["next_five_session_dates"]]]
+    with pytest.raises(ValidationError, match="Saturday or Sunday"):
+        MarketReactionObservationBundle.model_validate(payload)
+
+
+def test_official_close_must_match_verified_session_close():
+    payload = bundle_payload()
+    close = next(item for item in payload["observations"] if item["role"] == "next_business_day_close")
+    close["price_datetime"] = "2027-05-11T02:00:00+09:00"
+    with pytest.raises(ValueError, match="official close"):
+        track_market_reaction(MarketReactionObservationBundle.model_validate(payload), evaluation())
+
+
+def test_tracking_snapshot_cannot_overwrite_existing_file(tmp_path):
+    output = tmp_path / "reaction.json"
+    output.write_text("ORIGINAL", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="already exists"):
+        write_reaction(track_market_reaction(bundle(), evaluation()), output)
+    assert output.read_text(encoding="utf-8") == "ORIGINAL"
 
 
 def test_adjusted_or_raw_retained_observation_is_rejected():

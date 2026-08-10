@@ -37,6 +37,8 @@ def track_files(
 
 def write_reaction(result: MarketReactionTracking, output_path: Path) -> None:
     output_path = Path(output_path)
+    if output_path.exists():
+        raise FileExistsError("market reaction snapshot already exists; append a new snapshot path")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2, sort_keys=True) + "\n",

@@ -139,6 +139,18 @@ def _validate_timing(
     fifth_close = observations.get("fifth_business_day_close")
     if fifth_close and fifth_close.trading_date != bundle.next_five_session_dates[4]:
         raise ValueError("fifth-business-day close does not match trading calendar")
+    sessions = {item.trading_date: item for item in bundle.verified_sessions}
+    for observation in observations.values():
+        session = sessions.get(observation.trading_date)
+        if session is None:
+            raise ValueError("price observation date is not a verified trading session")
+        if observation.price_kind == "official_open" and observation.price_datetime != session.regular_open:
+            raise ValueError("official open must match verified regular-session open")
+        if observation.price_kind == "official_close" and observation.price_datetime != session.regular_close:
+            raise ValueError("official close must match verified regular-session close")
+        if observation.price_kind in {"minute_bar_close", "vwap_after_announcement", "manual_trade_price"}:
+            if not (session.regular_open <= observation.price_datetime <= session.regular_close):
+                raise ValueError("intraday price must be within the verified regular session")
 
 
 def _immediate_expected_date(bundle: MarketReactionObservationBundle):

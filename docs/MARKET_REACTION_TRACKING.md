@@ -23,6 +23,7 @@
 - event、company master、決算評価、価格観測のevent ID、企業名、tickerが一致する
 - 価格はunadjustedの実取引価格である
 - source確認時刻、記録者、source identifierを持つ
+- 出典付きの確認済み取引session一覧と、各sessionのregular open/close時刻を持つ
 - sourceのterms判定根拠と、価格を選んだ事前ruleを持つ
 - raw price dataをrepositoryへ保存しない
 
@@ -55,7 +56,7 @@ VWAPを使う場合は、開始・終了時刻とsessionを`vwap_window`へ事�
 
 ### 翌営業日と5営業日後
 
-calendar dayを足し算しない。入力には、確認済みの取引calendarから発表日後の5sessionを昇順で記録する。
+calendar dayを足し算しない。入力には、確認済みの取引calendarから発表日後の5sessionを昇順で記録する。calendar出典と価格窓内の全sessionのregular open/close時刻を保存し、土日、session一覧外、公式open/close時刻と一致しない観測、regular session外の分足を拒否する。祝日・臨時休場日は確認済みsession一覧に含めない。
 
 - 先頭sessionの公式終値を`next_business_day_close`
 - 5番目sessionの公式終値を`fifth_business_day_close`
@@ -86,7 +87,7 @@ calendar dayを足し算しない。入力には、確認済みの取引calendar
 - 既存milestoneは`observed`
 - 全価格と場中用referenceが揃うと`complete`
 
-途中で別の値へ上書きせず、新しい観測bundleから新しい追跡snapshotを生成する。
+途中で別の値へ上書きせず、新しい観測bundleから新しい追跡snapshotを生成する。既存の出力pathが存在する場合は保存を拒否し、新しい一意pathへappend-onlyで保存する。
 
 ## Corporate action
 

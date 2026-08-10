@@ -153,6 +153,32 @@
       ],
       "title": "PriceSourceReference",
       "type": "object"
+    },
+    "VerifiedTradingSession": {
+      "properties": {
+        "regular_close": {
+          "format": "date-time",
+          "title": "Regular Close",
+          "type": "string"
+        },
+        "regular_open": {
+          "format": "date-time",
+          "title": "Regular Open",
+          "type": "string"
+        },
+        "trading_date": {
+          "format": "date",
+          "title": "Trading Date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trading_date",
+        "regular_open",
+        "regular_close"
+      ],
+      "title": "VerifiedTradingSession",
+      "type": "object"
     }
   },
   "properties": {
@@ -173,6 +199,9 @@
     "calendar_name": {
       "title": "Calendar Name",
       "type": "string"
+    },
+    "calendar_source": {
+      "$ref": "#/$defs/PriceSourceReference"
     },
     "company_name": {
       "title": "Company Name",
@@ -242,6 +271,15 @@
     "tracking_id": {
       "title": "Tracking Id",
       "type": "string"
+    },
+    "verified_sessions": {
+      "items": {
+        "$ref": "#/$defs/VerifiedTradingSession"
+      },
+      "maxItems": 7,
+      "minItems": 6,
+      "title": "Verified Sessions",
+      "type": "array"
     }
   },
   "required": [
@@ -253,6 +291,8 @@
     "announcement_datetime",
     "announcement_session",
     "calendar_name",
+    "calendar_source",
+    "verified_sessions",
     "pre_event_close_date",
     "next_five_session_dates",
     "corporate_action_status",
