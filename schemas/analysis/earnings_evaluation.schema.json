@@ -1,0 +1,536 @@
+{
+  "$defs": {
+    "GuidanceAssessment": {
+      "properties": {
+        "announced_guidance": {
+          "title": "Announced Guidance",
+          "type": "number"
+        },
+        "calculation_origin": {
+          "const": "ers_calculated",
+          "default": "ers_calculated",
+          "title": "Calculation Origin",
+          "type": "string"
+        },
+        "expectation_source": {
+          "title": "Expectation Source",
+          "type": "string"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "pre_event_guidance": {
+          "title": "Pre Event Guidance",
+          "type": "number"
+        },
+        "revision": {
+          "enum": [
+            "up",
+            "unchanged",
+            "down"
+          ],
+          "title": "Revision",
+          "type": "string"
+        },
+        "revision_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision Pct"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        }
+      },
+      "required": [
+        "metric_name",
+        "pre_event_guidance",
+        "announced_guidance",
+        "revision_pct",
+        "revision",
+        "expectation_source",
+        "source"
+      ],
+      "title": "GuidanceAssessment",
+      "type": "object"
+    },
+    "HypothesisAssessment": {
+      "properties": {
+        "contradicting_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradicting Findings",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_text": {
+          "title": "Hypothesis Text",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "supported",
+            "mixed",
+            "invalidated",
+            "pending"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "supporting_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supporting Findings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "hypothesis_text",
+        "result",
+        "explanation"
+      ],
+      "title": "HypothesisAssessment",
+      "type": "object"
+    },
+    "MetricComparison": {
+      "properties": {
+        "actual_value": {
+          "title": "Actual Value",
+          "type": "number"
+        },
+        "calculation_origin": {
+          "const": "ers_calculated",
+          "default": "ers_calculated",
+          "title": "Calculation Origin",
+          "type": "string"
+        },
+        "comparison_basis": {
+          "title": "Comparison Basis",
+          "type": "string"
+        },
+        "difference": {
+          "title": "Difference",
+          "type": "number"
+        },
+        "difference_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Difference Pct"
+        },
+        "expectation_source": {
+          "title": "Expectation Source",
+          "type": "string"
+        },
+        "expectation_type": {
+          "enum": [
+            "market_consensus",
+            "company_guidance"
+          ],
+          "title": "Expectation Type",
+          "type": "string"
+        },
+        "expected_value": {
+          "title": "Expected Value",
+          "type": "number"
+        },
+        "formula": {
+          "default": "(actual - expected) / abs(expected) * 100",
+          "title": "Formula",
+          "type": "string"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "normalized_unit": {
+          "title": "Normalized Unit",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "above",
+            "in_line",
+            "below"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        }
+      },
+      "required": [
+        "metric_name",
+        "expectation_type",
+        "expected_value",
+        "actual_value",
+        "normalized_unit",
+        "difference",
+        "difference_pct",
+        "result",
+        "comparison_basis",
+        "expectation_source",
+        "source"
+      ],
+      "title": "MetricComparison",
+      "type": "object"
+    },
+    "ProgressAssessment": {
+      "properties": {
+        "cumulative_actual": {
+          "title": "Cumulative Actual",
+          "type": "number"
+        },
+        "full_year_company_forecast": {
+          "title": "Full Year Company Forecast",
+          "type": "number"
+        },
+        "interpretation": {
+          "enum": [
+            "reference_only",
+            "not_available"
+          ],
+          "title": "Interpretation",
+          "type": "string"
+        },
+        "metric_name": {
+          "title": "Metric Name",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "progress_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Progress Pct"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceReference"
+        }
+      },
+      "required": [
+        "metric_name",
+        "cumulative_actual",
+        "full_year_company_forecast",
+        "progress_pct",
+        "interpretation",
+        "note",
+        "source"
+      ],
+      "title": "ProgressAssessment",
+      "type": "object"
+    },
+    "SegmentAssessment": {
+      "properties": {
+        "assessment": {
+          "enum": [
+            "reported_positive",
+            "reported_negative",
+            "reported_mixed",
+            "reported_only"
+          ],
+          "title": "Assessment",
+          "type": "string"
+        },
+        "normalized_unit": {
+          "default": "JPY",
+          "title": "Normalized Unit",
+          "type": "string"
+        },
+        "profit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profit"
+        },
+        "revenue": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revenue"
+        },
+        "segment": {
+          "title": "Segment",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "segment",
+        "assessment"
+      ],
+      "title": "SegmentAssessment",
+      "type": "object"
+    },
+    "SourceReference": {
+      "properties": {
+        "acquired_at": {
+          "format": "date-time",
+          "title": "Acquired At",
+          "type": "string"
+        },
+        "document_title": {
+          "title": "Document Title",
+          "type": "string"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "source_url": {
+          "title": "Source Url",
+          "type": "string"
+        },
+        "text_anchor": {
+          "title": "Text Anchor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "document_title",
+        "text_anchor",
+        "acquired_at"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "analysis_id": {
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "assessment_dimensions": {
+      "additionalProperties": {
+        "enum": [
+          "positive",
+          "neutral",
+          "negative",
+          "not_available"
+        ],
+        "type": "string"
+      },
+      "title": "Assessment Dimensions",
+      "type": "object"
+    },
+    "baseline_id": {
+      "title": "Baseline Id",
+      "type": "string"
+    },
+    "baseline_unit_multiplier": {
+      "title": "Baseline Unit Multiplier",
+      "type": "number"
+    },
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "evaluation_id": {
+      "title": "Evaluation Id",
+      "type": "string"
+    },
+    "expectation_period_scope": {
+      "enum": [
+        "q1_cumulative",
+        "half_year_cumulative",
+        "nine_month_cumulative",
+        "full_year"
+      ],
+      "title": "Expectation Period Scope",
+      "type": "string"
+    },
+    "guidance_assessments": {
+      "items": {
+        "$ref": "#/$defs/GuidanceAssessment"
+      },
+      "title": "Guidance Assessments",
+      "type": "array"
+    },
+    "hypothesis_assessments": {
+      "items": {
+        "$ref": "#/$defs/HypothesisAssessment"
+      },
+      "title": "Hypothesis Assessments",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "market_reaction_included": {
+      "const": false,
+      "default": false,
+      "title": "Market Reaction Included",
+      "type": "boolean"
+    },
+    "metric_comparisons": {
+      "items": {
+        "$ref": "#/$defs/MetricComparison"
+      },
+      "title": "Metric Comparisons",
+      "type": "array"
+    },
+    "negative_factors": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Negative Factors",
+      "type": "array"
+    },
+    "next_stage": {
+      "enum": [
+        "ready_for_market_reaction_tracking",
+        "evaluation_not_available"
+      ],
+      "title": "Next Stage",
+      "type": "string"
+    },
+    "overall_assessment": {
+      "enum": [
+        "positive",
+        "mixed",
+        "negative",
+        "in_line",
+        "inconclusive"
+      ],
+      "title": "Overall Assessment",
+      "type": "string"
+    },
+    "overall_explanation": {
+      "title": "Overall Explanation",
+      "type": "string"
+    },
+    "positive_factors": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Positive Factors",
+      "type": "array"
+    },
+    "progress_assessments": {
+      "items": {
+        "$ref": "#/$defs/ProgressAssessment"
+      },
+      "title": "Progress Assessments",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "earnings_evaluation_v1",
+      "default": "earnings_evaluation_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "segment_assessments": {
+      "items": {
+        "$ref": "#/$defs/SegmentAssessment"
+      },
+      "title": "Segment Assessments",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "evaluated",
+        "insufficient_data"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "ticker": {
+      "title": "Ticker",
+      "type": "string"
+    },
+    "trade_decision_included": {
+      "const": false,
+      "default": false,
+      "title": "Trade Decision Included",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "evaluation_id",
+    "earnings_event_id",
+    "baseline_id",
+    "analysis_id",
+    "company_name",
+    "ticker",
+    "expectation_period_scope",
+    "evaluated_at",
+    "status",
+    "baseline_unit_multiplier",
+    "overall_assessment",
+    "overall_explanation",
+    "next_stage"
+  ],
+  "title": "EarningsEvaluation",
+  "type": "object"
+}
