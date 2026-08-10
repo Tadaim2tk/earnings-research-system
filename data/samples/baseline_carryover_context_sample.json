@@ -1,0 +1,33 @@
+{
+  "maintain_criteria": [
+    {
+      "occurrence_count": 1,
+      "source_review_ids": [
+        "PEL-FICTIONAL-LEARNING-001"
+      ],
+      "text": "主要指標は改善する。"
+    }
+  ],
+  "market_earnings_divergence_history": [],
+  "next_event_checks": [],
+  "prepared_at": "2027-06-01T09:00:00+09:00",
+  "production_rules_modified": false,
+  "recurring_errors_to_prevent": [],
+  "rejected_assumptions": [],
+  "schema_version": "baseline_carryover_context_v1",
+  "scoring_weights_modified": false,
+  "source_event_ids": [
+    "EVT-FICTIONAL-LEARNING-001"
+  ],
+  "source_reviews": [
+    {
+      "content_sha256": "1984ce0157340be219299982c10111645698c4eabf655d3d3327cf4ae4180976",
+      "earnings_event_id": "EVT-FICTIONAL-LEARNING-001",
+      "review_id": "PEL-FICTIONAL-LEARNING-001",
+      "reviewed_at": "2027-05-17T18:00:00+09:00"
+    }
+  ],
+  "target_event_id": "EVT-FICTIONAL-NEXT-001",
+  "trade_decision_included": false,
+  "weaken_candidates": []
+}

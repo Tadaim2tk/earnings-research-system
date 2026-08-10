@@ -351,3 +351,15 @@ Decision: [PROSPECTIVE_OPERATIONS.md](PROSPECTIVE_OPERATIONS.md) と [ICECO_PILO
 Consequences: 通常の公開IR監視はHuman不在でも継続できる。raw page本文は保存せず、metadataと比較digestだけを保持する。価格provider、formal evidence、baseline lock、event status、売買は本ADRの承認範囲外である。
 
 Alternatives Considered: すべての新規公開URLをHuman approval待ちにする案は不要な停止を繰り返すため採用しない。公開情報なら無条件で取得する案は明示禁止、認証、課金、privacy等を見落とすため採用しない。
+
+## ERS-ADR-0024
+
+Date: 2026-08-10
+
+Status: Accepted
+
+Context: `post_event_learning_review` の学習候補はappend-onlyで保存されるが、次回baseline作成時に人間が参照する単一contextがなかった。
+
+Decision: [BASELINE_CARRYOVER.md](BASELINE_CARRYOVER.md) に従い、1件以上のreviewから、人間向け `baseline_carryover_context_v1` を作る。各文字列は出典review IDとreview単位の出現回数を伴い、市場期待解釈とreaction transitionの食い違い履歴も同様に保持する。異なるeventは同一企業に限り、source event IDを明示する。未来sourceと既存出力pathは拒否する。
+
+Consequences: 次回baseline作成者は過去の学習候補を機械的に収集できるが、production rule、scoring weight、trade decisionへは反映されない。validated／確立等への昇格、独立3イベント判定、TSO／Vault／registry連携は実装しない。

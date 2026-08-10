@@ -19,6 +19,7 @@ from earnings_research.earnings_evaluation import (
 )
 from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
+from earnings_research.baseline_carryover import prepare_files, write_carryover
 
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
@@ -146,6 +147,15 @@ def main(argv=None) -> int:
     learning_parser.add_argument("--previous-review", type=Path)
     learning_parser.add_argument("--output", required=True, type=Path)
 
+    carryover_parser = subparsers.add_parser(
+        "prepare-baseline-carryover",
+        help="Prepare human-readable prior-learning context for a future baseline.",
+    )
+    carryover_parser.add_argument("--review", required=True, action="append", type=Path)
+    carryover_parser.add_argument("--target-event-id", required=True)
+    carryover_parser.add_argument("--prepared-at", required=True)
+    carryover_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -249,6 +259,25 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Post-event learning review failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "prepare-baseline-carryover":
+        try:
+            result = prepare_files(
+                args.review,
+                args.target_event_id,
+                datetime.fromisoformat(args.prepared_at),
+            )
+            write_carryover(result, args.output)
+            print(json.dumps({
+                "status": "prepared",
+                "target_event_id": result.target_event_id,
+                "source_review_count": len(result.source_reviews),
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Baseline carryover preparation failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:
