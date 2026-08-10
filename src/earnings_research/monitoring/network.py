@@ -60,7 +60,7 @@ def system_resolver(host: str, port: int) -> Sequence[str]:
     return [str(answer[4][0]) for answer in answers]
 
 
-def resolve_public_addresses(
+def _resolve_public_addresses(
     host: str,
     port: int,
     *,

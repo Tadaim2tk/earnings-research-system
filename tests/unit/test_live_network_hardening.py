@@ -16,7 +16,7 @@ from earnings_research.monitoring.network import (
     DNSResolutionTimeout,
     PinnedHTTPTransport,
     UnsafeResolvedAddress,
-    resolve_public_addresses,
+    _resolve_public_addresses,
     resolve_public_addresses_bounded,
 )
 from earnings_research.monitoring.registry import load_registry
@@ -59,7 +59,7 @@ def observe(handler, resolver, *, target_row=None, context=None, **adapter_kwarg
 
 
 def test_all_public_ipv4_and_ipv6_answers_are_accepted():
-    addresses = resolve_public_addresses(
+    addresses = _resolve_public_addresses(
         "approved.example.invalid",
         443,
         resolver=lambda _host, _port: [PUBLIC_IPV6, PUBLIC_IPV4, PUBLIC_IPV4],
@@ -109,6 +109,23 @@ def test_unsafe_ipv6_literals_and_embedded_ipv4_are_rejected(address):
     assert calls == []
 
 
+def test_embedded_private_ipv4_literal_is_rejected_before_resolver():
+    row = target()
+    row["source_url"] = "https://[2002:7f00:1::1]/"
+
+    def forbidden_resolver(_host, _port):
+        raise AssertionError("URL-literal validation must not call the resolver")
+
+    result = observe(
+        lambda _request: pytest.fail("URL-literal validation must not start HTTP"),
+        forbidden_resolver,
+        target_row=row,
+    )
+
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "terms_not_approved"
+
+
 @pytest.mark.parametrize(
     "address",
     [
@@ -136,7 +153,7 @@ def test_any_non_global_dns_answer_is_rejected_before_http(address):
 
 def test_mixed_public_and_private_dns_answers_fail_closed():
     with pytest.raises(UnsafeResolvedAddress):
-        resolve_public_addresses(
+        _resolve_public_addresses(
             "approved.example.invalid",
             443,
             resolver=lambda _host, _port: [PUBLIC_IPV4, "10.0.0.1"],
@@ -158,7 +175,7 @@ def test_dns_failure_is_source_unavailable_without_http_request():
         raise socket.gaierror("private resolver detail must not leak")
 
     with pytest.raises(DNSResolutionError):
-        resolve_public_addresses("approved.example.invalid", 443, resolver=failed_resolver)
+        _resolve_public_addresses("approved.example.invalid", 443, resolver=failed_resolver)
     result = observe(lambda request: calls.append(request), failed_resolver)
     assert result.error_code == "source_unavailable"
     assert result.retryable is True
@@ -212,30 +229,36 @@ def test_resolver_timeout_never_starts_http_even_after_late_completion():
     assert calls == []
 
 
-def test_timed_out_adapter_does_not_start_additional_resolver_workers():
+def test_resolver_timeout_does_not_poison_later_observe_for_another_host():
     release = threading.Event()
     resolver_calls = []
 
-    def delayed_resolver(_host, _port):
-        resolver_calls.append(True)
-        release.wait(0.5)
+    def resolver(host, _port):
+        resolver_calls.append(host)
+        if host == "slow.example.invalid":
+            release.wait(0.5)
         return [PUBLIC_IPV4]
+
+    slow_target = target()
+    slow_target["source_url"] = "https://slow.example.invalid/releases"
+    healthy_target = target()
+    healthy_target["source_url"] = "https://healthy.example.invalid/releases"
 
     with LiveSourceAdapter(
         transport=httpx.MockTransport(lambda _request: html_response()),
-        resolver=delayed_resolver,
+        resolver=resolver,
         resolver_timeout_seconds=0.01,
     ) as adapter:
-        first = adapter.observe(target(), LiveSourceContext(observed_at=moment()))
+        first = adapter.observe(slow_target, LiveSourceContext(observed_at=moment()))
         second = adapter.observe(
-            target(),
+            healthy_target,
             LiveSourceContext(observed_at=moment() + timedelta(minutes=1)),
         )
     release.set()
 
     assert first.error_code == "timeout"
-    assert second.error_code == "timeout"
-    assert resolver_calls == [True]
+    assert isinstance(second, SourceObservation)
+    assert resolver_calls == ["slow.example.invalid", "healthy.example.invalid"]
 
 
 def test_resolver_completion_rechecks_consumed_overall_deadline():
@@ -479,7 +502,7 @@ def test_rebinding_resolver_is_not_called_again_by_pinned_connection():
         resolver_calls.append(True)
         return [PUBLIC_IPV4] if len(resolver_calls) == 1 else ["127.0.0.1"]
 
-    pinned_ip = resolve_public_addresses(
+    pinned_ip = _resolve_public_addresses(
         "approved.example.invalid",
         443,
         resolver=rebinding_resolver,

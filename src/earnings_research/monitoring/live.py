@@ -119,7 +119,6 @@ class LiveSourceAdapter:
         self._monotonic = monotonic
         self._resolver = resolver
         self._resolver_timeout_seconds = resolver_timeout_seconds
-        self._resolver_timed_out = False
         self._network_backend_factory = network_backend_factory
         self._ssl_context = ssl.create_default_context()
         self._injected_client = self._build_client(transport) if transport is not None else None
@@ -232,14 +231,6 @@ class LiveSourceAdapter:
             if remaining <= 0:
                 return _failure("timeout", "overall request budget exceeded", current_url, context.observed_at, True)
             parts = urlsplit(current_url)
-            if self._resolver_timed_out:
-                return _failure(
-                    "timeout",
-                    "approved source DNS resolution timed out",
-                    current_url,
-                    context.observed_at,
-                    True,
-                )
             try:
                 addresses = resolve_public_addresses_bounded(
                     parts.hostname or "",
@@ -248,7 +239,6 @@ class LiveSourceAdapter:
                     timeout=min(self._resolver_timeout_seconds, remaining),
                 )
             except DNSResolutionTimeout:
-                self._resolver_timed_out = True
                 return _failure(
                     "timeout",
                     "approved source DNS resolution timed out",
