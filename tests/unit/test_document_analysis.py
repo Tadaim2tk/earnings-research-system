@@ -15,7 +15,8 @@ from earnings_research.document_analysis.pipeline import (
 )
 
 
-def extracted_fixture(reported_operating_yoy="3.6"):
+def extracted_fixture(reported_operating_yoy="3.6", money_unit="百万円"):
+    money_units = [money_unit, "%", money_unit, "%", money_unit, "%", money_unit, "%"] if money_unit else []
     page1 = "\n".join(
         [
             "2025年３月期",
@@ -31,6 +32,7 @@ def extracted_fixture(reported_operating_yoy="3.6"):
             "営業利益",
             "経常利益",
             "四半期純利益",
+            *money_units,
             "2025年３月期第３四半期",
             "42,415",
             "9.0",
@@ -58,6 +60,7 @@ def extracted_fixture(reported_operating_yoy="3.6"):
             "94.78",
             "92.91",
             "（２）財政状態",
+            *(money_units[:3] if money_unit else []),
             "2025年３月期第３四半期",
             "17,854",
             "3,742",
@@ -69,6 +72,8 @@ def extracted_fixture(reported_operating_yoy="3.6"):
             "2025年３月期(予想)",
             "9.5",
             "３．2025年３月期の業績予想（2024年４月１日～2025年３月31日）",
+            *money_units,
+            "円",
             "通期",
             "54,000",
             "6.9",
@@ -166,6 +171,115 @@ def test_missing_required_table_value_is_not_guessed():
     broken.pages[0] = broken.pages[0].replace("\n383\n4.7", "\n4.7")
     with pytest.raises(AnalysisError):
         analyze_fixture(broken)
+
+
+@pytest.mark.parametrize(
+    ("replacement", "displayed_value", "normalized_value", "unresolved"),
+    [
+        ("2025年３月期(予想)\n0.00", "0.00", 0.0, False),
+        ("2025年３月期(予想)\n無配", "無配", 0.0, False),
+        ("2025年３月期(予想)\n未定", None, None, True),
+        ("1株当たり配当金(予想):12.00円", "12.00", 12.0, False),
+    ],
+)
+def test_optional_dividend_does_not_discard_core_financials(
+    replacement, displayed_value, normalized_value, unresolved
+):
+    extracted = extracted_fixture()
+    extracted.pages[0] = extracted.pages[0].replace(
+        "2025年３月期(予想)\n9.5", replacement
+    )
+    result = analyze_fixture(extracted)
+    dividends = [
+        item for item in result.financial_metrics if item.metric_name == "dividend_per_share"
+    ]
+    assert any(
+        item.metric_name == "revenue" and item.value_kind == "actual"
+        for item in result.financial_metrics
+    )
+    if displayed_value is None:
+        assert dividends == []
+    else:
+        assert dividends[0].displayed_value == displayed_value
+        assert dividends[0].normalized_value == normalized_value
+    assert bool(result.unresolved_items) is unresolved
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    [("円", 42_415), ("千円", 42_415_000), ("百万円", 42_415_000_000), ("億円", 4_241_500_000_000)],
+)
+def test_financial_unit_is_read_from_the_document(unit, expected):
+    result = analyze_fixture(extracted_fixture(money_unit=unit))
+    revenue = next(
+        item
+        for item in result.financial_metrics
+        if item.metric_name == "revenue" and item.value_kind == "actual"
+    )
+    assert revenue.displayed_unit == unit
+    assert revenue.normalized_value == expected
+
+
+def test_missing_financial_unit_is_not_guessed():
+    result = analyze_fixture(extracted_fixture(money_unit=None))
+    revenue = next(
+        item
+        for item in result.financial_metrics
+        if item.metric_name == "revenue" and item.value_kind == "actual"
+    )
+    assert revenue.displayed_unit == "unknown"
+    assert revenue.normalized_unit == "unknown"
+    assert revenue.confidence == "unclear"
+    forecast = next(
+        item
+        for item in result.financial_metrics
+        if item.metric_name == "revenue" and item.value_kind == "company_forecast"
+    )
+    assert forecast.normalized_unit == "unknown"
+    assert any(check.check_type == "money_unit_presence" for check in result.consistency_checks)
+    assert result.unresolved_items
+
+
+@pytest.mark.parametrize(
+    ("loss_text", "displayed", "normalized"),
+    [
+        ("セグメント損失は68百万円", "68", -68_000_000),
+        ("セグメント利益は△68百万円", "△68", -68_000_000),
+        ("セグメント利益は▲68百万円", "▲68", -68_000_000),
+        ("セグメント利益は-68百万円", "-68", -68_000_000),
+    ],
+)
+def test_segment_losses_are_retained(loss_text, displayed, normalized):
+    extracted = extracted_fixture()
+    extracted.pages[2] = extracted.pages[2].replace(
+        "セグメント利益は68百万円", loss_text
+    )
+    result = analyze_fixture(extracted)
+    loss = next(
+        item.value
+        for item in result.company_specific_metrics
+        if item.category == "スーパーマーケット事業" and item.value.normalized_value < 0
+    )
+    assert loss.displayed_value == displayed
+    assert loss.normalized_value == normalized
+
+
+def test_qualitative_extraction_tolerates_year_and_wording_changes():
+    extracted = extracted_fixture()
+    extracted.pages[2] = extracted.pages[2].replace(
+        "主要得意先との取引が堅調に推移したことにより",
+        "得意先との取引が堅調で増収に寄与したことにより",
+    ).replace(
+        "人事制度の改定や、採用を強化した結果、人件費や採用費が増加したことにより、前年同期を下回りました。",
+        "採用費を含む費用の増加により利益は前年同期を下回りました。",
+    )
+    extracted.pages[3] = extracted.pages[3].replace(
+        "2025年３月期の業績は、計画どおりに推移しております。",
+        "2026年３月期の業績は順調に推移しております。",
+    )
+    result = analyze_fixture(extracted)
+    finding_types = {item.finding_type for item in result.narrative_findings}
+    assert {"revenue_driver", "profit_driver", "outlook"} <= finding_types
 
 
 def test_pdf_text_extraction_and_textless_and_malformed(tmp_path):

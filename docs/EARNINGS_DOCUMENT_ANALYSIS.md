@@ -43,6 +43,8 @@ The contract is [earnings_document_analysis.schema.json](../schemas/analysis/ear
 
 The parser fails closed when a required table cannot be read. Conflicting reported and calculated values are retained and marked `review_required`; they are not silently reconciled.
 
+Monetary units are read from the source table and support `円`, `千円`, `百万円`, and `億円`. An unknown unit is retained as `unknown` with `review_required`; it is never assumed to be millions of yen. Dividend data is optional, so an unreadable or undisclosed dividend does not discard otherwise valid financial results. Segment losses retain their displayed `損失`, `△`, `▲`, or minus notation and normalize to a negative JPY value. Narrative findings use section context and nearby terms while retaining the source statement, rather than requiring one fiscal year's sentence to match exactly.
+
 ## ICECO proof
 
 The repository includes [EDA-7698-20250212.json](../data/research/iceco/EDA-7698-20250212.json), produced from the official JPX disclosure PDF for ICECO's fiscal year ending March 2025 third-quarter earnings release.
