@@ -629,11 +629,18 @@ def test_slots_outside_the_morning_window_are_not_due(hour):
     assert active_target_plan([row], planned_at=moment(hour, day=12)) == []
 
 
-@pytest.mark.parametrize("hour,minute", [(9, 17), (15, 17), (21, 17)])
+@pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (15, 17), (17, 5), (21, 17), (23, 30)])
 def test_delayed_event_day_runs_are_due(hour, minute):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == [row]
+
+
+@pytest.mark.parametrize("hour,minute", [(0, 0), (8, 59)])
+def test_event_day_before_the_first_window_is_not_due(hour, minute):
+    row = target()
+    row["event_date"] = "2026-08-13"
+    assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == []
 
 
 class StubLiveAdapter:
