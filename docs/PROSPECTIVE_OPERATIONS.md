@@ -270,6 +270,8 @@ Level 3 = monitoringからevidence、price、post-event準備まで広範囲に�
 
 ### Monitor Checkpoint
 
+stale停止からの復帰はincident ownerであるHumanが、checkpointの `target_state=stopped` と `last_error_code=state_unavailable`、対象gap、最新成功時刻、未解決changeを確認した場合に限る。Humanは安定した `human:<stable-id>`（または承認済み `system_policy:<policy-id>`）を含む1件のJSON acknowledgementをworkflow_dispatchの `gap_acknowledgement` に渡し、実行後に通常のsource observationが行われたこと、append-only履歴が保持されたこと、pending changeが解除されていないことをartifactで検証する。scheduled runはこの入力を渡さない。
+
 正式evidenceとは別に、少なくとも次のmonitoring状態を概念上保持する。今回はschemaを作成しない。
 
 ```text

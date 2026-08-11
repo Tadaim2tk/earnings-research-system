@@ -63,6 +63,12 @@ Primary key: `event_status_record_id`. Foreign keys: `earnings_event_id` and opt
 
 Stores append-only `scheduled`, `postponed`, `cancelled`, and `occurred` status records. `supersedes_status_record_id` forms a single non-branching chain per event; the unsuperseded tail is current. Full dataset validation requires history for events activated by lifecycle rows, prospective baseline metadata, or related prospective evidence/reviews, then gates baseline revalidation and post-event review using [PROSPECTIVE_EVENT_LIFECYCLE.md](PROSPECTIVE_EVENT_LIFECYCLE.md).
 
+## monitor_gap_acknowledgement
+
+Primary key: `acknowledgement_id`. Foreign key: `monitor_target_id`; optional self-reference: `supersedes_acknowledgement_id`.
+
+Stores an append-only Human or approved system-policy acknowledgement of a past monitoring interruption. `acknowledged_gap_start`, `acknowledged_gap_end`, and `acknowledged_at` are timezone-aware; a gap cannot end after it is acknowledged. Corrections append a new row and may supersede an existing row only once. The record advances only the stale-gap reference time for the next normal observation. It does not create an observation, resolve `pending_change_run_id`, or affect evidence, baselines, event status, scoring, or trading decisions.
+
 ## post_earnings_review
 
 Primary key: `review_id`. Foreign keys: `earnings_event_id`, `baseline_id`.

@@ -363,3 +363,15 @@ Context: `post_event_learning_review` の学習候補はappend-onlyで保存さ�
 Decision: [BASELINE_CARRYOVER.md](BASELINE_CARRYOVER.md) に従い、1件以上のreviewから、人間向け `baseline_carryover_context_v1` を作る。各文字列は出典review IDとreview単位の出現回数を伴い、市場期待解釈とreaction transitionの食い違い履歴も同様に保持する。異なるeventは同一企業に限り、source event IDを明示する。未来sourceと既存出力pathは拒否する。
 
 Consequences: 次回baseline作成者は過去の学習候補を機械的に収集できるが、production rule、scoring weight、trade decisionへは反映されない。validated／確立等への昇格、独立3イベント判定、TSO／Vault／registry連携は実装しない。
+
+## ERS-ADR-0025
+
+Date: 2026-08-11
+
+Status: Accepted
+
+Context: stale gapを暦時間で測ると週末だけで閾値を超え、event windowを朝1回だけ監視すると24時間閾値に対して遅延余地がない。また、一度stale停止したstateは再初期化禁止のため、監視途切れを記録した上で通常観測へ戻るappend-only経路が必要である。
+
+Decision: stale経過時間は土曜・日曜を除外し、祝日calendarは追加しない。event 5営業日前から当日までは既存3 cron slotをdueとする。独立 `monitor_gap_acknowledgement` schemaを追加し、有効なappend-only tailの `acknowledged_gap_end` だけを次回stale評価の基準にできる。未来gap、解決済みgapの新規再利用、self／missing／二重supersessionを拒否する。acknowledgement後もrobots確認とsource observationを必須とし、pending changeを解除しない。
+
+Consequences: artifact削除や再初期化なしでstale停止から通常観測を再開できる。acknowledgementは監視健全性の履歴に限定され、formal evidence、baseline、event status、scoring、売買判断へ影響しない。threshold値、registry、外部network境界は変更しない。event_window初日とevent当日の朝slotは閾値到達時刻とほぼ一致して遅延余裕がほぼゼロであり、Actionsの通常遅延でもacknowledgementが定常的に必要になり得る。恒久対応は閾値を本ADRで変更せず、別ADRで決定する。

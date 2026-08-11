@@ -26,6 +26,7 @@ from earnings_research.monitoring.operational_cli import (
     fetch_state,
     notify_state,
     plan_registry,
+    record_gap_acknowledgement,
     run_offline,
     run_live,
     verify_state,
@@ -70,6 +71,7 @@ def main(argv=None) -> int:
     run_parser.add_argument("--started-at", required=True)
     run_parser.add_argument("--finished-at", required=True)
     run_parser.add_argument("--event-date")
+    run_parser.add_argument("--gap-acknowledgement", type=Path)
 
     live_parser = subparsers.add_parser("monitor-run-live", help="Run one authorized live monitor target.")
     live_parser.add_argument("--registry", required=True, type=Path)
@@ -79,6 +81,20 @@ def main(argv=None) -> int:
     live_parser.add_argument("--run-id", required=True)
     live_parser.add_argument("--started-at", required=True)
     live_parser.add_argument("--finished-at", required=True)
+    live_parser.add_argument("--gap-acknowledgement", type=Path)
+
+    acknowledge_parser = subparsers.add_parser(
+        "monitor-acknowledge-gap", help="Record an append-only monitoring gap acknowledgement."
+    )
+    acknowledge_parser.add_argument("--previous-dir", required=True, type=Path)
+    acknowledge_parser.add_argument("--output", required=True, type=Path)
+    acknowledge_parser.add_argument("--acknowledgement-id", required=True)
+    acknowledge_parser.add_argument("--gap-start", required=True)
+    acknowledge_parser.add_argument("--gap-end", required=True)
+    acknowledge_parser.add_argument("--acknowledged-at", required=True)
+    acknowledge_parser.add_argument("--acknowledged-by", required=True)
+    acknowledge_parser.add_argument("--reason", required=True)
+    acknowledge_parser.add_argument("--supersedes-id", default="")
 
     handoff_parser = subparsers.add_parser("monitor-build-handoff", help="Build a research handoff for an autonomous change.")
     handoff_parser.add_argument("path", type=Path)
@@ -303,6 +319,7 @@ def main(argv=None) -> int:
                 started_at=args.started_at,
                 finished_at=args.finished_at,
                 event_date_value=args.event_date,
+                gap_acknowledgement_path=args.gap_acknowledgement,
             )
         if args.command == "monitor-run-live":
             return run_live(
@@ -313,6 +330,19 @@ def main(argv=None) -> int:
                 run_id=args.run_id,
                 started_at=args.started_at,
                 finished_at=args.finished_at,
+                gap_acknowledgement_path=args.gap_acknowledgement,
+            )
+        if args.command == "monitor-acknowledge-gap":
+            return record_gap_acknowledgement(
+                previous_dir=args.previous_dir,
+                output_path=args.output,
+                acknowledgement_id=args.acknowledgement_id,
+                gap_start=args.gap_start,
+                gap_end=args.gap_end,
+                acknowledged_at=args.acknowledged_at,
+                acknowledged_by=args.acknowledged_by,
+                reason=args.reason,
+                supersedes_id=args.supersedes_id,
             )
         if args.command == "monitor-build-handoff":
             return build_handoff(args.path, args.output)
