@@ -281,6 +281,10 @@ def _validate_new_gap_acknowledgement(bundle, row) -> None:
         or bundle.checkpoint.get("last_error_code") != "state_unavailable"
     ):
         raise ValueError("gap acknowledgement requires a stale stopped checkpoint")
+    last_success_value = bundle.checkpoint.get("last_success_at", "")
+    if not last_success_value:
+        raise ValueError("last_success_at is required to acknowledge a monitoring gap")
+    last_success = _aware_datetime(last_success_value, "last_success_at")
     rows = bundle.gap_acknowledgements + [row]
     report = validate_monitor_bundle(
         {
@@ -297,7 +301,6 @@ def _validate_new_gap_acknowledgement(bundle, row) -> None:
             % "\n".join(issue.format() for issue in report.issues)
         )
     gap_end = _aware_datetime(row["acknowledged_gap_end"], "acknowledged_gap_end")
-    last_success = _aware_datetime(bundle.checkpoint["last_success_at"], "last_success_at")
     if gap_end < last_success:
         raise ValueError("acknowledged gap was already resolved by the latest success")
 

@@ -374,4 +374,4 @@ Context: stale gapを暦時間で測ると週末だけで閾値を超え、event
 
 Decision: stale経過時間は土曜・日曜を除外し、祝日calendarは追加しない。event 5営業日前から当日までは既存3 cron slotをdueとする。独立 `monitor_gap_acknowledgement` schemaを追加し、有効なappend-only tailの `acknowledged_gap_end` だけを次回stale評価の基準にできる。未来gap、解決済みgapの新規再利用、self／missing／二重supersessionを拒否する。acknowledgement後もrobots確認とsource observationを必須とし、pending changeを解除しない。
 
-Consequences: artifact削除や再初期化なしでstale停止から通常観測を再開できる。acknowledgementは監視健全性の履歴に限定され、formal evidence、baseline、event status、scoring、売買判断へ影響しない。threshold値、registry、外部network境界は変更しない。
+Consequences: artifact削除や再初期化なしでstale停止から通常観測を再開できる。acknowledgementは監視健全性の履歴に限定され、formal evidence、baseline、event status、scoring、売買判断へ影響しない。threshold値、registry、外部network境界は変更しない。event_window初日とevent当日の朝slotは閾値到達時刻とほぼ一致して遅延余裕がほぼゼロであり、Actionsの通常遅延でもacknowledgementが定常的に必要になり得る。恒久対応は閾値を本ADRで変更せず、別ADRで決定する。

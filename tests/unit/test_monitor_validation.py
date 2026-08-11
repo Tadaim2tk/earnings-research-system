@@ -198,6 +198,31 @@ def test_gap_acknowledgement_append_only_violations_are_rejected(tmp_path):
     assert "gap acknowledgement cannot be superseded twice" in issue_text(report)
 
 
+def test_gap_acknowledgement_rejects_non_authorizer_identifier(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "monitor_gap_acknowledgement_sample.csv"
+    fieldnames, rows = read_rows(path)
+    rows[0]["acknowledged_by"] = "workflow:github-actions"
+    write_rows(path, fieldnames, rows)
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "requires human:<stable-id> or system_policy:<policy-id>" in issue_text(report)
+
+
+def test_one_monitoring_gap_cannot_be_acknowledged_twice(tmp_path):
+    samples = copy_samples(tmp_path)
+    path = samples / "monitor_gap_acknowledgement_sample.csv"
+    fieldnames, rows = read_rows(path)
+    duplicate_gap = dict(rows[0])
+    duplicate_gap["acknowledgement_id"] = "MGACK-MINATO-DUPLICATE"
+    duplicate_gap["acknowledged_at"] = "2026-08-01T10:45:00+09:00"
+    rows.append(duplicate_gap)
+    write_rows(path, fieldnames, rows)
+    report = validate_dataset(samples)
+    assert not report.ok
+    assert "one monitoring gap may be acknowledged only once" in issue_text(report)
+
+
 @pytest.mark.parametrize(
     ("supersedes_id", "expected"),
     [

@@ -32,6 +32,9 @@ on:
         description: Deterministic dry-run monitor run ID
         required: true
         default: MRUN-EXAMPLE-001
+      gap_acknowledgement:
+        description: JSON record created after Human review of a stale stopped checkpoint
+        required: false
 
 permissions:
   contents: read
@@ -116,12 +119,18 @@ jobs:
           TARGET_ID: ${{ matrix.monitor_target_id }}
           FIXTURE_NAME: ${{ matrix.fixture_name }}
           DISPATCH_RUN_ID: ${{ github.event.inputs.run_id }}
+          GAP_ACKNOWLEDGEMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gap_acknowledgement || '' }}
           GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT_VALUE: ${{ github.run_attempt }}
         run: |
           started_at=$(date --iso-8601=seconds)
           finished_at=$(date --iso-8601=seconds --date='+1 second')
           run_id=${DISPATCH_RUN_ID:-MRUN-${GITHUB_RUN_ID_VALUE}-${GITHUB_RUN_ATTEMPT_VALUE}}
+          gap_acknowledgement_args=()
+          if [ -n "$GAP_ACKNOWLEDGEMENT" ]; then
+            printf '%s\n' "$GAP_ACKNOWLEDGEMENT" > .monitor/gap_acknowledgement.json
+            gap_acknowledgement_args=(--gap-acknowledgement .monitor/gap_acknowledgement.json)
+          fi
           if [ "${{ matrix.source_mode }}" = "live" ]; then
             result=$(python -m earnings_research.cli monitor-run-live \
               --registry "$REGISTRY" \
@@ -130,7 +139,8 @@ jobs:
               --output .monitor/current \
               --run-id "$run_id" \
               --started-at "$started_at" \
-              --finished-at "$finished_at")
+              --finished-at "$finished_at" \
+              "${gap_acknowledgement_args[@]}")
           else
             result=$(python -m earnings_research.cli monitor-run \
               --registry "$REGISTRY" \

@@ -23,7 +23,13 @@ from earnings_research.monitoring.notifications import (
     deliver_issue_notification,
 )
 from earnings_research.monitoring.offline import OfflineSourceAdapter
-from earnings_research.monitoring.operations import StateUnavailable, execute_live_run, execute_offline_run
+from earnings_research.monitoring.operations import (
+    StateUnavailable,
+    _stale_reference,
+    execute_live_run,
+    execute_offline_run,
+)
+from earnings_research.monitoring import operational_cli
 from earnings_research.monitoring.operational_cli import record_gap_acknowledgement
 from earnings_research.monitoring.persistence import (
     BundleError,
@@ -630,6 +636,12 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert "tests/fixtures/monitor_operations/monitor_targets.csv" in raw
     assert "data/config/monitor_targets.csv" in raw
     assert "monitor-run-live" in raw
+    dispatch_inputs = parsed[True]["workflow_dispatch"]["inputs"]
+    assert "gap_acknowledgement" in dispatch_inputs
+    assert "github.event_name == 'workflow_dispatch'" in raw
+    assert "GAP_ACKNOWLEDGEMENT" in raw
+    assert 'gap_acknowledgement_args=(--gap-acknowledgement .monitor/gap_acknowledgement.json)' in raw
+    assert '"${gap_acknowledgement_args[@]}"' in raw
     assert "monitor-build-handoff" in raw
     assert 'cron: "17 0,6,12 * * 1-5"' in raw
 
@@ -684,6 +696,29 @@ def test_stale_elapsed_excludes_weekend_but_preserves_weekday_hours():
     assert weekend.is_stale is False
     assert weekday.age == timedelta(hours=25)
     assert weekday.is_stale is True
+
+
+@pytest.mark.parametrize(
+    ("event_date", "last_success", "reference", "delay_minutes"),
+    [
+        (date(2026, 8, 13), moment(9, 17, day=10), moment(9, 17, day=11), 0),
+        (date(2026, 8, 13), moment(9, 17, day=10), moment(9, 18, day=11), 1),
+        (date(2026, 8, 13), moment(9, 17, day=10), moment(10, 17, day=11), 60),
+        (date(2026, 8, 11), moment(21, 17, day=10), moment(9, 17, day=11), 0),
+        (date(2026, 8, 11), moment(21, 17, day=10), moment(9, 18, day=11), 1),
+        (date(2026, 8, 11), moment(21, 17, day=10), moment(10, 17, day=11), 60),
+    ],
+)
+def test_event_window_and_event_day_morning_stale_delay_boundary(
+    event_date, last_success, reference, delay_minutes
+):
+    assessment = assess_stale_gap(
+        last_success_at=last_success,
+        reference_time=reference,
+        schedule_profile="prospective_event_v1",
+        event_date=event_date,
+    )
+    assert assessment.is_stale is (delay_minutes > 0)
 
 
 @pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (15, 17), (17, 5), (21, 17), (23, 30)])
@@ -821,6 +856,128 @@ def test_gap_acknowledgement_recovers_stopped_state_without_skipping_observation
     assert recovered.gap_acknowledgements == [acknowledgement]
 
 
+def test_acknowledgement_expires_after_continued_observation_failures(tmp_path):
+    previous = initial_bundle(tmp_path)
+    stopped = execute_offline_run(
+        target=target(), source_input=source_input("same", moment(22, day=11)),
+        previous_bundle=previous, output_dir=tmp_path / "expired-stopped",
+        run_id="MRUN-EXAMPLE-002", started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    acknowledgement = {
+        "acknowledgement_id": "MGACK-EXPIRING-001",
+        "monitor_target_id": target()["monitor_target_id"],
+        "acknowledged_gap_start": moment(9).isoformat(),
+        "acknowledged_gap_end": moment(22, 15, day=11).isoformat(),
+        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_by": "human:reviewer-alpha",
+        "reason": "Reviewed interruption before retrying observation",
+        "supersedes_acknowledgement_id": "",
+    }
+    failure = ObservationFailure("timeout", "temporary failure", moment(23, day=11))
+    first_adapter = StubLiveAdapter(failure)
+    failed = execute_live_run(
+        target=target(), previous_bundle=stopped, output_dir=tmp_path / "expired-failed",
+        run_id="MRUN-EXAMPLE-003", started_at=moment(23, day=11),
+        finished_at=moment(23, 1, day=11), adapter_factory=lambda: first_adapter,
+        gap_acknowledgements=[acknowledgement],
+    )
+    assert first_adapter.calls == ["robots", "source"]
+
+    stale_adapter = StubLiveAdapter(failure)
+    stale = execute_live_run(
+        target=target(), previous_bundle=failed, output_dir=tmp_path / "expired-again",
+        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=13),
+        finished_at=moment(13, 1, day=13), adapter_factory=lambda: stale_adapter,
+    )
+    assert stale.checkpoint["target_state"] == "stopped"
+    assert stale_adapter.calls == []
+
+
+def test_success_after_acknowledgement_does_not_cover_the_next_gap(tmp_path):
+    previous = initial_bundle(tmp_path)
+    stopped = execute_offline_run(
+        target=target(), source_input=source_input("same", moment(22, day=11)),
+        previous_bundle=previous, output_dir=tmp_path / "next-gap-stopped",
+        run_id="MRUN-EXAMPLE-002", started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    acknowledgement = {
+        "acknowledgement_id": "MGACK-NEXT-GAP-001",
+        "monitor_target_id": target()["monitor_target_id"],
+        "acknowledged_gap_start": moment(9).isoformat(),
+        "acknowledged_gap_end": moment(22, 15, day=11).isoformat(),
+        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_by": "human:reviewer-alpha",
+        "reason": "Reviewed interruption before successful recovery",
+        "supersedes_acknowledgement_id": "",
+    }
+    recovered = execute_offline_run(
+        target=target(), source_input=source_input("same", moment(23, day=11)),
+        previous_bundle=stopped, output_dir=tmp_path / "next-gap-recovered",
+        run_id="MRUN-EXAMPLE-003", started_at=moment(23, day=11),
+        finished_at=moment(23, 1, day=11), gap_acknowledgements=[acknowledgement],
+    )
+    next_gap = execute_offline_run(
+        target=target(), source_input=source_input("same", moment(13, day=13)),
+        previous_bundle=recovered, output_dir=tmp_path / "next-gap",
+        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=13),
+        finished_at=moment(13, 1, day=13),
+    )
+    assert next_gap.checkpoint["target_state"] == "stopped"
+
+
+def test_stale_reference_uses_only_eligible_unsuperseded_target_tail_gap_end():
+    checkpoint = {
+        "monitor_target_id": "MON-TARGET",
+        "last_success_at": moment(9).isoformat(),
+    }
+    rows = [
+        {"acknowledgement_id": "OLD", "monitor_target_id": "MON-TARGET", "acknowledged_gap_end": moment(18).isoformat(), "acknowledged_at": moment(18, 1).isoformat(), "supersedes_acknowledgement_id": ""},
+        {"acknowledgement_id": "TAIL", "monitor_target_id": "MON-TARGET", "acknowledged_gap_end": moment(12).isoformat(), "acknowledged_at": moment(12, 1).isoformat(), "supersedes_acknowledgement_id": "OLD"},
+        {"acknowledgement_id": "OTHER", "monitor_target_id": "MON-OTHER", "acknowledged_gap_end": moment(20).isoformat(), "acknowledged_at": moment(20, 1).isoformat(), "supersedes_acknowledgement_id": ""},
+        {"acknowledgement_id": "FUTURE", "monitor_target_id": "MON-TARGET", "acknowledged_gap_end": moment(21).isoformat(), "acknowledged_at": moment(23).isoformat(), "supersedes_acknowledgement_id": ""},
+    ]
+    assert _stale_reference(checkpoint, rows, moment(22)) == moment(12)
+
+
+@pytest.mark.parametrize("case", ["healthy", "future", "resolved"])
+def test_offline_operation_rejects_invalid_direct_gap_acknowledgement(tmp_path, case):
+    initial = initial_bundle(tmp_path)
+    previous = initial
+    started_at = moment(23, day=11)
+    if case != "healthy":
+        previous = execute_offline_run(
+            target=target(), source_input=source_input("same", moment(22, day=11)),
+            previous_bundle=initial, output_dir=tmp_path / (case + "-stopped"),
+            run_id="MRUN-EXAMPLE-002", started_at=moment(22, day=11),
+            finished_at=moment(22, 1, day=11),
+        )
+    gap_end = moment(22, 15, day=11)
+    acknowledged_at = moment(22, 20, day=11)
+    if case == "future":
+        acknowledged_at = moment(23, 1, day=11)
+    elif case == "resolved":
+        gap_end = moment(8)
+    acknowledgement = {
+        "acknowledgement_id": "MGACK-DIRECT-" + case.upper(),
+        "monitor_target_id": target()["monitor_target_id"],
+        "acknowledged_gap_start": moment(7).isoformat(),
+        "acknowledged_gap_end": gap_end.isoformat(),
+        "acknowledged_at": acknowledged_at.isoformat(),
+        "acknowledged_by": "human:reviewer-alpha",
+        "reason": "Direct library boundary test",
+        "supersedes_acknowledgement_id": "",
+    }
+    with pytest.raises(StateUnavailable):
+        execute_offline_run(
+            target=target(), source_input=source_input("same", started_at),
+            previous_bundle=previous, output_dir=tmp_path / (case + "-rejected"),
+            run_id="MRUN-EXAMPLE-003", started_at=started_at,
+            finished_at=moment(23, 1, day=11), gap_acknowledgements=[acknowledgement],
+        )
+
+
 def test_gap_acknowledgement_does_not_clear_pending_change(tmp_path):
     initial = initial_bundle(tmp_path)
     changed = next_bundle(tmp_path, initial, "changed", "MRUN-EXAMPLE-002", 10, "changed")
@@ -886,6 +1043,31 @@ def test_gap_acknowledgement_cli_rejects_future_and_already_resolved_gaps(tmp_pa
         record_gap_acknowledgement(
             **common,
             gap_end=moment(8, 30, day=7).isoformat(),
+        )
+
+
+def test_gap_acknowledgement_cli_rejects_missing_last_success_clearly(tmp_path, monkeypatch):
+    previous = initial_bundle(tmp_path)
+    stopped = execute_offline_run(
+        target=target(), source_input=source_input("same", moment(22, day=11)),
+        previous_bundle=previous, output_dir=tmp_path / "missing-success-stopped",
+        run_id="MRUN-EXAMPLE-002", started_at=moment(22, day=11),
+        finished_at=moment(22, 1, day=11),
+    )
+    without_success = replace(
+        stopped, checkpoint={**stopped.checkpoint, "last_success_at": ""}
+    )
+    monkeypatch.setattr(operational_cli, "verify_bundle", lambda _path: without_success)
+    with pytest.raises(ValueError, match="last_success_at is required"):
+        record_gap_acknowledgement(
+            previous_dir=without_success.path,
+            output_path=tmp_path / "missing-success.json",
+            acknowledgement_id="MGACK-MISSING-SUCCESS",
+            gap_start=moment(9).isoformat(),
+            gap_end=moment(22, 15, day=11).isoformat(),
+            acknowledged_at=moment(22, 20, day=11).isoformat(),
+            acknowledged_by="human:reviewer-alpha",
+            reason="Explicit missing timestamp error test",
         )
 
 
