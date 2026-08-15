@@ -697,6 +697,23 @@ def test_normal_threshold_absorbs_one_missed_business_day():
     assert two_missed.is_stale is True
 
 
+@pytest.mark.parametrize(
+    "gap,expected_stale",
+    [(timedelta(hours=60), False), (timedelta(hours=60, seconds=1), True)],
+)
+def test_normal_threshold_boundary_is_exactly_sixty_business_hours(gap, expected_stale):
+    """Pins the value itself; the absorb-one-day test alone allows 48h..60h."""
+    last_success = datetime(2026, 8, 17, 0, 0, tzinfo=JST)
+    assessment = assess_stale_gap(
+        last_success_at=last_success,
+        reference_time=last_success + gap,
+        schedule_profile="prospective_event_v1",
+        event_date=None,
+    )
+    assert assessment.threshold == timedelta(hours=60)
+    assert assessment.is_stale is expected_stale
+
+
 def test_stale_elapsed_excludes_weekend_but_preserves_weekday_hours():
     weekend = assess_stale_gap(
         last_success_at=datetime(2026, 8, 7, 9, tzinfo=JST),

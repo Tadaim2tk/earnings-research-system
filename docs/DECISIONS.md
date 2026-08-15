@@ -412,4 +412,6 @@ Context: 通常日のstale閾値36時間は、runの間隔から導いたもの�
 
 Decision: stale閾値はrunの間隔から導く。通常日の閾値を36時間から60時間へ変更する。成功間隔24時間に対し、単発の欠落は自動で回復し、連続2日の欠落で停止する。event window（24時間）とevent当日（12時間）は成功間隔が4時間であり、それぞれ5回・2回の欠落を吸収できるため変更しない。
 
-Consequences: 監視が完全に沈黙した場合の検知は1.5営業日から2.5営業日へ遅くなる。ただしrunが実行されて失敗した場合はerror Issueが即座に起票されるため、閾値が効くのはworkflowが一度も起動しない場合に限られる。acknowledgementが定常運用に入り込まなくなる。event窓の閾値、observation、robots、append-only、pendingの扱いは変更しない。
+Consequences: 監視が完全に沈黙した場合、最初に実行されたrunが停止を検知する時点は2営業日後から3営業日後へ遅くなる。observationが失敗したrunは閾値と無関係に即座にerror Issueを起票するが、workflowの `notify` は `if: always() && steps.run-monitor.outcome == 'success'` であり、`run-monitor` step自体またはそれ以前のstep（checkout、pip、`monitor-fetch-state`）が落ちた場合はIssueが出ず、stale閾値が唯一の検知経路になる。この経路の穴は本ADRの範囲外の既知の制約として記録する。acknowledgementが定常運用に入り込まなくなる。event窓の閾値、observation、robots、append-only、pendingの扱いは変更しない。
+
+なお、cronが1営業日おきにしか起動しない劣化（間隔48h）は60h閾値では健全に見える。36hでは停止していたが、その停止は「1日欠落で毎回停止する」副作用と同じ現象であり、間隔の劣化はstale閾値ではなくrun頻度そのものを見る指標で検出すべき課題として残す。
