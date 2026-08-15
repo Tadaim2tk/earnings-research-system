@@ -1,0 +1,1214 @@
+{
+  "analysis_id": "EDA-7698-20260813",
+  "company_specific_metrics": [
+    {
+      "category": "フローズン事業",
+      "name": "売上高",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "13,819",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "売上高",
+        "metric_name": "segment_revenue",
+        "normalized_unit": "JPY",
+        "normalized_value": 13819000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2026-06-30",
+          "fiscal_year": "2027",
+          "scope": "q1_cumulative",
+          "start_date": "2026-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-15T10:04:17+09:00",
+          "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "フローズン事業",
+      "name": "セグメント利益",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "118",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "セグメント利益",
+        "metric_name": "segment_profit",
+        "normalized_unit": "JPY",
+        "normalized_value": 118000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2026-06-30",
+          "fiscal_year": "2027",
+          "scope": "q1_cumulative",
+          "start_date": "2026-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-15T10:04:17+09:00",
+          "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "スーパーマーケット事業",
+      "name": "売上高",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "1,765",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "売上高",
+        "metric_name": "segment_revenue",
+        "normalized_unit": "JPY",
+        "normalized_value": 1765000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2026-06-30",
+          "fiscal_year": "2027",
+          "scope": "q1_cumulative",
+          "start_date": "2026-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-15T10:04:17+09:00",
+          "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    },
+    {
+      "category": "スーパーマーケット事業",
+      "name": "セグメント利益",
+      "value": {
+        "confidence": "table_explicit",
+        "displayed_unit": "百万円",
+        "displayed_value": "23",
+        "formula": null,
+        "input_metric_names": [],
+        "label": "セグメント利益",
+        "metric_name": "segment_profit",
+        "normalized_unit": "JPY",
+        "normalized_value": 23000000,
+        "origin": "reported",
+        "period": {
+          "comparison": "current",
+          "end_date": "2026-06-30",
+          "fiscal_year": "2027",
+          "scope": "q1_cumulative",
+          "start_date": "2026-04-01"
+        },
+        "source": {
+          "acquired_at": "2026-08-15T10:04:17+09:00",
+          "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+          "page_number": 4,
+          "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+          "text_anchor": "経営成績に関する説明"
+        },
+        "value_kind": "actual"
+      }
+    }
+  ],
+  "consistency_checks": [
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "revenue:actual",
+        "revenue:prior_actual",
+        "revenue_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "operating_profit:actual",
+        "operating_profit:prior_actual",
+        "operating_profit_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "ordinary_profit:actual",
+        "ordinary_profit:prior_actual",
+        "ordinary_profit_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "year_over_year_reconciliation",
+      "message": "reported and calculated year-over-year values agree within source rounding",
+      "related_metrics": [
+        "net_income:actual",
+        "net_income:prior_actual",
+        "net_income_yoy"
+      ],
+      "status": "passed"
+    },
+    {
+      "check_type": "operating_margin_sanity",
+      "message": "operating margin 0.91% is within the configured sanity range",
+      "related_metrics": [
+        "revenue:actual",
+        "operating_profit:actual"
+      ],
+      "status": "passed"
+    }
+  ],
+  "document": {
+    "accounting_period": "2027年3月期第1四半期",
+    "acquired_at": "2026-08-15T10:04:17+09:00",
+    "announcement_date": "2026-08-13",
+    "company_name": "株式会社アイスコ",
+    "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+    "document_type": "earnings_release",
+    "page_count": 10,
+    "reporting_scope": "q1_cumulative",
+    "source_sha256": "b8e5b0eae8e3f30764d7b7e40d3da376d4c6a6644005004c4f22924759639717",
+    "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+    "ticker": "7698"
+  },
+  "financial_metrics": [
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "15,584",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 15584000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "14,344",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 14344000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "q1_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "8.6",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高前年同期比",
+      "metric_name": "revenue_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": 8.6,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "142",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 142000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "255",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 255000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "q1_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "-44.3",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益前年同期比",
+      "metric_name": "operating_profit_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": -44.3,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "142",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 142000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "268",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 268000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "q1_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "-46.8",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益前年同期比",
+      "metric_name": "ordinary_profit_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": -46.8,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "94",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 94000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "173",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 173000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "q1_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "-45.6",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益前年同期比",
+      "metric_name": "net_income_yoy",
+      "normalized_unit": "percent",
+      "normalized_value": -45.6,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "24.08",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 24.08,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "44.54",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 44.54,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_corresponding",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "q1_cumulative",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "22,752",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "総資産",
+      "metric_name": "total_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 22752000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "20,962",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "総資産",
+      "metric_name": "total_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 20962000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "4,204",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純資産",
+      "metric_name": "net_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 4204000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "4,148",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純資産",
+      "metric_name": "net_assets",
+      "normalized_unit": "JPY",
+      "normalized_value": 4148000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "18.5",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "自己資本比率",
+      "metric_name": "equity_ratio",
+      "normalized_unit": "percent",
+      "normalized_value": 18.5,
+      "origin": "reported",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "%",
+      "displayed_value": "19.8",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "自己資本比率",
+      "metric_name": "equity_ratio",
+      "normalized_unit": "percent",
+      "normalized_value": 19.8,
+      "origin": "reported",
+      "period": {
+        "comparison": "prior_year_end",
+        "end_date": null,
+        "fiscal_year": "2026",
+        "scope": "point_in_time",
+        "start_date": null
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "prior_actual"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "62,500",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "売上高",
+      "metric_name": "revenue",
+      "normalized_unit": "JPY",
+      "normalized_value": 62500000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "724",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "営業利益",
+      "metric_name": "operating_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 724000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "737",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "経常利益",
+      "metric_name": "ordinary_profit",
+      "normalized_unit": "JPY",
+      "normalized_value": 737000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "百万円",
+      "displayed_value": "488",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "純利益",
+      "metric_name": "net_income",
+      "normalized_unit": "JPY",
+      "normalized_value": 488000000,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "124.16",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "1株利益",
+      "metric_name": "earnings_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 124.16,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "table_explicit",
+      "displayed_unit": "円",
+      "displayed_value": "11.00",
+      "formula": null,
+      "input_metric_names": [],
+      "label": "期末配当",
+      "metric_name": "dividend_per_share",
+      "normalized_unit": "JPY_per_share",
+      "normalized_value": 11.0,
+      "origin": "reported",
+      "period": {
+        "comparison": "company_forecast",
+        "end_date": null,
+        "fiscal_year": "2027",
+        "scope": "full_year",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "company_forecast"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "8.64",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "revenue:actual",
+        "revenue:prior_actual"
+      ],
+      "label": "売上高前年同期比(計算値)",
+      "metric_name": "revenue_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": 8.64,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "-44.31",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "operating_profit:actual",
+        "operating_profit:prior_actual"
+      ],
+      "label": "営業利益前年同期比(計算値)",
+      "metric_name": "operating_profit_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": -44.31,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "-47.01",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "ordinary_profit:actual",
+        "ordinary_profit:prior_actual"
+      ],
+      "label": "経常利益前年同期比(計算値)",
+      "metric_name": "ordinary_profit_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": -47.01,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "-45.66",
+      "formula": "(actual / prior_actual - 1) * 100",
+      "input_metric_names": [
+        "net_income:actual",
+        "net_income:prior_actual"
+      ],
+      "label": "純利益前年同期比(計算値)",
+      "metric_name": "net_income_yoy_calculated",
+      "normalized_unit": "percent",
+      "normalized_value": -45.66,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "24.93",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "revenue:actual",
+        "revenue:company_forecast"
+      ],
+      "label": "売上高会社予想進捗率",
+      "metric_name": "revenue_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 24.93,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "19.61",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "operating_profit:actual",
+        "operating_profit:company_forecast"
+      ],
+      "label": "営業利益会社予想進捗率",
+      "metric_name": "operating_profit_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 19.61,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "19.27",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "ordinary_profit:actual",
+        "ordinary_profit:company_forecast"
+      ],
+      "label": "経常利益会社予想進捗率",
+      "metric_name": "ordinary_profit_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 19.27,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    },
+    {
+      "confidence": "calculated",
+      "displayed_unit": "%",
+      "displayed_value": "19.26",
+      "formula": "actual / company_forecast * 100",
+      "input_metric_names": [
+        "net_income:actual",
+        "net_income:company_forecast"
+      ],
+      "label": "純利益会社予想進捗率",
+      "metric_name": "net_income_forecast_progress",
+      "normalized_unit": "percent",
+      "normalized_value": 19.26,
+      "origin": "calculated",
+      "period": {
+        "comparison": "current",
+        "end_date": "2026-06-30",
+        "fiscal_year": "2027",
+        "scope": "q1_cumulative",
+        "start_date": "2026-04-01"
+      },
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績・財政状態・業績予想"
+      },
+      "value_kind": "derived"
+    }
+  ],
+  "narrative_findings": [
+    {
+      "confidence": "text_explicit",
+      "finding_type": "revenue_driver",
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "この結果、当第1四半期累計期間は主要得意先との取引が堅調に推移したことにより、売上高15,584百万円(前年同四半期比8.6%増)となりました。",
+      "status": "positive",
+      "subject": "全社売上"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "profit_driver",
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 4,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "経営成績に関する説明"
+      },
+      "statement": "一方、利益面では、天候不順によりアイスクリーム類の販売が伸び悩んだことに加え、人件費や物流費の増加により、営業利益142百万円(前年同四半期比44.3%減)、経常利益142百万円(前年同四半期比46.8%減)、四半期純利益94百万円(前年同四半期比45.6%減)となりました。",
+      "status": "negative",
+      "subject": "フローズン事業"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "outlook",
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 5,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "業績予想などの将来予測情報"
+      },
+      "statement": "(3)業績予想などの将来予測情報に関する説明2027年3月期の業績は、計画どおりに推移しております。",
+      "status": "unchanged",
+      "subject": "全社業績"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "forecast_change",
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "通期会社予想"
+      },
+      "statement": "直近に公表されている業績予想からの修正の有無:無",
+      "status": "unchanged",
+      "subject": "通期会社予想"
+    },
+    {
+      "confidence": "text_explicit",
+      "finding_type": "dividend_change",
+      "source": {
+        "acquired_at": "2026-08-15T10:04:17+09:00",
+        "document_title": "2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+        "page_number": 1,
+        "source_url": "https://contents.xj-storage.jp/xcontents/AS04527/9aea2db0/94b4/463a/9b73/347971f3eb88/140120260807514298.pdf",
+        "text_anchor": "配当予想"
+      },
+      "statement": "直近に公表されている配当予想からの修正の有無:無",
+      "status": "unchanged",
+      "subject": "配当予想"
+    }
+  ],
+  "next_stage": "ready_for_pre_event_comparison",
+  "raw_document_retained": false,
+  "schema_version": "earnings_document_analysis_v1",
+  "status": "analyzed",
+  "unresolved_items": []
+}

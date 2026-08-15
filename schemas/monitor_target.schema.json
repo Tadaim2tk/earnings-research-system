@@ -14,7 +14,7 @@
     {"name": "earnings_event_id", "type": "string", "required": false},
     {"name": "source_name", "type": "string", "required": true},
     {"name": "source_url", "type": "string", "required": true},
-    {"name": "source_category", "type": "enum", "required": true, "allowed": ["company_ir_calendar", "company_ir_news_index", "company_ir_disclosure_index", "event_document"]},
+    {"name": "source_category", "type": "enum", "required": true, "allowed": ["company_ir_calendar", "company_ir_news_index", "company_ir_disclosure_index", "tdnet_index_json", "event_document"]},
     {"name": "monitoring_level", "type": "enum", "required": true, "allowed": ["level_1", "level_2"]},
     {"name": "automated_access_permitted", "type": "boolean", "required": true},
     {"name": "enabled", "type": "boolean", "required": true},

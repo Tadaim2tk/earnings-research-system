@@ -643,18 +643,15 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert 'gap_acknowledgement_args=(--gap-acknowledgement .monitor/gap_acknowledgement.json)' in raw
     assert '"${gap_acknowledgement_args[@]}"' in raw
     assert "monitor-build-handoff" in raw
-    assert 'cron: "17 0,6,12 * * 1-5"' in raw
+    assert 'cron: "17 0,4,8,12,16,20 * * *"' in raw
 
 
-def test_schedule_uses_three_slots_in_event_window_and_on_event_day():
+def test_schedule_uses_six_slots_in_event_window_and_on_event_day():
     row = target()
     row["event_date"] = "2026-08-13"
-    assert active_target_plan([row], planned_at=moment(9, day=12)) == [row]
-    assert active_target_plan([row], planned_at=moment(15, day=12)) == [row]
-    assert active_target_plan([row], planned_at=moment(21, day=12)) == [row]
-    assert active_target_plan([row], planned_at=moment(9, day=13)) == [row]
-    assert active_target_plan([row], planned_at=moment(15, day=13)) == [row]
-    assert active_target_plan([row], planned_at=moment(21, day=13)) == [row]
+    for day in (12, 13):
+        for hour in (1, 5, 9, 13, 17, 21):
+            assert active_target_plan([row], planned_at=moment(hour, 17, day=day)) == [row]
 
 
 @pytest.mark.parametrize("hour,minute", [(9, 17), (11, 37), (14, 59)])
@@ -664,18 +661,20 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
 
 
-@pytest.mark.parametrize("hour", [0, 8])
-def test_event_window_before_first_slot_is_not_due(hour):
-    row = target()
-    row["event_date"] = "2026-08-13"
-    assert active_target_plan([row], planned_at=moment(hour, day=12)) == []
-
-
-@pytest.mark.parametrize("hour", [9, 15, 21])
-def test_normal_day_more_than_five_business_days_before_event_uses_morning_only(hour):
+@pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])
+def test_normal_day_more_than_five_business_days_before_event_uses_one_slot(hour):
     row = target()
     row["event_date"] = "2026-08-21"
-    expected = [row] if hour == 9 else []
+    expected = [row] if hour == 17 else []
+    assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
+
+
+@pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])
+def test_target_without_event_date_uses_one_after_close_slot(hour):
+    """The TDnet index target carries no event date and must stay at one check per day."""
+    row = target()
+    row["event_date"] = ""
+    expected = [row] if hour == 17 else []
     assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
 
 
@@ -728,11 +727,15 @@ def test_delayed_event_day_runs_are_due(hour, minute):
     assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == [row]
 
 
-@pytest.mark.parametrize("hour,minute", [(0, 0), (8, 59)])
-def test_event_day_before_the_first_window_is_not_due(hour, minute):
-    row = target()
-    row["event_date"] = "2026-08-13"
-    assert active_target_plan([row], planned_at=moment(hour, minute, day=13)) == []
+def test_event_day_eight_hour_cron_delay_remains_within_stale_threshold():
+    assessment = assess_stale_gap(
+        last_success_at=moment(21, 17, day=12),
+        reference_time=moment(9, 17, day=13),
+        schedule_profile="prospective_event_v1",
+        event_date=date(2026, 8, 13),
+    )
+    assert assessment.age == timedelta(hours=12)
+    assert assessment.is_stale is False
 
 
 class StubLiveAdapter:

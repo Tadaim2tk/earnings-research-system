@@ -375,3 +375,29 @@ Context: stale gapを暦時間で測ると週末だけで閾値を超え、event
 Decision: stale経過時間は土曜・日曜を除外し、祝日calendarは追加しない。event 5営業日前から当日までは既存3 cron slotをdueとする。独立 `monitor_gap_acknowledgement` schemaを追加し、有効なappend-only tailの `acknowledged_gap_end` だけを次回stale評価の基準にできる。未来gap、解決済みgapの新規再利用、self／missing／二重supersessionを拒否する。acknowledgement後もrobots確認とsource observationを必須とし、pending changeを解除しない。
 
 Consequences: artifact削除や再初期化なしでstale停止から通常観測を再開できる。acknowledgementは監視健全性の履歴に限定され、formal evidence、baseline、event status、scoring、売買判断へ影響しない。threshold値、registry、外部network境界は変更しない。event_window初日とevent当日の朝slotは閾値到達時刻とほぼ一致して遅延余裕がほぼゼロであり、Actionsの通常遅延でもacknowledgementが定常的に必要になり得る。恒久対応は閾値を本ADRで変更せず、別ADRで決定する。
+
+## ERS-ADR-0026
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: ICECOの静的IR HTMLはXJ Storage資料一覧を動的表示するため、PDF追加をresponse metadataまたは本文digestで検知できず、2026-08-13 15:30の第1四半期決算短信を見逃した。代替候補のrobots.txtを実測したところ、`www.xj-storage.jp`、`contents.xj-storage.jp`、`www.release.tdnet.info` はいずれも `User-Agent: *` / `Disallow: /` で全パスの自動accessを明示禁止していた。pilot方針は明示禁止を検出したsourceを停止・例外報告とするため、この2案は採用できない。`webapi.yanoshin.jp` は `Allow: /` に加え、AI agent向けの `llms.txt`（2026-02-09公開）で認証不要・利用目的・頻度配慮を明示しており、`system_policy:public-web-low-frequency-v1` の条件を満たす。
+
+Decision: 監視対象を公開TDnet適時開示index（`webapi.yanoshin.jp`、`json2` format、`limit=10`）の新target `ICECO_TDNET_INDEX` へ移す。旧3 targetはregistryから削除せず `retired` として終了記録を残し、checkpoint／artifactの孤児化を避ける。target IDを維持したまま別sourceへ差し替えると「監視対象が変わった」ことが本物の資料追加と区別できないchange通知になるため、新IDで開始する。`tdnet_index_json` categoryは先頭1件の `id`／`title`／`pubdate`／`document_url` と一覧 `total_count` だけをfingerprintに入れ、raw JSONを保存しない。providerが全formatを `text/html` で返すため、parserはmedia typeではなくcategoryで選ぶ。timezoneなし `pubdate` はJSTと明示的に解釈する。
+
+`www.xj-storage.jp`／`www.release.tdnet.info` の明示禁止は、pilot方針の定めるHuman例外案件として報告する。決算短信PDF本体はこの2 hostにしか存在しないため、検知は自動化されるが**document本体の自動取得は現時点で許可されたsourceが無い**。
+
+Decision（付随）: robots.txt取得は `Accept: text/plain, */*` を使う。実測で `www.xj-storage.jp` は監視の既定Acceptに406を返し、robots方針が読めないことが `http_error` に化けていた。robots経路の非200（404／410を除く）は `terms_not_approved` とし、読めないrobotsを許可として扱わない。
+
+Decision（付随）: 通常日のdue slotを09:17から引け後の17:17へ移す。1日1回という頻度は変えず、15時台の開示を当日中に観測する。
+
+Decision（付随）: checkpointに `last_seen_document_url` を追加し、research handoffへ渡す。document byteは保存しない。`analyze-earnings-handoff` は `tdnet_index_json` のhandoffでdocument discoveryを実行しない。indexはhardened monitoring adapter専用の認可であり、pipeline側から再取得するとrobots未確認・IP pinningなしのrequestが増え、その先のdocumentは明示禁止hostにある。
+
+Decision（付随）: `document_url` の空userinfo（`https://@host/...`）とobserved_atより未来の `pubdate` を拒否する。前者は `or parts.username` が空文字を偽と判定して素通ししていた。後者はproviderの異常値が研究handoffの基準時刻になるのを防ぐ（時計ずれ許容5分）。
+
+Decision（付随）: change Issue本文に `latest_title`、`latest_published_at`、`latest_document_url` を含める。従来は変更されたfield名しか出ず、何が開示されたか本文から分からなかった。
+
+Decision（付随）: workflowの `analyze` stepを `continue-on-error` とし、`notify` を `always()` にする。実測で、handoff先がPDFでanalyzeが失敗すると `notify` がskipされchange Issueが届かなかった。analyzeの失敗は通知後に別stepで再表面化する。
+
+Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる（change検知日も、pipelineがindexを再取得しないため2 requestのまま）。`total_count` はfingerprintに入るがproviderの返却件数であり、`limit` 到達後は沈黙防止として機能しない。stale threshold（36h／24h／12h）、IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。

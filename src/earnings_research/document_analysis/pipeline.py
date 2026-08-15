@@ -97,6 +97,9 @@ def analyze_document_url(
     return result
 
 
+_INDEX_ONLY_CATEGORIES = {"tdnet_index_json"}
+
+
 def analyze_handoff(
     handoff_path: Path,
     output_dir: Path,
@@ -107,12 +110,19 @@ def analyze_handoff(
     fetcher = fetcher or TemporaryDocumentFetcher()
     source_url = payload["source_url"]
     candidates = []
-    direct_type = classify_document(payload.get("last_seen_title") or "", source_url)
-    if direct_type:
-        candidates = [{"url": source_url, "title": payload.get("last_seen_title") or source_url}]
+    if payload.get("source_category") in _INDEX_ONLY_CATEGORIES:
+        # A disclosure index is metadata, not a document, and it is only
+        # authorized for the hardened monitoring adapter. Re-fetching it here
+        # would add an unpinned request that skips the robots check, and the
+        # documents it points at live on hosts that forbid automated access.
+        candidates = []
     else:
-        html = fetcher.html(source_url)
-        candidates = [candidate.__dict__ for candidate in discover_earnings_documents(html, source_url)]
+        direct_type = classify_document(payload.get("last_seen_title") or "", source_url)
+        if direct_type:
+            candidates = [{"url": source_url, "title": payload.get("last_seen_title") or source_url}]
+        else:
+            html = fetcher.html(source_url)
+            candidates = [candidate.__dict__ for candidate in discover_earnings_documents(html, source_url)]
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     analyzed = []

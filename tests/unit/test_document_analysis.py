@@ -369,6 +369,34 @@ def test_non_earnings_handoff_continues_without_analysis(tmp_path):
     assert result["analyzed_outputs"] == []
 
 
+def test_disclosure_index_handoff_never_refetches_the_index(tmp_path):
+    """The index is only authorized for the hardened monitoring adapter."""
+    handoff = tmp_path / "handoff.json"
+    handoff.write_text(json.dumps({
+        "source_url": "https://webapi.yanoshin.jp/webapi/tdnet/list/7698.json2?limit=10",
+        "source_category": "tdnet_index_json",
+        "last_seen_title": "2027年３月期第１四半期決算短信〔日本基準〕(非連結)",
+        "last_seen_document_url": "https://www.release.tdnet.info/inbs/140120260807514298.pdf",
+        "monitor_target_id": "ICECO_TDNET_INDEX",
+    }), encoding="utf-8")
+
+    calls = []
+
+    class Fetcher:
+        def html(self, url):
+            calls.append(url)
+            raise AssertionError("the disclosure index must not be fetched again")
+
+        def pdf(self, url, _destination):
+            calls.append(url)
+            raise AssertionError("document acquisition is not authorized")
+
+    result = analyze_handoff(handoff, tmp_path / "out", fetcher=Fetcher())
+    assert result["status"] == "no_target_documents"
+    assert result["analyzed_outputs"] == []
+    assert calls == []
+
+
 def test_presentation_type_is_preserved_when_standard_financial_tables_exist():
     result = analyze_japanese_earnings_release(
         extracted_fixture(),

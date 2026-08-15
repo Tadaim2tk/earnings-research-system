@@ -14,6 +14,7 @@ from earnings_research.monitoring.models import (
     ObservationFailure,
     SourceObservation,
 )
+from earnings_research.monitoring.fingerprint import build_metadata_fingerprint
 from earnings_research.monitoring.registry import load_registry
 from earnings_research.monitoring.runtime import MonitorRuntime
 
@@ -146,9 +147,24 @@ def test_absent_robots_file_does_not_create_an_unwritten_prohibition():
     assert result is None
 
 
-def test_robots_transport_failure_is_not_treated_as_permission():
-    result = check_robots_with(lambda _request: httpx.Response(503))
-    assert result.error_code == "source_unavailable"
+@pytest.mark.parametrize("status", [406, 401, 403, 500, 503])
+def test_unreadable_robots_policy_is_not_treated_as_permission(status):
+    result = check_robots_with(lambda _request: httpx.Response(status))
+    assert result.error_code == "terms_not_approved"
+
+
+def test_robots_request_asks_for_plain_text():
+    """A metadata-only Accept header makes some origins answer 406."""
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("accept"))
+        return httpx.Response(
+            200, text="User-agent: *\nAllow: /\n", headers={"content-type": "text/plain"}
+        )
+
+    assert check_robots_with(handler) is None
+    assert seen == ["text/plain, */*"]
 
 
 def test_unapproved_requested_origin_is_rejected_before_network():
@@ -201,6 +217,150 @@ def test_200_json_uses_only_recognized_generic_metadata():
     assert result.stable_metadata["period"] == "FY2026"
     assert len(result.stable_metadata["page_content_sha256"]) == 64
     assert "token" not in result.stable_metadata
+
+
+def tdnet_payload(
+    title="2027年3月期第1四半期決算短信〔日本基準〕(非連結)",
+    published="2026-08-13 15:30:00",
+    document_id="1275226",
+    total_count=1,
+    extra_items=(),
+):
+    return {
+        "total_count": str(total_count),
+        "condition_desc": "7698の適時開示情報一覧",
+        "items": [
+            {
+                "id": document_id,
+                "pubdate": published,
+                "company_code": "76980",
+                "company_name": "アイスコ",
+                "title": title,
+                "document_url": "https://www.release.tdnet.info/inbs/140120260807514298.pdf",
+                "url_xbrl": "https://www.release.tdnet.info/inbs/081220260807514298.zip",
+                "update_history": None,
+            },
+            *extra_items,
+        ],
+    }
+
+
+TDNET_OBSERVED_AT = datetime(2026, 8, 15, 10, 0, tzinfo=JST)
+
+
+def observe_tdnet_index(payload, *, content_type="text/html; charset=UTF-8"):
+    row = target()
+    row["source_category"] = "tdnet_index_json"
+    return observe_with(
+        lambda _request: httpx.Response(
+            200, json=payload, headers={"content-type": content_type}
+        ),
+        target_row=row,
+        source_context=context(at=TDNET_OBSERVED_AT),
+    )
+
+
+def test_tdnet_index_fingerprint_uses_only_latest_item_metadata():
+    result = observe_tdnet_index(tdnet_payload())
+    assert isinstance(result, SourceObservation)
+    assert result.title == "2027年3月期第1四半期決算短信〔日本基準〕(非連結)"
+    assert result.document_id == "1275226"
+    assert result.published_at == datetime(2026, 8, 13, 15, 30, tzinfo=JST)
+    assert result.stable_metadata == {
+        "latest_document_url": "https://www.release.tdnet.info/inbs/140120260807514298.pdf",
+        "index_item_count": "1",
+    }
+    assert len(build_metadata_fingerprint(result)) == 64
+
+
+def test_tdnet_index_is_parsed_as_json_even_when_served_as_html():
+    """The provider answers text/html for every format, including json2."""
+    result = observe_tdnet_index(tdnet_payload(), content_type="text/html; charset=UTF-8")
+    assert isinstance(result, SourceObservation)
+    assert result.document_id == "1275226"
+
+
+def test_tdnet_index_fingerprint_changes_when_new_item_is_prepended():
+    """The 2026-08-13 miss must not be able to repeat."""
+    before = tdnet_payload(title="2026年3月期 決算短信", published="2026-05-27 15:00:00",
+                           document_id="1255919")
+    after = tdnet_payload(total_count=2, extra_items=(before["items"][0],))
+    previous = observe_tdnet_index(before)
+    current = observe_tdnet_index(after)
+    assert isinstance(current, SourceObservation)
+    assert build_metadata_fingerprint(previous) != build_metadata_fingerprint(current)
+
+
+def test_identical_tdnet_index_keeps_the_same_fingerprint():
+    first = observe_tdnet_index(tdnet_payload())
+    second = observe_tdnet_index(tdnet_payload())
+    assert build_metadata_fingerprint(first) == build_metadata_fingerprint(second)
+
+
+def test_tdnet_index_count_change_below_the_first_row_is_visible():
+    """A change that leaves the newest row untouched still moves the fingerprint."""
+    one = observe_tdnet_index(tdnet_payload(total_count=1))
+    two = observe_tdnet_index(tdnet_payload(total_count=2))
+    assert build_metadata_fingerprint(one) != build_metadata_fingerprint(two)
+
+
+@pytest.mark.parametrize(
+    "published",
+    ["2026-08-15 10:06:00", "2099-01-01 00:00:00"],
+)
+def test_tdnet_index_rejects_publication_after_observation(published):
+    """A disclosure cannot be published after it was observed."""
+    result = observe_tdnet_index(tdnet_payload(published=published))
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "timestamp_parse_error"
+
+
+def test_tdnet_index_allows_small_clock_skew():
+    result = observe_tdnet_index(tdnet_payload(published="2026-08-15 10:04:00"))
+    assert isinstance(result, SourceObservation)
+
+
+def test_tdnet_index_update_history_marks_replacement():
+    payload = tdnet_payload()
+    payload["items"][0]["update_history"] = "2026-08-13 16:00:00 訂正"
+    result = observe_tdnet_index(payload)
+    assert isinstance(result, SourceObservation)
+    assert result.replacement_suspected is True
+
+
+@pytest.mark.parametrize(
+    "payload,expected_code",
+    [
+        ({"total_count": "0", "items": []}, "parse_error"),
+        ({"total_count": "1", "items": [{"id": "1", "pubdate": "2026-08-13 15:30:00"}]}, "parse_error"),
+        ({"total_count": "1", "items": [{"id": "1", "title": "Disclosure"}]}, "parse_error"),
+        (tdnet_payload(document_id=""), "parse_error"),
+        (tdnet_payload(published="not-a-timestamp"), "timestamp_parse_error"),
+        (tdnet_payload(published="2026-08-13T15:30:00+09:00"), "timestamp_parse_error"),
+    ],
+)
+def test_tdnet_index_rejects_missing_or_invalid_latest_metadata(payload, expected_code):
+    result = observe_tdnet_index(payload)
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == expected_code
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://www.release.tdnet.info/a.pdf",
+        "",
+        "not-a-url",
+        "https://@www.release.tdnet.info/a.pdf",
+        "https://user:pass@www.release.tdnet.info/a.pdf",
+    ],
+)
+def test_tdnet_index_rejects_unsafe_document_url(url):
+    payload = tdnet_payload()
+    payload["items"][0]["document_url"] = url
+    result = observe_tdnet_index(payload)
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "parse_error"
 
 
 def test_same_origin_redirect_is_followed_without_cookie_carryover():

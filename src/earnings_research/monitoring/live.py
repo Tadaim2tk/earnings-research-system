@@ -7,7 +7,7 @@ import json
 import re
 import ssl
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.message import Message
 from html.parser import HTMLParser
 from typing import Callable, Dict, Mapping, Optional, Tuple
@@ -58,6 +58,9 @@ _SECRET_QUERY_KEYS = {
 }
 _ALLOWED_CHARSETS = {"utf-8", "shift_jis", "cp932", "euc_jp", "iso2022_jp"}
 _ALLOWED_STABLE_METADATA_KEYS = {"category", "document_type", "language", "period"}
+_TDNET_INDEX_CATEGORY = "tdnet_index_json"
+_JST = timezone(timedelta(hours=9))
+_PUBLISHED_AT_TOLERANCE = timedelta(minutes=5)
 
 
 class LiveSourcePolicyError(ValueError):
@@ -167,6 +170,7 @@ class LiveSourceAdapter:
                 current_url=current_url,
                 approved_origin=approved_origin,
                 context=context,
+                source_category=target.get("source_category"),
             )
         except LiveSourcePolicyError as exc:
             return _failure(
@@ -213,6 +217,7 @@ class LiveSourceAdapter:
         approved_origin: Tuple[str, str, int],
         context: LiveSourceContext,
         robots_path: Optional[str] = None,
+        source_category: Optional[str] = None,
     ) -> ObservationResult:
         started = self._monotonic()
         visited = set()
@@ -293,7 +298,15 @@ class LiveSourceAdapter:
             )
             client.cookies.clear()
             try:
-                with client.stream("GET", current_url, timeout=timeout) as response:
+                # robots.txt is plain text. Some origins answer 406 to the
+                # metadata Accept header, which would hide the policy behind a
+                # transport error instead of resolving it.
+                request_headers = (
+                    {"Accept": "text/plain, */*"} if robots_path is not None else None
+                )
+                with client.stream(
+                    "GET", current_url, timeout=timeout, headers=request_headers
+                ) as response:
                     client.cookies.clear()
                     if response.status_code in _REDIRECT_STATUSES:
                         location = response.headers.get("location", "")
@@ -331,6 +344,16 @@ class LiveSourceAdapter:
                             allowed=True,
                             status="absent",
                         )
+                    if robots_path is not None and response.status_code != 200:
+                        # An unreadable robots policy is not permission. Any other
+                        # status, including 4xx content negotiation failures and
+                        # transient 5xx, keeps the source closed.
+                        return _failure(
+                            "terms_not_approved",
+                            "robots policy could not be verified",
+                            current_url,
+                            context.observed_at,
+                        )
                     status_failure = _status_failure(response.status_code)
                     if status_failure is not None:
                         code, message, retryable = status_failure
@@ -349,6 +372,7 @@ class LiveSourceAdapter:
                         context,
                         deadline=started + OVERALL_BUDGET_SECONDS,
                         robots_path=robots_path,
+                        source_category=source_category,
                     )
             except httpx.InvalidURL:
                 return _failure(
@@ -391,6 +415,7 @@ class LiveSourceAdapter:
         *,
         deadline: float,
         robots_path: Optional[str] = None,
+        source_category: Optional[str] = None,
     ) -> ObservationResult:
         content_type_header = response.headers.get("content-type", "")
         media_type, charset = _parse_content_type(content_type_header)
@@ -476,7 +501,20 @@ class LiveSourceAdapter:
                     etag=_optional_header(response.headers.get("etag")),
                     last_modified=_optional_header(response.headers.get("last-modified")),
                 )
-            parsed = _parse_html(text) if media_type == "text/html" else _parse_json(text)
+            # The TDnet index provider answers with text/html even for the JSON
+            # formats, so the Human-declared category decides the parser first.
+            if source_category == _TDNET_INDEX_CATEGORY:
+                parsed = _parse_json(
+                    text,
+                    source_category=source_category,
+                    observed_at=context.observed_at,
+                )
+            else:
+                parsed = (
+                    _parse_html(text)
+                    if media_type == "text/html"
+                    else _parse_json(text, source_category=source_category)
+                )
         except UnicodeError:
             return _failure("parse_error", "response charset decoding failed", source_url, context.observed_at)
         except TimestampError:
@@ -490,9 +528,11 @@ class LiveSourceAdapter:
             return _failure("parse_error", "response metadata parsing failed", source_url, context.observed_at)
 
         actual_length = len(body)
-        # Keep only a digest for later comparisons; raw response content is not
-        # part of the persisted monitoring bundle.
-        parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
+        # Generic pages keep only a digest for later comparisons. Disclosure
+        # lists fingerprint their latest-item metadata instead; raw content is
+        # never part of the persisted monitoring bundle.
+        if source_category != _TDNET_INDEX_CATEGORY:
+            parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
         length_mismatch = isinstance(declared_length, int) and declared_length != actual_length
         previous = context.previous_checkpoint
         etag = _optional_header(response.headers.get("etag"))
@@ -751,10 +791,17 @@ def _parse_html(text: str) -> Dict:
     }
 
 
-def _parse_json(text: str) -> Dict:
+def _parse_json(
+    text: str,
+    *,
+    source_category: Optional[str] = None,
+    observed_at: Optional[datetime] = None,
+) -> Dict:
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError("JSON root must be an object")
+    if source_category == _TDNET_INDEX_CATEGORY:
+        return _parse_tdnet_index_json(loaded, observed_at)
     recognized = {"title", "document_id", "published_at", "corrected", "updated", "stable_metadata"}
     if not recognized.intersection(loaded):
         raise ValueError("JSON has no recognized metadata")
@@ -785,6 +832,71 @@ def _parse_json(text: str) -> Dict:
         "replacement_suspected": _truthy(loaded.get("corrected")) or _truthy(loaded.get("updated")),
         "stable_metadata": filtered_metadata,
     }
+
+
+def _parse_tdnet_index_json(loaded: Dict, observed_at: Optional[datetime] = None) -> Dict:
+    items = loaded.get("items")
+    if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+        raise ValueError("TDnet index must contain a first item")
+    latest = items[0]
+    title = _clean_text(str(latest.get("title") or ""))
+    if not _is_meaningful_text(title):
+        raise ValueError("latest disclosure title is missing or invalid")
+    document_id = _validated_optional_metadata(latest.get("id"), "disclosure ID")
+    if document_id is None:
+        raise ValueError("latest disclosure ID is missing")
+    pubdate = latest.get("pubdate")
+    if pubdate in (None, ""):
+        raise ValueError("latest disclosure pubdate is missing")
+    try:
+        published_at = datetime.strptime(str(pubdate), "%Y-%m-%d %H:%M:%S")
+    except ValueError as exc:
+        raise TimestampError from exc
+    # The TDnet index omits a timezone from pubdate. For this source category only,
+    # the documented provider timestamp is interpreted explicitly as Japan time,
+    # matching the Tokyo Stock Exchange disclosure clock the provider mirrors.
+    published_at = published_at.replace(tzinfo=_JST)
+    # A disclosure cannot be published after it was observed. Accepting a future
+    # timestamp would put a provider error straight into the research handoff.
+    if observed_at is not None and published_at > observed_at + _PUBLISHED_AT_TOLERANCE:
+        raise TimestampError
+    document_url = _validated_optional_metadata(latest.get("document_url"), "document URL")
+    if document_url is None:
+        raise ValueError("latest disclosure document URL is missing")
+    parts = urlsplit(document_url)
+    if (
+        parts.scheme.lower() != "https"
+        or not parts.hostname
+        # An empty userinfo is still userinfo; `or parts.username` would pass it.
+        or parts.username is not None
+        or parts.password is not None
+    ):
+        raise ValueError("latest disclosure document URL is invalid")
+    total_count = latest_index_count(loaded, len(items))
+    return {
+        "title": title,
+        "document_id": document_id,
+        "published_at": published_at,
+        "replacement_suspected": _is_meaningful_text(
+            _clean_text(str(latest.get("update_history") or ""))
+        ),
+        # The index count joins the newest item in the fingerprint so that a
+        # change below the first row cannot pass as an unchanged observation.
+        "stable_metadata": {
+            "latest_document_url": document_url,
+            "index_item_count": str(total_count),
+        },
+    }
+
+
+def latest_index_count(loaded: Dict, fallback: int) -> int:
+    declared = loaded.get("total_count")
+    if declared in (None, ""):
+        return fallback
+    try:
+        return int(str(declared))
+    except ValueError as exc:
+        raise ValueError("TDnet index total_count is invalid") from exc
 
 
 def _parse_published_at(value) -> Optional[datetime]:
