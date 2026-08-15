@@ -678,6 +678,42 @@ def test_target_without_event_date_uses_one_after_close_slot(hour):
     assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
 
 
+def test_normal_threshold_absorbs_one_missed_business_day():
+    """One skipped day must recover on its own; two in a row must stop."""
+    last_success = datetime(2026, 8, 14, 17, 17, tzinfo=JST)
+    one_missed = assess_stale_gap(
+        last_success_at=last_success,
+        reference_time=datetime(2026, 8, 18, 17, 17, tzinfo=JST),
+        schedule_profile="prospective_event_v1",
+        event_date=None,
+    )
+    two_missed = assess_stale_gap(
+        last_success_at=last_success,
+        reference_time=datetime(2026, 8, 19, 17, 17, tzinfo=JST),
+        schedule_profile="prospective_event_v1",
+        event_date=None,
+    )
+    assert one_missed.is_stale is False
+    assert two_missed.is_stale is True
+
+
+@pytest.mark.parametrize(
+    "gap,expected_stale",
+    [(timedelta(hours=60), False), (timedelta(hours=60, seconds=1), True)],
+)
+def test_normal_threshold_boundary_is_exactly_sixty_business_hours(gap, expected_stale):
+    """Pins the value itself; the absorb-one-day test alone allows 48h..60h."""
+    last_success = datetime(2026, 8, 17, 0, 0, tzinfo=JST)
+    assessment = assess_stale_gap(
+        last_success_at=last_success,
+        reference_time=last_success + gap,
+        schedule_profile="prospective_event_v1",
+        event_date=None,
+    )
+    assert assessment.threshold == timedelta(hours=60)
+    assert assessment.is_stale is expected_stale
+
+
 def test_stale_elapsed_excludes_weekend_but_preserves_weekday_hours():
     weekend = assess_stale_gap(
         last_success_at=datetime(2026, 8, 7, 9, tzinfo=JST),
@@ -890,8 +926,8 @@ def test_acknowledgement_expires_after_continued_observation_failures(tmp_path):
     stale_adapter = StubLiveAdapter(failure)
     stale = execute_live_run(
         target=target(), previous_bundle=failed, output_dir=tmp_path / "expired-again",
-        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=13),
-        finished_at=moment(13, 1, day=13), adapter_factory=lambda: stale_adapter,
+        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=17),
+        finished_at=moment(13, 1, day=17), adapter_factory=lambda: stale_adapter,
     )
     assert stale.checkpoint["target_state"] == "stopped"
     assert stale_adapter.calls == []
@@ -922,10 +958,10 @@ def test_success_after_acknowledgement_does_not_cover_the_next_gap(tmp_path):
         finished_at=moment(23, 1, day=11), gap_acknowledgements=[acknowledgement],
     )
     next_gap = execute_offline_run(
-        target=target(), source_input=source_input("same", moment(13, day=13)),
+        target=target(), source_input=source_input("same", moment(13, day=17)),
         previous_bundle=recovered, output_dir=tmp_path / "next-gap",
-        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=13),
-        finished_at=moment(13, 1, day=13),
+        run_id="MRUN-EXAMPLE-004", started_at=moment(13, day=17),
+        finished_at=moment(13, 1, day=17),
     )
     assert next_gap.checkpoint["target_state"] == "stopped"
 
@@ -986,31 +1022,31 @@ def test_gap_acknowledgement_does_not_clear_pending_change(tmp_path):
     changed = next_bundle(tmp_path, initial, "changed", "MRUN-EXAMPLE-002", 10, "changed")
     stopped = execute_offline_run(
         target=target(),
-        source_input=source_input("changed", moment(22, day=11)),
+        source_input=source_input("changed", moment(22, day=12)),
         previous_bundle=changed,
         output_dir=tmp_path / "pending-stopped",
         run_id="MRUN-EXAMPLE-003",
-        started_at=moment(22, day=11),
-        finished_at=moment(22, 1, day=11),
+        started_at=moment(22, day=12),
+        finished_at=moment(22, 1, day=12),
     )
     acknowledgement = {
         "acknowledgement_id": "MGACK-EXAMPLE-PENDING",
         "monitor_target_id": target()["monitor_target_id"],
         "acknowledged_gap_start": moment(10, day=7).isoformat(),
-        "acknowledged_gap_end": moment(22, 15, day=11).isoformat(),
-        "acknowledged_at": moment(22, 20, day=11).isoformat(),
+        "acknowledged_gap_end": moment(22, 15, day=12).isoformat(),
+        "acknowledged_at": moment(22, 20, day=12).isoformat(),
         "acknowledged_by": "system_policy:monitor-gap-recovery-v1",
         "reason": "Policy-reviewed infrastructure interruption",
         "supersedes_acknowledgement_id": "",
     }
     recovered = execute_offline_run(
         target=target(),
-        source_input=source_input("changed", moment(23, day=11)),
+        source_input=source_input("changed", moment(23, day=12)),
         previous_bundle=stopped,
         output_dir=tmp_path / "pending-recovered",
         run_id="MRUN-EXAMPLE-004",
-        started_at=moment(23, day=11),
-        finished_at=moment(23, 1, day=11),
+        started_at=moment(23, day=12),
+        finished_at=moment(23, 1, day=12),
         gap_acknowledgements=[acknowledgement],
     )
     assert recovered.checkpoint["pending_change_run_id"] == "MRUN-EXAMPLE-002"

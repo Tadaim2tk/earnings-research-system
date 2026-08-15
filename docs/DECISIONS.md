@@ -400,4 +400,18 @@ Decision（付随）: change Issue本文に `latest_title`、`latest_published_a
 
 Decision（付随）: workflowの `analyze` stepを `continue-on-error` とし、`notify` を `always()` にする。実測で、handoff先がPDFでanalyzeが失敗すると `notify` がskipされchange Issueが届かなかった。analyzeの失敗は通知後に別stepで再表面化する。
 
-Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる（change検知日も、pipelineがindexを再取得しないため2 requestのまま）。`total_count` はfingerprintに入るがproviderの返却件数であり、`limit` 到達後は沈黙防止として機能しない。stale threshold（36h／24h／12h）、IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。
+Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる（change検知日も、pipelineがindexを再取得しないため2 requestのまま）。`total_count` はfingerprintに入るがproviderの返却件数であり、`limit` 到達後は沈黙防止として機能しない。IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。
+
+## ERS-ADR-0027
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: 通常日のstale閾値36時間は、runの間隔から導いたものではなく手で選んだ定数だった。ERS-ADR-0026で通常日のdue slotを1営業日1回に固定した結果、成功間隔は24時間となり、遅延余裕は12時間しか残らない。実測では、土曜11:55の成功を起点に月曜17:17は17.3時間で健全だが、月曜が欠けると火曜17:17で41.3時間となり閾値超過で `stopped` になる。1日欠けただけでHuman acknowledgementが必要になる設計であり、2026-08-13にevent当日閾値12時間で3日間停止した構造と同じである。ERS-ADR-0025の時点でこの遅延余裕の無さは指摘されていたが、閾値を変えず先送りした。
+
+Decision: stale閾値はrunの間隔から導く。通常日の閾値を36時間から60時間へ変更する。成功間隔24時間に対し、単発の欠落は自動で回復し、連続2日の欠落で停止する。event window（24時間）とevent当日（12時間）は成功間隔が4時間であり、それぞれ5回・2回の欠落を吸収できるため変更しない。
+
+Consequences: 監視が完全に沈黙した場合、最初に実行されたrunが停止を検知する時点は2営業日後から3営業日後へ遅くなる。observationが失敗したrunは閾値と無関係に即座にerror Issueを起票するが、workflowの `notify` は `if: always() && steps.run-monitor.outcome == 'success'` であり、`run-monitor` step自体またはそれ以前のstep（checkout、pip、`monitor-fetch-state`）が落ちた場合はIssueが出ず、stale閾値が唯一の検知経路になる。この経路の穴は本ADRの範囲外の既知の制約として記録する。acknowledgementが定常運用に入り込まなくなる。event窓の閾値、observation、robots、append-only、pendingの扱いは変更しない。
+
+なお、cronが1営業日おきにしか起動しない劣化（間隔48h）は60h閾値では健全に見える。36hでは停止していたが、その停止は「1日欠落で毎回停止する」副作用と同じ現象であり、間隔の劣化はstale閾値ではなくrun頻度そのものを見る指標で検出すべき課題として残す。
