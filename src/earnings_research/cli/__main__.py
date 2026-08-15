@@ -21,10 +21,12 @@ from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
 
+from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
     fetch_state,
     notify_state,
+    notify_workflow_failure,
     plan_registry,
     record_gap_acknowledgement,
     run_offline,
@@ -108,6 +110,19 @@ def main(argv=None) -> int:
     notify_parser.add_argument("--repository", required=True)
     notify_parser.add_argument("--receipt", required=True, type=Path)
     notify_parser.add_argument("--recorded-at", required=True)
+
+    failure_parser = subparsers.add_parser(
+        "monitor-notify-workflow-failure",
+        help="Report a monitor job that failed before committing a state bundle.",
+    )
+    failure_parser.add_argument("--target-id", required=True)
+    failure_parser.add_argument("--repository", required=True)
+    failure_parser.add_argument("--receipt", required=True, type=Path)
+    failure_parser.add_argument("--recorded-at", required=True)
+    failure_parser.add_argument("--workflow-run-url", default="")
+    failure_parser.add_argument(
+        "--reason", default="no_bundle", choices=WORKFLOW_FAILURE_REASONS
+    )
 
     analysis_parser = subparsers.add_parser(
         "analyze-earnings-document",
@@ -348,6 +363,15 @@ def main(argv=None) -> int:
             return build_handoff(args.path, args.output)
         if args.command == "monitor-verify-bundle":
             return verify_state(args.path)
+        if args.command == "monitor-notify-workflow-failure":
+            return notify_workflow_failure(
+                target_id=args.target_id,
+                repository=args.repository,
+                receipt_path=args.receipt,
+                recorded_at=args.recorded_at,
+                workflow_run_url=args.workflow_run_url,
+                reason=args.reason,
+            )
         if args.command == "monitor-notify":
             return notify_state(
                 bundle_dir=args.path,

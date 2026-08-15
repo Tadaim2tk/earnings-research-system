@@ -394,7 +394,7 @@ artifact取得jobだけに `actions: read` を付与する。`actions: write` �
 
 workflowは次を満たす。
 
-1. `workflow_dispatch` と4時間ごとのscheduled executionを持ち、毎時0分を避ける。cronはmachine truthにしない。
+1. `workflow_dispatch` と4時間ごとのscheduled executionを持ち、毎時0分を避ける。cronはmachine truthにしない。jobが失敗し通常のIssue通知が届かなかった場合は、bundleを前提としないworkflow failure通知を起票する。JST 1日1 targetにつき1 Issueへdedupし、`no_change` と読まれないようにする。plan jobの失敗とmonitor jobのcancel／skipは、in-job stepが構造上実行できないため独立jobで通知する。monitor jobのfailureは二重通知を避けるため独立jobの対象外とする。
 2. target/run単位のconcurrencyとidempotency keyでduplicate observationを抑制する。
 3. registryをvalidateし、terms、enabled、active period、Human approval gateをsource access前に検査する。
 4. previous committed stateを取得・検証する。取得不能ならstopし、初期化しない。

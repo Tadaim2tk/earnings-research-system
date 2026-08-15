@@ -12,6 +12,7 @@ from earnings_research.monitoring.models import OfflineSourceInput
 from earnings_research.monitoring.notifications import (
     NotificationReceipt,
     build_issue_plan,
+    build_workflow_failure_plan,
     deliver_issue_notification,
 )
 from earnings_research.monitoring.operations import execute_live_run, execute_offline_run
@@ -213,6 +214,39 @@ def notify_state(
             run_id=bundle.manifest.monitor_run_id,
             recorded_at=timestamp,
         )
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write(receipt_path)
+    print(json.dumps({"notification_status": receipt.status}, separators=(",", ":")))
+    return 1 if receipt.status == "failed" else 0
+
+
+def notify_workflow_failure(
+    *,
+    target_id: str,
+    repository: str,
+    receipt_path: Path,
+    recorded_at: str,
+    workflow_run_url: str = "",
+    reason: str = "no_bundle",
+) -> int:
+    """Report a monitor job that failed before any bundle existed."""
+    timestamp = _aware_datetime(recorded_at, "recorded_at")
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise ValueError("GITHUB_TOKEN is required for Issue notification")
+    plan = build_workflow_failure_plan(
+        target_id=target_id,
+        workflow_run_url=workflow_run_url,
+        occurred_at=timestamp,
+        reason=reason,
+    )
+    receipt = deliver_issue_notification(
+        client=GitHubAPIClient(repository=repository, token=token),
+        plan=plan,
+        target_id=target_id,
+        run_id="",
+        recorded_at=timestamp,
+    )
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt.write(receipt_path)
     print(json.dumps({"notification_status": receipt.status}, separators=(",", ":")))
