@@ -233,3 +233,29 @@ jobs:
       - name: Surface failed earnings analysis
         if: always() && steps.analyze.outcome == 'failure'
         run: exit 1
+      - id: failure-notice
+        name: Report a monitor job that produced no bundle
+        # The regular notification needs a verified bundle, so a job that dies
+        # before the monitor step would otherwise leave no Issue at all and the
+        # stale threshold would be the only detector.
+        if: failure() && steps.notify.outcome != 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python -m earnings_research.cli monitor-notify-workflow-failure \
+            --target-id "${{ matrix.monitor_target_id }}" \
+            --repository "$REPOSITORY" \
+            --receipt .monitor/notification/workflow_failure_receipt.json \
+            --workflow-run-url "$RUN_URL" \
+            --recorded-at "$(date --iso-8601=seconds)"
+      - name: Preserve workflow failure receipt
+        if: always() && steps.failure-notice.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ers-monitor-workflow-failure-${{ matrix.monitor_target_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .monitor/notification/workflow_failure_receipt.json
+          if-no-files-found: warn
+          retention-days: 14

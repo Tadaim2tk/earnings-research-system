@@ -20,6 +20,7 @@ from earnings_research.monitoring.handoff import build_research_handoff, write_r
 from earnings_research.monitoring.models import ObservationFailure, OfflineSourceInput, SourceObservation
 from earnings_research.monitoring.notifications import (
     build_issue_plan,
+    build_workflow_failure_plan,
     deliver_issue_notification,
 )
 from earnings_research.monitoring.offline import OfflineSourceAdapter
@@ -603,6 +604,58 @@ def test_userinfo_url_is_rejected_by_read_only_registry(tmp_path):
 
     with pytest.raises(RegistryError, match="userinfo"):
         load_registry(unsafe)
+
+
+def test_workflow_failure_plan_is_one_issue_per_target_per_day():
+    same_day = [
+        build_workflow_failure_plan(
+            target_id="ICECO_TDNET_INDEX",
+            workflow_run_url="https://example.invalid/run/%s" % index,
+            occurred_at=moment(hour, day=17),
+        )
+        for index, hour in enumerate((1, 21))
+    ]
+    other_day = build_workflow_failure_plan(
+        target_id="ICECO_TDNET_INDEX",
+        workflow_run_url="https://example.invalid/run/3",
+        occurred_at=moment(1, day=18),
+    )
+    other_target = build_workflow_failure_plan(
+        target_id="OTHER_TARGET",
+        workflow_run_url="https://example.invalid/run/4",
+        occurred_at=moment(1, day=17),
+    )
+    assert same_day[0].dedup_key == same_day[1].dedup_key
+    assert other_day.dedup_key != same_day[0].dedup_key
+    assert other_target.dedup_key != same_day[0].dedup_key
+
+
+def test_workflow_failure_plan_refuses_to_read_as_no_change():
+    plan = build_workflow_failure_plan(
+        target_id="ICECO_TDNET_INDEX",
+        workflow_run_url="https://example.invalid/run/1",
+        occurred_at=moment(9, day=17),
+    )
+    assert plan.requires_human_decision is True
+    assert "run_result: `not_recorded`" in plan.body
+    assert "Do not read it as no_change" in plan.body
+    assert "https://example.invalid/run/1" in plan.body
+    assert plan.dedup_key in plan.body
+
+
+def test_workflow_reports_a_job_that_never_produced_a_bundle():
+    raw = WORKFLOW.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(raw)
+    steps = parsed["jobs"]["monitor"]["steps"]
+    notice = [step for step in steps if step.get("id") == "failure-notice"]
+    assert len(notice) == 1
+    assert notice[0]["if"] == "failure() && steps.notify.outcome != 'success'"
+    assert "monitor-notify-workflow-failure" in notice[0]["run"]
+    # It must come after the steps that turn an internal failure into a job
+    # failure, otherwise failure() is still false when it is evaluated.
+    order = [step.get("id") or step.get("name") for step in steps]
+    assert order.index("failure-notice") > order.index("Surface failed earnings analysis")
+    assert order.index("failure-notice") > order.index("Surface exhausted notification retry")
 
 
 def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():

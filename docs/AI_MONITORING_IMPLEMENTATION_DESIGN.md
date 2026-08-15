@@ -395,6 +395,7 @@ artifact取得jobだけに `actions: read` を付与する。`actions: write` �
 workflowは次を満たす。
 
 1. `workflow_dispatch` と4時間ごとのscheduled executionを持ち、毎時0分を避ける。cronはmachine truthにしない。
+1a. jobが失敗し通常のIssue通知が届かなかった場合は、bundleを前提としないworkflow failure通知を起票する。1日1 targetにつき1 Issueへdedupし、本文で `not_recorded` を明示して `no_change` と読まれないようにする。
 2. target/run単位のconcurrencyとidempotency keyでduplicate observationを抑制する。
 3. registryをvalidateし、terms、enabled、active period、Human approval gateをsource access前に検査する。
 4. previous committed stateを取得・検証する。取得不能ならstopし、初期化しない。
