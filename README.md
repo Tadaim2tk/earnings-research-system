@@ -64,7 +64,7 @@ python -m earnings_research.cli show-schema pre_earnings_baseline
 
 The monitoring core remains deterministic and can be exercised without network access. The live-source adapter uses HTTPX/HTTPCore with fixed DNS, request, job, and response-size limits, manual same-origin redirects, sanitized failures, resolved-IP validation, a robots check, and an authorization gate before page access. It is connected to the scheduled workflow for activated production targets.
 
-The read-only production registry at `data/config/monitor_targets.csv` contains three activated ICECO targets authorized by `system_policy:public-web-low-frequency-v1`. Each target is processed independently and stores metadata and comparison digests, not raw page bodies.
+The read-only production registry at `data/config/monitor_targets.csv` contains one activated ICECO XJ Storage disclosure-list target authorized by the unchanged `system_policy:public-web-low-frequency-v1` fields inherited from the former ICECO results target. It stores only the newest disclosure's title, JST publication time, PDF URL, and comparison fingerprint, not the JSON body or older list items.
 
 The fictional offline workflow can be exercised with `workflow_dispatch`. Operational entry points are available under `python -m earnings_research.cli monitor-*`; they never write the registry or push repository contents. CI is fixed to Python 3.11.9. State artifacts use 14-day retention and are temporary pilot persistence, not permanent machine truth. Missing retained state fails closed outside an exact Human-approved initialization.
 

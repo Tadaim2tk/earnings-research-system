@@ -7,7 +7,7 @@ import json
 import re
 import ssl
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.message import Message
 from html.parser import HTMLParser
 from typing import Callable, Dict, Mapping, Optional, Tuple
@@ -58,6 +58,8 @@ _SECRET_QUERY_KEYS = {
 }
 _ALLOWED_CHARSETS = {"utf-8", "shift_jis", "cp932", "euc_jp", "iso2022_jp"}
 _ALLOWED_STABLE_METADATA_KEYS = {"category", "document_type", "language", "period"}
+_DISCLOSURE_LIST_CATEGORY = "disclosure_list_json"
+_JST = timezone(timedelta(hours=9))
 
 
 class LiveSourcePolicyError(ValueError):
@@ -167,6 +169,7 @@ class LiveSourceAdapter:
                 current_url=current_url,
                 approved_origin=approved_origin,
                 context=context,
+                source_category=target.get("source_category"),
             )
         except LiveSourcePolicyError as exc:
             return _failure(
@@ -213,6 +216,7 @@ class LiveSourceAdapter:
         approved_origin: Tuple[str, str, int],
         context: LiveSourceContext,
         robots_path: Optional[str] = None,
+        source_category: Optional[str] = None,
     ) -> ObservationResult:
         started = self._monotonic()
         visited = set()
@@ -349,6 +353,7 @@ class LiveSourceAdapter:
                         context,
                         deadline=started + OVERALL_BUDGET_SECONDS,
                         robots_path=robots_path,
+                        source_category=source_category,
                     )
             except httpx.InvalidURL:
                 return _failure(
@@ -391,6 +396,7 @@ class LiveSourceAdapter:
         *,
         deadline: float,
         robots_path: Optional[str] = None,
+        source_category: Optional[str] = None,
     ) -> ObservationResult:
         content_type_header = response.headers.get("content-type", "")
         media_type, charset = _parse_content_type(content_type_header)
@@ -476,7 +482,11 @@ class LiveSourceAdapter:
                     etag=_optional_header(response.headers.get("etag")),
                     last_modified=_optional_header(response.headers.get("last-modified")),
                 )
-            parsed = _parse_html(text) if media_type == "text/html" else _parse_json(text)
+            parsed = (
+                _parse_html(text)
+                if media_type == "text/html"
+                else _parse_json(text, source_category=source_category)
+            )
         except UnicodeError:
             return _failure("parse_error", "response charset decoding failed", source_url, context.observed_at)
         except TimestampError:
@@ -490,9 +500,11 @@ class LiveSourceAdapter:
             return _failure("parse_error", "response metadata parsing failed", source_url, context.observed_at)
 
         actual_length = len(body)
-        # Keep only a digest for later comparisons; raw response content is not
-        # part of the persisted monitoring bundle.
-        parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
+        # Generic pages keep only a digest for later comparisons. Disclosure
+        # lists fingerprint their latest-item metadata instead; raw content is
+        # never part of the persisted monitoring bundle.
+        if source_category != _DISCLOSURE_LIST_CATEGORY:
+            parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
         length_mismatch = isinstance(declared_length, int) and declared_length != actual_length
         previous = context.previous_checkpoint
         etag = _optional_header(response.headers.get("etag"))
@@ -751,10 +763,12 @@ def _parse_html(text: str) -> Dict:
     }
 
 
-def _parse_json(text: str) -> Dict:
+def _parse_json(text: str, *, source_category: Optional[str] = None) -> Dict:
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError("JSON root must be an object")
+    if source_category == _DISCLOSURE_LIST_CATEGORY:
+        return _parse_disclosure_list_json(loaded)
     recognized = {"title", "document_id", "published_at", "corrected", "updated", "stable_metadata"}
     if not recognized.intersection(loaded):
         raise ValueError("JSON has no recognized metadata")
@@ -784,6 +798,48 @@ def _parse_json(text: str) -> Dict:
         "published_at": published_at,
         "replacement_suspected": _truthy(loaded.get("corrected")) or _truthy(loaded.get("updated")),
         "stable_metadata": filtered_metadata,
+    }
+
+
+def _parse_disclosure_list_json(loaded: Dict) -> Dict:
+    items = loaded.get("items")
+    if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+        raise ValueError("disclosure list must contain a first item")
+    latest = items[0]
+    title = _clean_text(str(latest.get("title") or ""))
+    if not _is_meaningful_text(title):
+        raise ValueError("latest disclosure title is missing or invalid")
+    publish_date = latest.get("publishDate")
+    if publish_date in (None, ""):
+        raise ValueError("latest disclosure publishDate is missing")
+    try:
+        published_at = datetime.strptime(str(publish_date), "%Y/%m/%d %H:%M:%S")
+    except ValueError as exc:
+        raise TimestampError from exc
+    # XJ Storage omits a timezone from publishDate. For this source category only,
+    # the documented provider timestamp is interpreted explicitly as Japan time.
+    published_at = published_at.replace(tzinfo=_JST)
+    files = latest.get("files")
+    if not isinstance(files, list):
+        raise ValueError("latest disclosure files are missing")
+    pdf_url = None
+    for file_entry in files:
+        if not isinstance(file_entry, dict) or not str(file_entry.get("type", "")).startswith("PDF"):
+            continue
+        pdf_url = _validated_optional_metadata(file_entry.get("url"), "PDF URL")
+        if pdf_url is not None:
+            break
+    if pdf_url is None:
+        raise ValueError("latest disclosure PDF URL is missing")
+    parts = urlsplit(pdf_url)
+    if parts.scheme.lower() != "https" or not parts.hostname or parts.username or parts.password:
+        raise ValueError("latest disclosure PDF URL is invalid")
+    return {
+        "title": title,
+        "document_id": None,
+        "published_at": published_at,
+        "replacement_suspected": False,
+        "stable_metadata": {"latest_pdf_url": pdf_url},
     }
 
 

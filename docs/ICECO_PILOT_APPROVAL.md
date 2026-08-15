@@ -36,15 +36,13 @@ raw_storage_status = metadata_only
 
 上記確認範囲に自動accessの明示禁止はない。毎回page取得前にrobots規則を確認し、明示禁止または確認不能ならpage取得へ進まずfail-closedとする。
 
-## Activated Targets
+## Activated Target Correction (2026-08-15)
 
 | target | URL | role |
 | --- | --- | --- |
-| `ICECO_IR_CALENDAR` | https://www.iceco.co.jp/ir/calendar/ | 発表予定日と日程変更の検知 |
-| `ICECO_IR_ROOT` | https://www.iceco.co.jp/ir/ | IR新着導線の検知 |
-| `ICECO_RESULTS` | https://www.iceco.co.jp/ir/results/ | 決算短信の追加・差替え検知 |
+| `ICECO_RESULTS` | https://www.xj-storage.jp/public-list/GetList2.aspx?company=AS04527&len=10000&output=json | XJ Storage資料一覧の最新1件を検知 |
 
-[IR Library](https://www.iceco.co.jp/ir/library/) は上記への入口が重複するため、初回構成では独立targetにしない。取りこぼしが実測された場合に追加する。
+旧3 targetの静的HTMLには動的に埋め込まれるPDF資料情報がなく、2026-08-13の決算短信を検知できなかったため1 targetへ置換した。重複した無効な取得を残さず、資料追加を直接表す公開JSONだけを低頻度で確認する。`automated_access_permitted`、`activation_state`、`terms_review_state` その他のHuman／system-policy承認欄は旧 `ICECO_RESULTS` rowの値をそのまま継承し、新しいHuman承認を記録しない。
 
 ```text
 company_name = 株式会社アイスコ
@@ -58,15 +56,15 @@ schedule_profile = prospective_event_v1
 
 ## Frequency And Isolation
 
-workflowは平日09:17、15:17、21:17 JSTに起動する。通常日は09:17の1回だけを実行し、event dayは3枠を実行する。event接近時も少なくとも営業日1回を維持する。終了日は固定せず、例外検知または明示停止まで低頻度で継続する。高頻度polling、crawl、bulk downloadは行わない。
+workflowはJST 01:17、05:17、09:17、13:17、17:17、21:17に起動する。通常日は09:17の1回だけを実行し、event windowとevent dayは最大6枠を実行する。4時間間隔により、隣接runの欠落や遅延が重ならない場合は単発の最大8時間遅延まで前回成功から12時間以内となる。8時間超または連続欠落では従来どおりstale停止する。36h / 24h / 12hの閾値は変更しない。高頻度polling、crawl、bulk downloadは行わない。
 
 各targetは独立jobと独立 `LiveSourceAdapter` instanceで処理する。ICECO以外の会社とDNS timeout stateやmonitor stateを共有しない。
 
 ## Storage And Change Detection
 
-raw HTML、PDF、screenshot、response bodyをartifactまたはrepositoryへ保存しない。保存対象は監視契約、URL、取得時刻、title、公開metadata、HTTP header、content length、SHA-256比較値、run/checkpoint、差分状態だけである。このSHA-256はmonitoring用fingerprintであり、formal evidenceのcontent hashではない。
+raw HTML、JSON、PDF、screenshot、response bodyをartifactまたはrepositoryへ保存しない。XJ Storage一覧では先頭の最新1件のtitle、publishDate、最初のPDF URLだけをmetadataとして保持し、全件一覧や本文digestをfingerprintへ含めない。timezone表記のない `YYYY/MM/DD HH:MM:SS` のpublishDateは、このsource categoryに限りJSTとして解釈する。空一覧、title／publishDate欠落、timestamp不正は推測せずparse failureとする。このSHA-256はmonitoring用fingerprintであり、formal evidenceのcontent hashではない。
 
-同じtitleのまま資料が追加された場合も、page responseのSHA-256比較値が変わるため `change_detected` とする。headerだけが変わり本文比較値が同じ場合は `content_ambiguous` とし、`no_change`へ落とさない。
+新しい資料が先頭へ追加されると最新1件metadataのSHA-256 fingerprintが変わり、`change_detected` とする。headerだけが変わりfingerprintが同じ場合は `content_ambiguous` とし、`no_change`へ落とさない。
 
 ## Failure And Handoff
 

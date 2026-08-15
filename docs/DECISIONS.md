@@ -375,3 +375,15 @@ Context: stale gapを暦時間で測ると週末だけで閾値を超え、event
 Decision: stale経過時間は土曜・日曜を除外し、祝日calendarは追加しない。event 5営業日前から当日までは既存3 cron slotをdueとする。独立 `monitor_gap_acknowledgement` schemaを追加し、有効なappend-only tailの `acknowledged_gap_end` だけを次回stale評価の基準にできる。未来gap、解決済みgapの新規再利用、self／missing／二重supersessionを拒否する。acknowledgement後もrobots確認とsource observationを必須とし、pending changeを解除しない。
 
 Consequences: artifact削除や再初期化なしでstale停止から通常観測を再開できる。acknowledgementは監視健全性の履歴に限定され、formal evidence、baseline、event status、scoring、売買判断へ影響しない。threshold値、registry、外部network境界は変更しない。event_window初日とevent当日の朝slotは閾値到達時刻とほぼ一致して遅延余裕がほぼゼロであり、Actionsの通常遅延でもacknowledgementが定常的に必要になり得る。恒久対応は閾値を本ADRで変更せず、別ADRで決定する。
+
+## ERS-ADR-0026
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: ICECOの静的IR HTMLはXJ Storage資料一覧を動的表示するため、PDF追加をresponse metadataまたは本文digestで検知できなかった。またevent当日の3枠は12時間thresholdに対してActions遅延余裕がなく、実測13時間gapでstale停止した。
+
+Decision: registryの旧3 targetを、旧 `ICECO_RESULTS` の承認欄とidentityを継承する公開XJ Storage JSON一覧1 targetへ置換する。新しい `disclosure_list_json` categoryだけが先頭1件のtitle、publishDate、PDF URLを解釈し、全件やraw JSONを保存しない。timezoneなしpublishDateはprovider固有contractとしてJSTと明示的に解釈し、欠落・不正値はfail-closedにする。cronは4時間間隔の6枠とし、event window／event dayのみ最大6回、平常日は09:17の1回に限定する。stale thresholdは変更しない。
+
+Consequences: 新資料が先頭へ追加されれば最新metadata fingerprintが必ず変わる。無効な静的targetへの重複accessを除き、新規Human承認は記録しない。4時間間隔では、連続欠落がなく単発runだけが遅れる場合、最大8時間の遅延まで前回成功から12時間以内であり、8時間超または連続欠落は従来どおり停止する。IP pinning、TLS SNI、DNS rebinding、redirect、robots、append-only bundle、pending、stale acknowledgementの境界は変更しない。

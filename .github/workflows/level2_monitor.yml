@@ -2,7 +2,7 @@ name: ERS Level 2 Monitor
 
 on:
   schedule:
-    - cron: "17 0,6,12 * * 1-5"
+    - cron: "17 0,4,8,12,16,20 * * *"
   workflow_dispatch:
     inputs:
       source_mode:

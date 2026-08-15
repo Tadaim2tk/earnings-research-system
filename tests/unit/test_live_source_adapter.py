@@ -14,6 +14,7 @@ from earnings_research.monitoring.models import (
     ObservationFailure,
     SourceObservation,
 )
+from earnings_research.monitoring.fingerprint import build_metadata_fingerprint
 from earnings_research.monitoring.registry import load_registry
 from earnings_research.monitoring.runtime import MonitorRuntime
 
@@ -201,6 +202,70 @@ def test_200_json_uses_only_recognized_generic_metadata():
     assert result.stable_metadata["period"] == "FY2026"
     assert len(result.stable_metadata["page_content_sha256"]) == 64
     assert "token" not in result.stable_metadata
+
+
+def disclosure_payload(title="2027年3月期第1四半期決算短信", published="2026/08/13 15:30:00"):
+    return {
+        "length": "1",
+        "items": [
+            {
+                "title": title,
+                "publishDate": published,
+                "files": [
+                    {
+                        "type": "PDF-GENERAL",
+                        "url": "https://contents.xj-storage.jp/xcontents/AS04527/latest.pdf",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def observe_disclosure_list(payload):
+    row = target()
+    row["source_category"] = "disclosure_list_json"
+    return observe_with(
+        lambda _request: httpx.Response(
+            200, json=payload, headers={"content-type": "application/json"}
+        ),
+        target_row=row,
+    )
+
+
+def test_disclosure_list_fingerprint_uses_only_latest_item_metadata():
+    result = observe_disclosure_list(disclosure_payload())
+    assert isinstance(result, SourceObservation)
+    assert result.title == "2027年3月期第1四半期決算短信"
+    assert result.published_at == datetime(2026, 8, 13, 15, 30, tzinfo=JST)
+    assert result.stable_metadata == {
+        "latest_pdf_url": "https://contents.xj-storage.jp/xcontents/AS04527/latest.pdf"
+    }
+    assert len(build_metadata_fingerprint(result)) == 64
+
+
+def test_disclosure_list_fingerprint_changes_when_new_item_is_prepended():
+    previous_payload = disclosure_payload("Previous disclosure", "2026/08/01 15:00:00")
+    current_payload = disclosure_payload()
+    current_payload["items"].append(previous_payload["items"][0])
+    previous = observe_disclosure_list(previous_payload)
+    current = observe_disclosure_list(current_payload)
+    assert build_metadata_fingerprint(previous) != build_metadata_fingerprint(current)
+
+
+@pytest.mark.parametrize(
+    "payload,expected_code",
+    [
+        ({"length": "0", "items": []}, "parse_error"),
+        ({"length": "1", "items": [{"publishDate": "2026/08/13 15:30:00"}]}, "parse_error"),
+        ({"length": "1", "items": [{"title": "Disclosure"}]}, "parse_error"),
+        (disclosure_payload(published="not-a-timestamp"), "timestamp_parse_error"),
+    ],
+)
+def test_disclosure_list_rejects_missing_or_invalid_latest_metadata(payload, expected_code):
+    result = observe_disclosure_list(payload)
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == expected_code
 
 
 def test_same_origin_redirect_is_followed_without_cookie_carryover():
