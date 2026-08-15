@@ -662,10 +662,19 @@ def test_delayed_morning_run_is_still_due(hour, minute):
 
 
 @pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])
-def test_normal_day_more_than_five_business_days_before_event_uses_morning_only(hour):
+def test_normal_day_more_than_five_business_days_before_event_uses_one_slot(hour):
     row = target()
     row["event_date"] = "2026-08-21"
-    expected = [row] if hour == 9 else []
+    expected = [row] if hour == 17 else []
+    assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
+
+
+@pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])
+def test_target_without_event_date_uses_one_after_close_slot(hour):
+    """The TDnet index target carries no event date and must stay at one check per day."""
+    row = target()
+    row["event_date"] = ""
+    expected = [row] if hour == 17 else []
     assert active_target_plan([row], planned_at=moment(hour, day=12)) == expected
 
 

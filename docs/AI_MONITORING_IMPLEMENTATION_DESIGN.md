@@ -377,7 +377,7 @@ profileのminimum semantics:
 
 exchange calendar、holiday、event-specific windows、最大許容gapはprofile定義の責務とする。GitHub Actions cronは起動機構でありdomain scheduleの正本ではない。scheduled runは厳密時刻を保証しないため、各runでprofile上のexpected previous observation windowとcheckpointの `last_success_at` を比較する。
 
-stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。通常時36時間、event 5営業日前から前日24時間、event当日12時間を上限とする。経過時間から土曜・日曜を除き、休日calendarを増設しないpilot最小実装とする。event windowとevent当日はJST 1:17、5:17、9:17、13:17、17:17、21:17の最大6 slot、通常日は9:17 slotだけをdueとする。4時間間隔なので、隣接runの欠落や遅延が重ならない前提では、1 runが最大8時間遅延しても前回成功から12時間以内に収まる。8時間を超える遅延、連続欠落、source failureは従来どおりstale停止し、閾値36h / 24h / 12h自体は変更しない。event dateが必要なのに不明なら最も厳しい12時間を使う。閾値超過は `ObservationFailure(state_unavailable)`、`target_state=stopped`、Human通知へ進む。有効なgap acknowledgementがあれば、その `acknowledged_gap_end` を次回stale評価の基準にできるが、観測自体は省略しない。
+stale gapがprofileの最大許容値を超えた場合は `no_change` にしない。通常時36時間、event 5営業日前から前日24時間、event当日12時間を上限とする。経過時間から土曜・日曜を除き、休日calendarを増設しないpilot最小実装とする。event windowとevent当日はJST 1:17、5:17、9:17、13:17、17:17、21:17の最大6 slot、通常日は引け後の17:17 slotだけをdueとする。通常日枠を引け後に置くのは、開示の多い15時台の当日中に観測を1回通すためであり、1日あたりの取得回数は増やさない。4時間間隔なので、隣接runの欠落や遅延が重ならない前提では、1 runが最大8時間遅延しても前回成功から12時間以内に収まる。8時間を超える遅延、連続欠落、source failureは従来どおりstale停止し、閾値36h / 24h / 12h自体は変更しない。event dateが必要なのに不明なら最も厳しい12時間を使う。閾値超過は `ObservationFailure(state_unavailable)`、`target_state=stopped`、Human通知へ進む。有効なgap acknowledgementがあれば、その `acknowledged_gap_end` を次回stale評価の基準にできるが、観測自体は省略しない。
 
 ## GitHub Actions Contract
 
@@ -652,7 +652,9 @@ PR Bでは最低限次のfixtureを含める。
 
 ## ICECO Activated Targets
 
-静的HTMLで資料追加を観測できなかった3 targetは、既存 `ICECO_RESULTS` identityと承認欄を維持したXJ Storage JSON資料一覧1 targetへ置換する。`disclosure_list_json` は先頭の最新1件だけを読み、`title`、`publishDate`、PDF URLだけをfingerprint metadataにする。XJ Storageのtimezone表記なし `publishDate` は、このsource categoryに限りJSTと明示的に仮定する。空一覧、title／publishDate欠落、timestamp不正は推測せず失敗し、raw JSONや全件一覧を保存しない。詳細は [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) を正本とする。
+静的HTMLで資料追加を観測できなかった3 targetは `retired` として終了記録を残し、公開TDnet適時開示indexを読む新target `ICECO_TDNET_INDEX` へ移す。旧targetを行ごと削除するとcheckpointとartifactが孤児化するため、`enabled=false`、`activation_state=retired`、`active_until` を記録して残す。
+
+`tdnet_index_json` categoryは先頭の最新1件だけを読み、`id`、`title`、`pubdate`、`document_url` と一覧件数をfingerprint metadataにする。先頭以外の変化がbyte長不変で沈黙しないよう、`total_count` をfingerprintに含める。timezone表記のない `pubdate` は、このsource categoryに限りJSTと明示的に仮定する（providerがミラーする東証開示時刻に一致）。providerは全formatを `text/html` で返すため、parserはmedia typeではなくHuman宣言のcategoryで選ぶ。空一覧、`id`／`title`／`pubdate` 欠落、timestamp不正、非https document URLは推測せず失敗し、raw JSONや全件一覧を保存しない。詳細は [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) を正本とする。
 
 ## Pull Request Sequence
 

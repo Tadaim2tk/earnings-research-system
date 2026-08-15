@@ -312,6 +312,12 @@ class MonitorRuntime:
                     "last_seen_document_id": observation.document_id or "",
                     "last_seen_title": observation.title or "",
                     "last_seen_published_at": _iso(observation.published_at) if observation.published_at else "",
+                    # Carried so the research handoff can reach the disclosure
+                    # itself. Only the provider-published URL is kept, never the
+                    # document bytes.
+                    "last_seen_document_url": observation.stable_metadata.get(
+                        "latest_document_url", ""
+                    ),
                     "metadata_fingerprint": fingerprint_after,
                     "fingerprint_version": FINGERPRINT_VERSION,
                     "observed_etag": observation.etag or "",
@@ -336,6 +342,7 @@ def _empty_checkpoint(target_id: str, recorded_by: str) -> Dict[str, str]:
         "last_seen_document_id": "",
         "last_seen_title": "",
         "last_seen_published_at": "",
+        "last_seen_document_url": "",
         "metadata_fingerprint": "",
         "fingerprint_version": "",
         "observed_etag": "",

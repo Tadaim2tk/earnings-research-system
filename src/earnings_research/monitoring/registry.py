@@ -64,8 +64,10 @@ def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
             return True
         if local.date() < parsed_event_date and _business_days_until(local.date(), parsed_event_date) <= 5:
             return True
-    # Only the 09:17 slot owns the normal-day window, preserving one request per day.
-    return 9 <= local.hour < 13
+    # Only the 17:17 slot owns the normal-day window, preserving one request per
+    # day. It follows the close, so a same-day disclosure is seen the same day
+    # instead of waiting for the next morning.
+    return 17 <= local.hour < 21
 
 
 def find_target(rows: List[Dict[str, str]], monitor_target_id: str) -> Dict[str, str]:

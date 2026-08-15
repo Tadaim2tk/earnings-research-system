@@ -382,8 +382,18 @@ Date: 2026-08-15
 
 Status: Accepted
 
-Context: ICECOの静的IR HTMLはXJ Storage資料一覧を動的表示するため、PDF追加をresponse metadataまたは本文digestで検知できなかった。またevent当日の3枠は12時間thresholdに対してActions遅延余裕がなく、実測13時間gapでstale停止した。
+Context: ICECOの静的IR HTMLはXJ Storage資料一覧を動的表示するため、PDF追加をresponse metadataまたは本文digestで検知できず、2026-08-13 15:30の第1四半期決算短信を見逃した。代替候補のrobots.txtを実測したところ、`www.xj-storage.jp`、`contents.xj-storage.jp`、`www.release.tdnet.info` はいずれも `User-Agent: *` / `Disallow: /` で全パスの自動accessを明示禁止していた。pilot方針は明示禁止を検出したsourceを停止・例外報告とするため、この2案は採用できない。`webapi.yanoshin.jp` は `Allow: /` に加え、AI agent向けの `llms.txt`（2026-02-09公開）で認証不要・利用目的・頻度配慮を明示しており、`system_policy:public-web-low-frequency-v1` の条件を満たす。
 
-Decision: registryの旧3 targetを、旧 `ICECO_RESULTS` の承認欄とidentityを継承する公開XJ Storage JSON一覧1 targetへ置換する。新しい `disclosure_list_json` categoryだけが先頭1件のtitle、publishDate、PDF URLを解釈し、全件やraw JSONを保存しない。timezoneなしpublishDateはprovider固有contractとしてJSTと明示的に解釈し、欠落・不正値はfail-closedにする。cronは4時間間隔の6枠とし、event window／event dayのみ最大6回、平常日は09:17の1回に限定する。stale thresholdは変更しない。
+Decision: 監視対象を公開TDnet適時開示index（`webapi.yanoshin.jp`、`json2` format、`limit=10`）の新target `ICECO_TDNET_INDEX` へ移す。旧3 targetはregistryから削除せず `retired` として終了記録を残し、checkpoint／artifactの孤児化を避ける。target IDを維持したまま別sourceへ差し替えると「監視対象が変わった」ことが本物の資料追加と区別できないchange通知になるため、新IDで開始する。`tdnet_index_json` categoryは先頭1件の `id`／`title`／`pubdate`／`document_url` と一覧 `total_count` だけをfingerprintに入れ、raw JSONを保存しない。providerが全formatを `text/html` で返すため、parserはmedia typeではなくcategoryで選ぶ。timezoneなし `pubdate` はJSTと明示的に解釈する。
 
-Consequences: 新資料が先頭へ追加されれば最新metadata fingerprintが必ず変わる。無効な静的targetへの重複accessを除き、新規Human承認は記録しない。4時間間隔では、連続欠落がなく単発runだけが遅れる場合、最大8時間の遅延まで前回成功から12時間以内であり、8時間超または連続欠落は従来どおり停止する。IP pinning、TLS SNI、DNS rebinding、redirect、robots、append-only bundle、pending、stale acknowledgementの境界は変更しない。
+`www.xj-storage.jp`／`www.release.tdnet.info` の明示禁止は、pilot方針の定めるHuman例外案件として報告する。決算短信PDF本体はこの2 hostにしか存在しないため、検知は自動化されるが**document本体の自動取得は現時点で許可されたsourceが無い**。
+
+Decision（付随）: robots.txt取得は `Accept: text/plain, */*` を使う。実測で `www.xj-storage.jp` は監視の既定Acceptに406を返し、robots方針が読めないことが `http_error` に化けていた。robots経路の非200（404／410を除く）は `terms_not_approved` とし、読めないrobotsを許可として扱わない。
+
+Decision（付随）: 通常日のdue slotを09:17から引け後の17:17へ移す。1日1回という頻度は変えず、15時台の開示を当日中に観測する。
+
+Decision（付随）: checkpointに `last_seen_document_url` を追加し、research handoffへ渡す。document byteは保存しない。
+
+Decision（付随）: workflowの `analyze` stepを `continue-on-error` とし、`notify` を `always()` にする。実測で、handoff先がPDFでanalyzeが失敗すると `notify` がskipされchange Issueが届かなかった。analyzeの失敗は通知後に別stepで再表面化する。
+
+Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる。stale threshold（36h／24h／12h）、IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。
