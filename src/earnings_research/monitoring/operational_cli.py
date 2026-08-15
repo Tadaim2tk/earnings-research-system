@@ -227,6 +227,7 @@ def notify_workflow_failure(
     receipt_path: Path,
     recorded_at: str,
     workflow_run_url: str = "",
+    reason: str = "no_bundle",
 ) -> int:
     """Report a monitor job that failed before any bundle existed."""
     timestamp = _aware_datetime(recorded_at, "recorded_at")
@@ -237,6 +238,7 @@ def notify_workflow_failure(
         target_id=target_id,
         workflow_run_url=workflow_run_url,
         occurred_at=timestamp,
+        reason=reason,
     )
     receipt = deliver_issue_notification(
         client=GitHubAPIClient(repository=repository, token=token),

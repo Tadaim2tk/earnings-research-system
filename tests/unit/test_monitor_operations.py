@@ -21,6 +21,7 @@ from earnings_research.monitoring.models import ObservationFailure, OfflineSourc
 from earnings_research.monitoring.notifications import (
     build_issue_plan,
     build_workflow_failure_plan,
+    WORKFLOW_FAILURE_REASONS,
     deliver_issue_notification,
 )
 from earnings_research.monitoring.offline import OfflineSourceAdapter
@@ -630,6 +631,64 @@ def test_workflow_failure_plan_is_one_issue_per_target_per_day():
     assert other_target.dedup_key != same_day[0].dedup_key
 
 
+def test_workflow_failure_day_is_japan_time_not_runner_utc():
+    """The runner records UTC; the dedup day must still be a JST calendar day."""
+    utc = timezone.utc
+    before = build_workflow_failure_plan(
+        target_id="T", workflow_run_url="", occurred_at=datetime(2026, 8, 17, 14, 59, 59, tzinfo=utc)
+    )
+    after = build_workflow_failure_plan(
+        target_id="T", workflow_run_url="", occurred_at=datetime(2026, 8, 17, 15, 0, 0, tzinfo=utc)
+    )
+    same_jst_day = build_workflow_failure_plan(
+        target_id="T", workflow_run_url="", occurred_at=datetime(2026, 8, 18, 14, 0, 0, tzinfo=utc)
+    )
+    assert before.dedup_key != after.dedup_key
+    assert after.dedup_key == same_jst_day.dedup_key
+
+
+@pytest.mark.parametrize("reason", WORKFLOW_FAILURE_REASONS)
+def test_every_workflow_failure_reason_forbids_a_no_change_reading(reason):
+    plan = build_workflow_failure_plan(
+        target_id="T", workflow_run_url="", occurred_at=moment(9, day=17), reason=reason
+    )
+    assert plan.requires_human_decision is True
+    assert "Do not read it as no_change" in plan.body
+
+
+def test_delivery_failure_does_not_claim_the_run_observed_nothing():
+    """The bundle exists when only Issue delivery failed."""
+    plan = build_workflow_failure_plan(
+        target_id="T", workflow_run_url="", occurred_at=moment(9, day=17),
+        reason="notification_failed",
+    )
+    assert "run_result: `recorded_but_not_notified`" in plan.body
+    assert "not_recorded" not in plan.body
+    assert "observed nothing" not in plan.body
+    assert "artifacts" in plan.body
+
+
+def test_unknown_workflow_failure_reason_is_rejected():
+    with pytest.raises(ValueError, match="reason"):
+        build_workflow_failure_plan(
+            target_id="T", workflow_run_url="", occurred_at=moment(9, day=17), reason="made_up"
+        )
+
+
+def test_pipeline_failure_job_covers_what_the_in_job_report_cannot():
+    parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = parsed["jobs"]["report-pipeline-failure"]
+    condition = " ".join(job["if"].split())
+    assert job["needs"] == ["plan", "monitor"]
+    assert "needs.plan.result != 'success'" in condition
+    assert "needs.monitor.result == 'cancelled'" in condition
+    # A failed monitor job already reports itself, so covering it here would
+    # deliver two Issues for one failure.
+    assert "needs.monitor.result == 'failure'" not in condition
+    assert job["permissions"]["issues"] == "write"
+    assert any("--reason pipeline" in str(step.get("run", "")) for step in job["steps"])
+
+
 def test_workflow_failure_plan_refuses_to_read_as_no_change():
     plan = build_workflow_failure_plan(
         target_id="ICECO_TDNET_INDEX",
@@ -651,6 +710,10 @@ def test_workflow_reports_a_job_that_never_produced_a_bundle():
     assert len(notice) == 1
     assert notice[0]["if"] == "failure() && steps.notify.outcome != 'success'"
     assert "monitor-notify-workflow-failure" in notice[0]["run"]
+    assert notice[0]["continue-on-error"] is True
+    assert "--workflow-run-url" in notice[0]["run"]
+    # A delivery-only failure must not be reported as an unobserved run.
+    assert "notification_failed" in notice[0]["env"]["REASON"]
     # It must come after the steps that turn an internal failure into a job
     # failure, otherwise failure() is still false when it is evaluated.
     order = [step.get("id") or step.get("name") for step in steps]

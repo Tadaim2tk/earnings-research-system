@@ -77,18 +77,55 @@ def build_issue_plan(bundle: VerifiedMonitorBundle) -> Optional[IssueNotificatio
     return IssueNotificationPlan(dedup_key, title, body, update, requires_human)
 
 
+WORKFLOW_FAILURE_REASONS = ("no_bundle", "notification_failed", "pipeline")
+
+_WORKFLOW_FAILURE_TEXT = {
+    "no_bundle": (
+        "not_recorded",
+        "the monitor job failed before it committed a state bundle",
+        (
+            "This run observed nothing. Do not read it as no_change. Restore the"
+            " job, then re-run the target before the stale threshold expires."
+        ),
+    ),
+    "notification_failed": (
+        "recorded_but_not_notified",
+        "the state bundle was committed but Issue delivery failed three times",
+        (
+            "The observation exists in this run's artifacts and may contain a"
+            " change. Do not read it as no_change. Read the state artifact, then"
+            " restore Issue delivery."
+        ),
+    ),
+    "pipeline": (
+        "not_recorded",
+        "the monitoring workflow failed before any target was observed",
+        (
+            "No target ran. Do not read it as no_change. Restore the workflow,"
+            " then re-run every enabled target before the stale threshold"
+            " expires."
+        ),
+    ),
+}
+
+
 def build_workflow_failure_plan(
     *,
     target_id: str,
     workflow_run_url: str,
     occurred_at: datetime,
+    reason: str = "no_bundle",
 ) -> IssueNotificationPlan:
-    """Announce a monitor job that never produced a verifiable bundle.
+    """Announce a monitor run that produced no notification of its own.
 
-    The regular notification needs a bundle, so a job that dies before the
-    monitor step leaves no Issue at all and the stale threshold becomes the
-    only detector. One Issue per target per day; repeats become comments.
+    The regular notification needs a verified bundle, so a job that dies before
+    the monitor step leaves no Issue at all and the stale threshold becomes the
+    only detector. One Issue per target per JST day; repeats become comments.
+    The runner records UTC, so the day is converted explicitly.
     """
+    if reason not in _WORKFLOW_FAILURE_TEXT:
+        raise ValueError("unknown workflow failure reason")
+    run_result, cause, next_action = _WORKFLOW_FAILURE_TEXT[reason]
     episode_id = occurred_at.astimezone(_JST).date().isoformat()
     dedup_key = _dedup_key(target_id, "workflow_failure", episode_id)
     details = "\n".join(
@@ -96,15 +133,11 @@ def build_workflow_failure_plan(
             "- monitor_target_id: `%s`" % target_id,
             "- occurred_at: `%s`" % occurred_at.isoformat(),
             "- workflow_run: %s" % (workflow_run_url or "unknown"),
-            "- run_result: `not_recorded`",
-            "- what_changed_or_error: the monitor job failed before it committed a state bundle",
+            "- run_result: `%s`" % run_result,
+            "- what_changed_or_error: %s" % cause,
             "- confidence: `none`",
             "- requires_human_decision: `true`",
-            (
-                "- recommended_next_action: This run observed nothing. Do not read it as"
-                " no_change. Restore the job, then re-run the target before the stale"
-                " threshold expires."
-            ),
+            "- recommended_next_action: %s" % next_action,
             "- dedup_key: `%s`" % dedup_key,
         ]
     )

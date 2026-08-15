@@ -244,12 +244,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TARGET_ID: ${{ matrix.monitor_target_id }}
+          # The bundle exists when only Issue delivery failed, so the report
+          # must not claim the run observed nothing.
+          REASON: ${{ steps.notify.outcome == 'failure' && 'notification_failed' || 'no_bundle' }}
         run: |
           python -m earnings_research.cli monitor-notify-workflow-failure \
-            --target-id "${{ matrix.monitor_target_id }}" \
+            --target-id "$TARGET_ID" \
             --repository "$REPOSITORY" \
             --receipt .monitor/notification/workflow_failure_receipt.json \
             --workflow-run-url "$RUN_URL" \
+            --reason "$REASON" \
             --recorded-at "$(date --iso-8601=seconds)"
       - name: Preserve workflow failure receipt
         if: always() && steps.failure-notice.outcome != 'skipped'
@@ -257,5 +262,48 @@ jobs:
         with:
           name: ers-monitor-workflow-failure-${{ matrix.monitor_target_id }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .monitor/notification/workflow_failure_receipt.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  report-pipeline-failure:
+    # The in-job report cannot run when the monitor job never started or was
+    # cancelled, and those are exactly the cases where no target is observed at
+    # all. Monitor-job failures are excluded so the two reports never duplicate.
+    needs: [plan, monitor]
+    if: >-
+      always() &&
+      (needs.plan.result != 'success' ||
+       needs.monitor.result == 'cancelled' ||
+       needs.monitor.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: 3.11.9
+      - run: pip install -e .
+      - name: Report a monitoring workflow that observed nothing
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python -m earnings_research.cli monitor-notify-workflow-failure \
+            --target-id pipeline \
+            --repository "$REPOSITORY" \
+            --receipt .monitor/notification/pipeline_failure_receipt.json \
+            --workflow-run-url "$RUN_URL" \
+            --reason pipeline \
+            --recorded-at "$(date --iso-8601=seconds)"
+      - name: Preserve pipeline failure receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ers-monitor-pipeline-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .monitor/notification/pipeline_failure_receipt.json
           if-no-files-found: warn
           retention-days: 14

@@ -21,6 +21,7 @@ from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
 
+from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
 from earnings_research.monitoring.operational_cli import (
     build_handoff,
     fetch_state,
@@ -119,6 +120,9 @@ def main(argv=None) -> int:
     failure_parser.add_argument("--receipt", required=True, type=Path)
     failure_parser.add_argument("--recorded-at", required=True)
     failure_parser.add_argument("--workflow-run-url", default="")
+    failure_parser.add_argument(
+        "--reason", default="no_bundle", choices=WORKFLOW_FAILURE_REASONS
+    )
 
     analysis_parser = subparsers.add_parser(
         "analyze-earnings-document",
@@ -366,6 +370,7 @@ def main(argv=None) -> int:
                 receipt_path=args.receipt,
                 recorded_at=args.recorded_at,
                 workflow_run_url=args.workflow_run_url,
+                reason=args.reason,
             )
         if args.command == "monitor-notify":
             return notify_state(
