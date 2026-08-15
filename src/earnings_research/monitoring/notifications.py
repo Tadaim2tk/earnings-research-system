@@ -167,6 +167,9 @@ def _issue_details(
             "- run_result: `%s`" % run["run_result"],
             "- target_state: `%s`" % checkpoint["target_state"],
             "- what_changed_or_error: %s" % summary,
+            "- latest_title: %s" % (checkpoint.get("last_seen_title") or "none"),
+            "- latest_published_at: `%s`" % (checkpoint.get("last_seen_published_at") or "none"),
+            "- latest_document_url: %s" % (checkpoint.get("last_seen_document_url") or "none"),
             "- source_url: %s" % target["source_url"],
             "- confidence: `metadata_only`",
             "- requires_human_decision: `%s`"

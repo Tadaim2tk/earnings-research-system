@@ -245,6 +245,9 @@ def tdnet_payload(
     }
 
 
+TDNET_OBSERVED_AT = datetime(2026, 8, 15, 10, 0, tzinfo=JST)
+
+
 def observe_tdnet_index(payload, *, content_type="text/html; charset=UTF-8"):
     row = target()
     row["source_category"] = "tdnet_index_json"
@@ -253,6 +256,7 @@ def observe_tdnet_index(payload, *, content_type="text/html; charset=UTF-8"):
             200, json=payload, headers={"content-type": content_type}
         ),
         target_row=row,
+        source_context=context(at=TDNET_OBSERVED_AT),
     )
 
 
@@ -300,6 +304,22 @@ def test_tdnet_index_count_change_below_the_first_row_is_visible():
     assert build_metadata_fingerprint(one) != build_metadata_fingerprint(two)
 
 
+@pytest.mark.parametrize(
+    "published",
+    ["2026-08-15 10:06:00", "2099-01-01 00:00:00"],
+)
+def test_tdnet_index_rejects_publication_after_observation(published):
+    """A disclosure cannot be published after it was observed."""
+    result = observe_tdnet_index(tdnet_payload(published=published))
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "timestamp_parse_error"
+
+
+def test_tdnet_index_allows_small_clock_skew():
+    result = observe_tdnet_index(tdnet_payload(published="2026-08-15 10:04:00"))
+    assert isinstance(result, SourceObservation)
+
+
 def test_tdnet_index_update_history_marks_replacement():
     payload = tdnet_payload()
     payload["items"][0]["update_history"] = "2026-08-13 16:00:00 訂正"
@@ -325,7 +345,16 @@ def test_tdnet_index_rejects_missing_or_invalid_latest_metadata(payload, expecte
     assert result.error_code == expected_code
 
 
-@pytest.mark.parametrize("url", ["http://www.release.tdnet.info/a.pdf", "", "not-a-url"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://www.release.tdnet.info/a.pdf",
+        "",
+        "not-a-url",
+        "https://@www.release.tdnet.info/a.pdf",
+        "https://user:pass@www.release.tdnet.info/a.pdf",
+    ],
+)
 def test_tdnet_index_rejects_unsafe_document_url(url):
     payload = tdnet_payload()
     payload["items"][0]["document_url"] = url

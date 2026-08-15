@@ -67,6 +67,16 @@ raw_storage_status = metadata_only
 
 - 法定開示のdocument URLを、許可されたindexから受け取った1件に限り、`www.release.tdnet.info` から低頻度で取得することを例外として認めるか。認める場合はhost・上限回数・crawl禁止を明記した例外recordを追加する。認めない場合、pipelineは検知とmetadataまでで止まる。
 
+現状の実装は後者に倒してある。`analyze-earnings-handoff` は `tdnet_index_json` のhandoffに対してdocument discoveryを実行せず `no_target_documents` を返す。`last_seen_document_url` はcheckpointとhandoffへ渡すだけで、そこからfetchする経路はコード上存在しない。
+
+### 既取得documentのprovenance record (2026-08-15)
+
+`data/research/iceco/EDA-7698-20260813.json` の元PDFは、2026-08-15T10:04:17+09:00 にassistantが見逃しinquiryの一環として `contents.xj-storage.jp` から1回取得したものである。取得は上記robots実測（同日10:20以降）より前であり、当時この明示禁止は認識していなかった。事実として次を記録する。
+
+- 自動監視pipelineによる取得ではない。pipelineは当該hostへ一度もaccessしていない。
+- 同hostへの再取得は行わない。将来の取得可否は上記Human例外案件の判断に従う。
+- 本recordを消さずに残し、以後 `data/research/` へ追加するdocumentは出所hostと取得根拠を明記する。
+
 ```text
 company_name = 株式会社アイスコ
 ticker = 7698
@@ -85,7 +95,7 @@ workflowはJST 01:17、05:17、09:17、13:17、17:17、21:17に起動する。�
 
 ## Storage And Change Detection
 
-raw HTML、JSON、PDF、screenshot、response bodyをartifactまたはrepositoryへ保存しない。TDnet index (`tdnet_index_json`) では先頭の最新1件の `id`、`title`、`pubdate`、`document_url` と一覧 `total_count` だけをmetadataとして保持し、2件目以降の内容や本文digestをfingerprintへ含めない。`total_count` を含めるのは、先頭以外の変化がbyte長不変のときに沈黙しないようにするためである。timezone表記のない `YYYY-MM-DD HH:MM:SS` の `pubdate` は、このsource categoryに限りJSTとして解釈する。空一覧、`id`／`title`／`pubdate` 欠落、timestamp不正、非https document URLは推測せずparse failureとする。`document_url` はcheckpointとresearch handoffへ渡すが、document本体は取得も保存もしない。このSHA-256はmonitoring用fingerprintであり、formal evidenceのcontent hashではない。
+raw HTML、JSON、PDF、screenshot、response bodyをartifactまたはrepositoryへ保存しない。TDnet index (`tdnet_index_json`) では先頭の最新1件の `id`、`title`、`pubdate`、`document_url` と一覧 `total_count` だけをmetadataとして保持し、2件目以降の内容や本文digestをfingerprintへ含めない。`total_count` はproviderが返した件数であり `limit` に達すると定数になるため、これ自体は沈黙防止にならない。先頭以外の変化は `observed_content_length` の差で `content_ambiguous` として表面化する（byte長まで一致する変化は検知できない）。timezone表記のない `YYYY-MM-DD HH:MM:SS` の `pubdate` は、このsource categoryに限りJSTとして解釈する。空一覧、`id`／`title`／`pubdate` 欠落、timestamp不正、非https document URLは推測せずparse failureとする。`document_url` はcheckpointとresearch handoffへ渡すが、document本体は取得も保存もしない。このSHA-256はmonitoring用fingerprintであり、formal evidenceのcontent hashではない。
 
 新しい資料が先頭へ追加されると最新1件metadataのSHA-256 fingerprintが変わり、`change_detected` とする。headerだけが変わりfingerprintが同じ場合は `content_ambiguous` とし、`no_change`へ落とさない。
 

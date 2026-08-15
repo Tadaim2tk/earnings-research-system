@@ -654,7 +654,7 @@ PR Bでは最低限次のfixtureを含める。
 
 静的HTMLで資料追加を観測できなかった3 targetは `retired` として終了記録を残し、公開TDnet適時開示indexを読む新target `ICECO_TDNET_INDEX` へ移す。旧targetを行ごと削除するとcheckpointとartifactが孤児化するため、`enabled=false`、`activation_state=retired`、`active_until` を記録して残す。
 
-`tdnet_index_json` categoryは先頭の最新1件だけを読み、`id`、`title`、`pubdate`、`document_url` と一覧件数をfingerprint metadataにする。先頭以外の変化がbyte長不変で沈黙しないよう、`total_count` をfingerprintに含める。timezone表記のない `pubdate` は、このsource categoryに限りJSTと明示的に仮定する（providerがミラーする東証開示時刻に一致）。providerは全formatを `text/html` で返すため、parserはmedia typeではなくHuman宣言のcategoryで選ぶ。空一覧、`id`／`title`／`pubdate` 欠落、timestamp不正、非https document URLは推測せず失敗し、raw JSONや全件一覧を保存しない。詳細は [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) を正本とする。
+`tdnet_index_json` categoryは先頭の最新1件だけを読み、`id`、`title`、`pubdate`、`document_url` と一覧件数をfingerprint metadataにする。`total_count` もfingerprintに含めるが、これはproviderの返却件数であり `limit` 到達後は定数になるため沈黙防止にはならない。先頭以外の変化は `observed_content_length` の差が `content_ambiguous` として拾う。timezone表記のない `pubdate` は、このsource categoryに限りJSTと明示的に仮定する（providerがミラーする東証開示時刻に一致）。providerは全formatを `text/html` で返すため、parserはmedia typeではなくHuman宣言のcategoryで選ぶ。空一覧、`id`／`title`／`pubdate` 欠落、timestamp不正、非https document URLは推測せず失敗し、raw JSONや全件一覧を保存しない。詳細は [ICECO_PILOT_APPROVAL.md](ICECO_PILOT_APPROVAL.md) を正本とする。
 
 ## Pull Request Sequence
 

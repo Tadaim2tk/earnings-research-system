@@ -60,6 +60,7 @@ _ALLOWED_CHARSETS = {"utf-8", "shift_jis", "cp932", "euc_jp", "iso2022_jp"}
 _ALLOWED_STABLE_METADATA_KEYS = {"category", "document_type", "language", "period"}
 _TDNET_INDEX_CATEGORY = "tdnet_index_json"
 _JST = timezone(timedelta(hours=9))
+_PUBLISHED_AT_TOLERANCE = timedelta(minutes=5)
 
 
 class LiveSourcePolicyError(ValueError):
@@ -503,7 +504,11 @@ class LiveSourceAdapter:
             # The TDnet index provider answers with text/html even for the JSON
             # formats, so the Human-declared category decides the parser first.
             if source_category == _TDNET_INDEX_CATEGORY:
-                parsed = _parse_json(text, source_category=source_category)
+                parsed = _parse_json(
+                    text,
+                    source_category=source_category,
+                    observed_at=context.observed_at,
+                )
             else:
                 parsed = (
                     _parse_html(text)
@@ -786,12 +791,17 @@ def _parse_html(text: str) -> Dict:
     }
 
 
-def _parse_json(text: str, *, source_category: Optional[str] = None) -> Dict:
+def _parse_json(
+    text: str,
+    *,
+    source_category: Optional[str] = None,
+    observed_at: Optional[datetime] = None,
+) -> Dict:
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError("JSON root must be an object")
     if source_category == _TDNET_INDEX_CATEGORY:
-        return _parse_tdnet_index_json(loaded)
+        return _parse_tdnet_index_json(loaded, observed_at)
     recognized = {"title", "document_id", "published_at", "corrected", "updated", "stable_metadata"}
     if not recognized.intersection(loaded):
         raise ValueError("JSON has no recognized metadata")
@@ -824,7 +834,7 @@ def _parse_json(text: str, *, source_category: Optional[str] = None) -> Dict:
     }
 
 
-def _parse_tdnet_index_json(loaded: Dict) -> Dict:
+def _parse_tdnet_index_json(loaded: Dict, observed_at: Optional[datetime] = None) -> Dict:
     items = loaded.get("items")
     if not isinstance(items, list) or not items or not isinstance(items[0], dict):
         raise ValueError("TDnet index must contain a first item")
@@ -846,11 +856,21 @@ def _parse_tdnet_index_json(loaded: Dict) -> Dict:
     # the documented provider timestamp is interpreted explicitly as Japan time,
     # matching the Tokyo Stock Exchange disclosure clock the provider mirrors.
     published_at = published_at.replace(tzinfo=_JST)
+    # A disclosure cannot be published after it was observed. Accepting a future
+    # timestamp would put a provider error straight into the research handoff.
+    if observed_at is not None and published_at > observed_at + _PUBLISHED_AT_TOLERANCE:
+        raise TimestampError
     document_url = _validated_optional_metadata(latest.get("document_url"), "document URL")
     if document_url is None:
         raise ValueError("latest disclosure document URL is missing")
     parts = urlsplit(document_url)
-    if parts.scheme.lower() != "https" or not parts.hostname or parts.username or parts.password:
+    if (
+        parts.scheme.lower() != "https"
+        or not parts.hostname
+        # An empty userinfo is still userinfo; `or parts.username` would pass it.
+        or parts.username is not None
+        or parts.password is not None
+    ):
         raise ValueError("latest disclosure document URL is invalid")
     total_count = latest_index_count(loaded, len(items))
     return {
