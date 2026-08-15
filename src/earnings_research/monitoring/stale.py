@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-NORMAL_THRESHOLD = timedelta(hours=36)
+# A threshold must absorb one missed run, otherwise a single skipped day stops
+# monitoring and needs a Human acknowledgement to resume. Normal days run once
+# per business day, so 36h left only 12h of headroom and one miss was fatal;
+# 60h stops after two consecutive missed days. Event windows run every four
+# hours, so their thresholds already absorb several misses and stay unchanged.
+NORMAL_THRESHOLD = timedelta(hours=60)
 EVENT_WINDOW_THRESHOLD = timedelta(hours=24)
 EVENT_DAY_THRESHOLD = timedelta(hours=12)
 

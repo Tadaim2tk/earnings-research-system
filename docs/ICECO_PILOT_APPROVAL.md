@@ -89,7 +89,7 @@ schedule_profile = prospective_event_v1
 
 ## Frequency And Isolation
 
-workflowはJST 01:17、05:17、09:17、13:17、17:17、21:17に起動する。通常日は引け後の17:17の1回だけを実行し、event windowとevent dayは最大6枠を実行する。robots.txtと合わせても通常日は2 requestに留まる。4時間間隔により、隣接runの欠落や遅延が重ならない場合は単発の最大8時間遅延まで前回成功から12時間以内となる。8時間超または連続欠落では従来どおりstale停止する。36h / 24h / 12hの閾値は変更しない。高頻度polling、crawl、bulk downloadは行わない。
+workflowはJST 01:17、05:17、09:17、13:17、17:17、21:17に起動する。通常日は引け後の17:17の1回だけを実行し、event windowとevent dayは最大6枠を実行する。robots.txtと合わせても通常日は2 requestに留まる。4時間間隔により、隣接runの欠落や遅延が重ならない場合は単発の最大8時間遅延まで前回成功から12時間以内となる。8時間超または連続欠落では従来どおりstale停止する。閾値は通常60h / event window 24h / event当日12hとする。高頻度polling、crawl、bulk downloadは行わない。
 
 各targetは独立jobと独立 `LiveSourceAdapter` instanceで処理する。ICECO以外の会社とDNS timeout stateやmonitor stateを共有しない。
 

@@ -400,4 +400,16 @@ Decision（付随）: change Issue本文に `latest_title`、`latest_published_a
 
 Decision（付随）: workflowの `analyze` stepを `continue-on-error` とし、`notify` を `always()` にする。実測で、handoff先がPDFでanalyzeが失敗すると `notify` がskipされchange Issueが届かなかった。analyzeの失敗は通知後に別stepで再表面化する。
 
-Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる（change検知日も、pipelineがindexを再取得しないため2 requestのまま）。`total_count` はfingerprintに入るがproviderの返却件数であり、`limit` 到達後は沈黙防止として機能しない。stale threshold（36h／24h／12h）、IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。
+Consequences: 新資料が先頭へ追加されればfingerprintは必ず変わり、2026-08-13の見逃しは再現しない。実測で初回observationは `id=1275226`、`2027年３月期第１四半期決算短信〔日本基準〕(非連結)`、`2026-08-13T15:30:00+09:00` を取得し、2回目は `no_change`。取得は平日1日1回、robots.txtと合わせて2 requestに留まる（change検知日も、pipelineがindexを再取得しないため2 requestのまま）。`total_count` はfingerprintに入るがproviderの返却件数であり、`limit` 到達後は沈黙防止として機能しない。IP pinning、TLS SNI、DNS rebinding、redirect、append-only bundle、pending、stale acknowledgementの境界は変更しない。document本体の取得可否は未解決のHuman例外案件として残る。
+
+## ERS-ADR-0027
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: 通常日のstale閾値36時間は、runの間隔から導いたものではなく手で選んだ定数だった。ERS-ADR-0026で通常日のdue slotを1営業日1回に固定した結果、成功間隔は24時間となり、遅延余裕は12時間しか残らない。実測では、土曜11:55の成功を起点に月曜17:17は17.3時間で健全だが、月曜が欠けると火曜17:17で41.3時間となり閾値超過で `stopped` になる。1日欠けただけでHuman acknowledgementが必要になる設計であり、2026-08-13にevent当日閾値12時間で3日間停止した構造と同じである。ERS-ADR-0025の時点でこの遅延余裕の無さは指摘されていたが、閾値を変えず先送りした。
+
+Decision: stale閾値はrunの間隔から導く。通常日の閾値を36時間から60時間へ変更する。成功間隔24時間に対し、単発の欠落は自動で回復し、連続2日の欠落で停止する。event window（24時間）とevent当日（12時間）は成功間隔が4時間であり、それぞれ5回・2回の欠落を吸収できるため変更しない。
+
+Consequences: 監視が完全に沈黙した場合の検知は1.5営業日から2.5営業日へ遅くなる。ただしrunが実行されて失敗した場合はerror Issueが即座に起票されるため、閾値が効くのはworkflowが一度も起動しない場合に限られる。acknowledgementが定常運用に入り込まなくなる。event窓の閾値、observation、robots、append-only、pendingの扱いは変更しない。
