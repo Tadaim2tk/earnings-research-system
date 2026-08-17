@@ -6,6 +6,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+
+from earnings_research.document_analysis.disclosure import analyze_named_disclosure
 from earnings_research.document_analysis.pipeline import (
     analyze_document_url,
     analyze_handoff,
@@ -143,6 +146,14 @@ def main(argv=None) -> int:
     dispatch_parser.add_argument("--output-dir", required=True, type=Path)
     dispatch_parser.add_argument("--acquired-at")
 
+    named_parser = subparsers.add_parser(
+        "analyze-named-disclosure",
+        help="Analyze the disclosure document a monitor handoff already named.",
+    )
+    named_parser.add_argument("handoff", type=Path)
+    named_parser.add_argument("--output-dir", required=True, type=Path)
+    named_parser.add_argument("--acquired-at")
+
     evaluation_parser = subparsers.add_parser(
         "evaluate-earnings", help="Compare one locked pre-event baseline with analyzed earnings results."
     )
@@ -212,16 +223,35 @@ def main(argv=None) -> int:
             write_analysis(result, args.output)
             print(json.dumps({"status": result.status, "analysis_id": result.analysis_id, "output": str(args.output)}))
             return 0
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             print("Document analysis failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "analyze-earnings-handoff":
         try:
-            result = analyze_handoff(args.handoff, args.output_dir, args.acquired_at)
+            # Prefers the document the handoff already names and falls back to
+            # discovery when it names none, so the caller needs one command.
+            result = analyze_named_disclosure(
+                handoff_path=args.handoff,
+                output_dir=args.output_dir,
+                acquired_at=args.acquired_at,
+            )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
+            print("Document analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "analyze-named-disclosure":
+        try:
+            result = analyze_named_disclosure(
+                handoff_path=args.handoff,
+                output_dir=args.output_dir,
+                acquired_at=args.acquired_at,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             print("Document analysis failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1

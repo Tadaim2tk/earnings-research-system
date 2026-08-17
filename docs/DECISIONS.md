@@ -503,3 +503,31 @@ Decision: `monitor_target` に `schedule_source_target_id` 列を追加する。
 registryは引き続きread-onlyであり、監視コードは書き込まない。観測した日付はmachine stateから毎回導出するのであって、registryへ反映するのではない。
 
 Consequences: 会社が発表日を動かすと、カレンダーtargetが次回観測でそれを取り込み、その日程でevent windowが開く。人の転記は不要になる。planのHTTPは1日あたりGitHub artifact取得1件だけ増え、外部サイトへのアクセスは増えない。取得したbundleは読むだけで、checkpointの更新も再アップロードもしない。schedule source自身は `schedule_source_target_id` を持たないので循環しない。
+
+## ERS-ADR-0033
+
+Date: 2026-08-17
+
+Status: Accepted
+
+Context: ERS-ADR-0026以降、開示の検知は自動化されたが、決算短信PDF本体の取得は保留していた。本体は `www.release.tdnet.info` と `contents.xj-storage.jp` にしか存在せず、両者のrobots.txtが `User-Agent: *` / `Disallow: /` だったためである。この保留はAI側の判断で設けたものであり、Humanの意図ではなかった。Humanは2026-08-17に「全部許可します。そもそもその辺のセーフガードはAIで勝手に設定したもので私の意図ではありません。それで作業が止まることを好ましく思いません」と明示的に承認した。
+
+対象は法令および東証規則で公開が義務づけられた適時開示資料であり、認証も課金も個人情報も伴わない。robots.txtはcrawler向けの除外規約であって、公開済み法定開示1件の取得を禁じる法規ではない。判断は運用者であるHumanのものである。
+
+Decision: `document_analysis/acquisition.py` に取得可否の方針をデータとして置き、request前に一箇所で判定する。承認範囲は狭く限定する。
+
+- 取得先は `www.release.tdnet.info` と `contents.xj-storage.jp` のみ。他のhostは `AcquisitionNotAuthorized` で明示的に失敗させ、黙って読み飛ばさない
+- 取得するのは**許可されたindexが既に渡したdocument URLだけ**。link追跡もdirectory走査も行わない
+- 1 runあたり最大4件（`MAX_DOCUMENTS_PER_RUN`）。現状のhandoffは1件しか名指ししないので実効は1件だが、複数を渡す形へ広げたときに上限が先に効くようにしておく
+- 401 / 403 / 429 / 451 は拒否であって一時障害ではないので再試行しない
+- **redirectは1 hopずつ解決し、各hopの遷移先を同じ承認リストで検査する**。汎用fetcherは `follow_redirects=True` で自動追従するため、承認hostが任意のhostへ302すれば承認範囲が意味を失う（実測で確認: 承認hostから `elsewhere.invalid` への302がそのまま追従された）。hop上限は3
+- 決算短信・決算説明資料以外は取得前に除外する
+- document byteは従来どおり保存しない（`raw_document_retained: false`）
+
+解析入口は `document_analysis/disclosure.py` の `analyze_named_disclosure` に置き、handoffがdocumentを名指ししていればそれを読み、していなければ従来のdiscovery pipelineへ委譲する。`analyze-earnings-handoff` はこの入口を呼ぶので、workflowの記述は変わらない。
+
+取得は `document_analysis/guarded_fetch.py` の `GuardedDocumentFetcher` が担う。汎用の `TemporaryDocumentFetcher` は方針を知らないので、承認範囲の強制はこの層に置く。同classは `html()` も拒否する。継承したままだと、将来この fetcher を discovery pipeline へ渡した瞬間に承認外hostでlink追跡が動くためである。
+
+人手起動の `analyze-earnings-document`（単体URL指定）は従来どおり汎用取得のままで、この承認範囲の外にある。自動運用経路ではないが、抜け道として残ることを記録する。
+
+Consequences: 開示検知から構造化データ生成までが人手なしで通る。実測で、2026-08-13 15:30公開の第1四半期決算短信を実URLから取得・解析し、売上高15,584百万円（正規化 15,584,000,000 JPY、`q1_cumulative`、page/anchor付き）を含む34 metricを生成した。承認範囲外のhostは失敗するため、将来targetが増えても取得先が黙って広がることはない。低頻度という前提は、監視側の枠（平常日2 fetch/日）と1 runあたり4件の上限で担保される。
