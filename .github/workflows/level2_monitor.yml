@@ -269,12 +269,14 @@ jobs:
     # The in-job report cannot run when the monitor job never started or was
     # cancelled, and those are exactly the cases where no target is observed at
     # all. Monitor-job failures are excluded so the two reports never duplicate.
+    # An empty matrix is the ordinary "nothing is due today" outcome, so the
+    # skipped case only counts when there was in fact something to observe.
     needs: [plan, monitor]
     if: >-
       always() &&
       (needs.plan.result != 'success' ||
        needs.monitor.result == 'cancelled' ||
-       needs.monitor.result == 'skipped')
+       (needs.monitor.result == 'skipped' && needs.plan.outputs.matrix != '[]'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
