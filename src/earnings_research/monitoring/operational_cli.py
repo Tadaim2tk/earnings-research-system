@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -45,6 +46,21 @@ def plan_registry(
             _published_schedules(Path(schedule_state_dir)),
             planned.astimezone(JST).date(),
         )
+        unresolved = sorted(
+            row["monitor_target_id"]
+            for row in rows
+            if row.get("schedule_source_target_id", "").strip()
+            and row["monitor_target_id"] not in observed
+        )
+        if unresolved:
+            # Falling back to the registry column is the safe direction only if
+            # someone can see that it happened. Planning silently from a date
+            # the company already moved is how an event window fails to open.
+            print(
+                "schedule source unresolved, planning from the registry column: %s"
+                % ", ".join(unresolved),
+                file=sys.stderr,
+            )
     targets = active_target_plan(
         rows, planned_at=planned, force=force, observed_event_dates=observed
     )
@@ -143,8 +159,15 @@ def run_live(
     started_at: str,
     finished_at: str,
     gap_acknowledgement_path: Optional[Path] = None,
+    event_date: Optional[str] = None,
 ) -> int:
     target = find_target(load_registry(registry_path), target_id)
+    if event_date:
+        # The plan resolved this from the schedule source. Without it the stale
+        # window is computed from the registry column the plan already
+        # overrode, so the announcement day would keep the 60h normal threshold
+        # instead of the 12h event-day one.
+        target["event_date"] = event_date
     previous = None
     if previous_dir is not None and (previous_dir / "manifest.json").is_file():
         previous = verify_bundle(previous_dir, expected_target_id=target_id)
@@ -211,6 +234,10 @@ def _published_schedules(state_dir: Path) -> Dict[str, str]:
         try:
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(checkpoint, dict):
+            # A list or a bare scalar is still valid JSON. Letting it raise here
+            # would fail the plan and skip every target for that slot.
             continue
         target = str(checkpoint.get("monitor_target_id", ""))
         schedule = str(checkpoint.get("last_seen_schedule", ""))

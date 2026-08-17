@@ -1761,18 +1761,18 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
 
         schedule_source = _clean(row.get("schedule_source_target_id", ""))
         if schedule_source:
-            known = {_clean(other.get("monitor_target_id", "")) for other in rows}
+            sources = {
+                _clean(other.get("monitor_target_id", "")): _clean(
+                    other.get("schedule_source_target_id", "")
+                )
+                for other in rows
+            }
             if schedule_source == _clean(row.get("monitor_target_id", "")):
                 issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not be the target itself"))
-            elif schedule_source not in known:
+            elif schedule_source not in sources:
                 issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must exist in the registry"))
-
-        schedule_source = _clean(row.get("schedule_source_target_id", ""))
-        if schedule_source:
-            if schedule_source == _clean(row.get("monitor_target_id", "")):
-                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not be the target itself"))
-            elif schedule_source not in {_clean(other.get("monitor_target_id", "")) for other in rows}:
-                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must exist in the registry"))
+            elif sources[schedule_source]:
+                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not itself depend on another schedule source"))
 
         for column in ("automation_approved_by", "activation_approved_by"):
             value = _clean(row.get(column, ""))

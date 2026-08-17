@@ -85,12 +85,12 @@ def next_announcement_date(schedule: str, on_or_after: date) -> Optional[str]:
 
     ``schedule`` is the checkpoint field written by the calendar source, for
     example ``2026-08-13=...;2026-11-13=... | 2027-02-中旬=...``. Rows whose day
-    was never published sit after the separator and are ignored here: a window
-    cannot be opened on a date the company has not given.
+    was never published carry a month part instead (``2027-02-中旬``) and fail
+    the ISO parse, so they never open a window. Splitting on the separator would
+    add nothing and would drop every later row if a label ever contained a pipe.
     """
-    dated = schedule.split("|", 1)[0]
     upcoming = []
-    for entry in dated.split(";"):
+    for entry in schedule.replace("|", ";").split(";"):
         candidate = entry.split("=", 1)[0].strip()
         if not candidate:
             continue

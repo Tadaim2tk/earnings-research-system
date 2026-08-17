@@ -138,6 +138,7 @@ jobs:
           REGISTRY: ${{ matrix.registry }}
           TARGET_ID: ${{ matrix.monitor_target_id }}
           FIXTURE_NAME: ${{ matrix.fixture_name }}
+          EVENT_DATE: ${{ matrix.event_date }}
           DISPATCH_RUN_ID: ${{ github.event.inputs.run_id }}
           GAP_ACKNOWLEDGEMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gap_acknowledgement || '' }}
           GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
@@ -160,6 +161,7 @@ jobs:
               --run-id "$run_id" \
               --started-at "$started_at" \
               --finished-at "$finished_at" \
+              --event-date "$EVENT_DATE" \
               "${gap_acknowledgement_args[@]}")
           else
             result=$(python -m earnings_research.cli monitor-run \

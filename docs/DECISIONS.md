@@ -494,7 +494,11 @@ Context: ERS-ADR-0029でカレンダーから決算発表予定日を読める�
 
 Decision: `monitor_target` に `schedule_source_target_id` 列を追加する。plan jobは、registryに現れるschedule sourceのbundleを `monitor-fetch-state` で取得し、その `last_seen_schedule` から「今日以降で最も早い発表日」を求めて `event_date` を上書きする。registryの `event_date` は fallback として残す。
 
-日が公表されていない行（`2027-02-中旬`）はwindowを開く根拠にしない。日程が取れない、bundleが無い、artifactが期限切れ、いずれの場合もplanは失敗せずregistryの値へ落ちる。`schedule_source_target_id` は自己参照とregistry未登録を拒否する。plan jobに `actions: read` を付与する。
+日が公表されていない行（`2027-02-中旬`）はISO日付として解釈できないためwindowを開く根拠にならない。日程が取れない、bundleが無い、artifactが期限切れ、checkpointがdictでない、いずれの場合もplanは失敗せずregistryの値へ落ちる。ただし**落ちたことをstderrに明示する**。fallbackは安全な方向だが、それが見えないまま古い日付で回り続けるのは、windowが開かない事故そのものである。
+
+解決した日付は matrix の `event_date` として monitor jobへ渡し、`monitor-run-live --event-date` で stale window の計算にも使う。planだけが観測日を使い monitor がregistry列を読むと、発表当日の閾値が12hではなく60hのままになる。
+
+`schedule_source_target_id` は自己参照、registry未登録、およびschedule source自身がschedule sourceを持つ連鎖を拒否する。plan jobに `actions: read` を付与する。
 
 registryは引き続きread-onlyであり、監視コードは書き込まない。観測した日付はmachine stateから毎回導出するのであって、registryへ反映するのではない。
 
