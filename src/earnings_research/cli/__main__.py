@@ -6,6 +6,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+
 from earnings_research.document_analysis.disclosure import analyze_named_disclosure
 from earnings_research.document_analysis.pipeline import (
     analyze_document_url,
@@ -221,7 +223,7 @@ def main(argv=None) -> int:
             write_analysis(result, args.output)
             print(json.dumps({"status": result.status, "analysis_id": result.analysis_id, "output": str(args.output)}))
             return 0
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             print("Document analysis failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
@@ -236,7 +238,7 @@ def main(argv=None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             print("Document analysis failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
@@ -249,7 +251,7 @@ def main(argv=None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, httpx.HTTPError) as exc:
             print("Document analysis failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1

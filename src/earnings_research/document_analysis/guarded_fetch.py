@@ -56,6 +56,15 @@ class GuardedDocumentFetcher(TemporaryDocumentFetcher):
             )
         )
 
+    def html(self, url: str) -> str:
+        """Discovery is outside the grant, so this fetcher does not do it.
+
+        Inheriting the generic implementation would mean a future caller could
+        pass this fetcher to the discovery pipeline and get link following on
+        hosts nobody approved.
+        """
+        raise AcquisitionNotAuthorized("page retrieval is outside the approved grant")
+
     @contextmanager
     def pdf(self, url: str) -> Iterator[Path]:
         if not authorized_host(url):

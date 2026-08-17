@@ -115,7 +115,46 @@ def test_a_redirect_loop_stops_at_the_hop_limit():
 
     outcome, contacted = fetch(handler)
     assert isinstance(outcome, DocumentAcquisitionError)
-    assert len(contacted) == MAX_REDIRECT_HOPS + 1
+    # Pinned, not derived: reading the constant here would pass at any value.
+    assert MAX_REDIRECT_HOPS == 3
+    assert len(contacted) == 4
+
+
+def test_the_default_client_refuses_an_offsite_redirect(monkeypatch):
+    """Without a factory of our own, the shipped client settings must hold.
+
+    Every other redirect test injects follow_redirects=False, so flipping the
+    real default to True left them all green while the fetch walked off the
+    approved list.
+    """
+    contacted = []
+    captured = {}
+    real_client = httpx.Client
+
+    def recording(request):
+        contacted.append(str(request.url))
+        if "release.tdnet.info" in request.url.host:
+            return httpx.Response(302, headers={"location": "https://elsewhere.invalid/leak.pdf"})
+        return pdf_response(request)
+
+    def client_factory(**kwargs):
+        captured.update(kwargs)
+        kwargs["transport"] = httpx.MockTransport(recording)
+        return real_client(**kwargs)
+
+    monkeypatch.setattr("earnings_research.document_analysis.guarded_fetch.httpx.Client", client_factory)
+    with pytest.raises(AcquisitionNotAuthorized):
+        with GuardedDocumentFetcher().pdf(APPROVED):
+            pass
+    assert contacted == [APPROVED]
+    assert captured["follow_redirects"] is False
+    assert captured["trust_env"] is False
+
+
+def test_the_guarded_fetcher_does_not_retrieve_pages():
+    """Discovery on an approved host would still be link following."""
+    with pytest.raises(AcquisitionNotAuthorized):
+        GuardedDocumentFetcher().html(APPROVED)
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 451])

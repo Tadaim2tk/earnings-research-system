@@ -36,6 +36,8 @@ def analyze_named_disclosure(
     branch lives here rather than in shell.
     """
     payload = json.loads(Path(handoff_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("research handoff must be a JSON object")
     if not payload.get("last_seen_document_url"):
         return analyze_handoff(handoff_path, output_dir, acquired_at)
     output_dir = Path(output_dir)
