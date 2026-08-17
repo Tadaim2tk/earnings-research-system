@@ -2,9 +2,10 @@
 
 import json
 import os
-from datetime import date, datetime
+import sys
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from earnings_research.monitoring.github_api import GitHubAPIClient
 from earnings_research.monitoring.handoff import write_research_handoff
@@ -17,8 +18,15 @@ from earnings_research.monitoring.notifications import (
 )
 from earnings_research.monitoring.operations import execute_live_run, execute_offline_run
 from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
-from earnings_research.monitoring.registry import active_target_plan, find_target, load_registry
+from earnings_research.monitoring.registry import (
+    active_target_plan,
+    find_target,
+    load_registry,
+    observed_event_dates,
+)
 from earnings_research.validation.validator import validate_monitor_bundle
+
+JST = timezone(timedelta(hours=9))
 
 
 def plan_registry(
@@ -27,10 +35,35 @@ def plan_registry(
     fixture_name: Optional[str],
     planned_at: Optional[str] = None,
     force: bool = False,
+    schedule_state_dir: Optional[Path] = None,
 ) -> int:
     rows = load_registry(registry_path)
     planned = _aware_datetime(planned_at, "planned_at") if planned_at else None
-    targets = active_target_plan(rows, planned_at=planned, force=force)
+    observed = {}
+    if schedule_state_dir is not None and planned is not None:
+        observed = observed_event_dates(
+            rows,
+            _published_schedules(Path(schedule_state_dir)),
+            planned.astimezone(JST).date(),
+        )
+        unresolved = sorted(
+            row["monitor_target_id"]
+            for row in rows
+            if row.get("schedule_source_target_id", "").strip()
+            and row["monitor_target_id"] not in observed
+        )
+        if unresolved:
+            # Falling back to the registry column is the safe direction only if
+            # someone can see that it happened. Planning silently from a date
+            # the company already moved is how an event window fails to open.
+            print(
+                "schedule source unresolved, planning from the registry column: %s"
+                % ", ".join(unresolved),
+                file=sys.stderr,
+            )
+    targets = active_target_plan(
+        rows, planned_at=planned, force=force, observed_event_dates=observed
+    )
     if target_id:
         targets = [target for target in targets if target.get("monitor_target_id") == target_id]
         if len(targets) != 1:
@@ -126,8 +159,15 @@ def run_live(
     started_at: str,
     finished_at: str,
     gap_acknowledgement_path: Optional[Path] = None,
+    event_date: Optional[str] = None,
 ) -> int:
     target = find_target(load_registry(registry_path), target_id)
+    if event_date:
+        # The plan resolved this from the schedule source. Without it the stale
+        # window is computed from the registry column the plan already
+        # overrode, so the announcement day would keep the 60h normal threshold
+        # instead of the 12h event-day one.
+        target["event_date"] = event_date
     previous = None
     if previous_dir is not None and (previous_dir / "manifest.json").is_file():
         previous = verify_bundle(previous_dir, expected_target_id=target_id)
@@ -179,6 +219,31 @@ def build_handoff(bundle_dir: Path, output_path: Path) -> int:
     created = write_research_handoff(bundle, output_path)
     print(json.dumps({"handoff_required": created}, separators=(",", ":")))
     return 0
+
+
+def _published_schedules(state_dir: Path) -> Dict[str, str]:
+    """Read last_seen_schedule from every downloaded schedule-source bundle.
+
+    A missing or unreadable bundle simply contributes nothing, so planning falls
+    back to the registry column instead of failing the run.
+    """
+    schedules = {}
+    if not state_dir.is_dir():
+        return schedules
+    for checkpoint_path in sorted(state_dir.glob("**/checkpoint.json")):
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(checkpoint, dict):
+            # A list or a bare scalar is still valid JSON. Letting it raise here
+            # would fail the plan and skip every target for that slot.
+            continue
+        target = str(checkpoint.get("monitor_target_id", ""))
+        schedule = str(checkpoint.get("last_seen_schedule", ""))
+        if target and schedule:
+            schedules[target] = schedule
+    return schedules
 
 
 def notify_state(

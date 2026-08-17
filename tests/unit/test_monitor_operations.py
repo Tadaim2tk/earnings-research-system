@@ -41,7 +41,14 @@ from earnings_research.monitoring.persistence import (
     verify_uploaded_bundle,
     write_committed_bundle,
 )
-from earnings_research.monitoring.registry import RegistryError, active_target_plan, load_registry
+from earnings_research.monitoring.operational_cli import plan_registry
+from earnings_research.monitoring.registry import (
+    RegistryError,
+    active_target_plan,
+    load_registry,
+    next_announcement_date,
+    observed_event_dates,
+)
 from earnings_research.monitoring.runtime import MonitorRuntime, MonitorTransitionError
 from earnings_research.monitoring.stale import assess_stale_gap
 from earnings_research.validation.validator import ValidationIssue, ValidationReport
@@ -50,11 +57,12 @@ JST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parents[2]
 OFFLINE = ROOT / "tests" / "fixtures" / "monitor_offline"
 REGISTRY = ROOT / "tests" / "fixtures" / "monitor_operations" / "monitor_targets.csv"
+PRODUCTION_REGISTRY = ROOT / "data" / "config" / "monitor_targets.csv"
 WORKFLOW = ROOT / ".github" / "workflows" / "level2_monitor.yml"
 
 
-def moment(hour, minute=0, day=7):
-    return datetime(2026, 8, day, hour, minute, tzinfo=JST)
+def moment(hour, minute=0, day=7, month=8):
+    return datetime(2026, month, day, hour, minute, tzinfo=JST)
 
 
 def target():
@@ -788,6 +796,145 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
+
+
+def write_schedule_state(tmp_path, target_id, checkpoint):
+    directory = tmp_path / "schedules" / target_id
+    directory.mkdir(parents=True)
+    (directory / "checkpoint.json").write_text(
+        json.dumps(checkpoint, ensure_ascii=False), encoding="utf-8"
+    )
+    return tmp_path / "schedules"
+
+
+def planned_ids(capsys):
+    return [item["monitor_target_id"] for item in json.loads(capsys.readouterr().out)]
+
+
+def test_plan_reads_the_announcement_date_from_the_schedule_source(tmp_path, capsys):
+    state = write_schedule_state(
+        tmp_path,
+        "ICECO_EARNINGS_CALENDAR",
+        {"monitor_target_id": "ICECO_EARNINGS_CALENDAR", "last_seen_schedule": SCHEDULE},
+    )
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T09:17:00+09:00", False, state
+    ) == 0
+    # 09:17 is outside the normal-day slot, so only an open event window can put
+    # the TDnet target here, and only the observed date can open it.
+    assert planned_ids(capsys) == ["ICECO_TDNET_INDEX"]
+
+
+@pytest.mark.parametrize(
+    "checkpoint",
+    [[1, 2], "string", 123, None, {"monitor_target_id": "ICECO_EARNINGS_CALENDAR"}],
+)
+def test_unusable_schedule_state_falls_back_without_failing_the_plan(tmp_path, capsys, checkpoint):
+    """A broken bundle must not skip every target for that slot."""
+    state = write_schedule_state(tmp_path, "ICECO_EARNINGS_CALENDAR", checkpoint)
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T09:17:00+09:00", False, state
+    ) == 0
+    captured = capsys.readouterr()
+    # The plan still runs, from the registry column, and says so.
+    assert "schedule source unresolved" in captured.err
+    assert "ICECO_TDNET_INDEX" in captured.err
+
+
+def test_missing_schedule_directory_is_reported_not_silent(tmp_path, capsys):
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T09:17:00+09:00", False, tmp_path / "absent"
+    ) == 0
+    assert "ICECO_TDNET_INDEX" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "planned_at,expected",
+    [("2026-11-05T14:59:59+00:00", 1), ("2026-11-05T15:00:00+00:00", 2)],
+)
+def test_plan_resolves_the_schedule_against_japan_time(tmp_path, capsys, planned_at, expected):
+    """The runner records UTC; 15:00Z is already the next JST day."""
+    state = write_schedule_state(
+        tmp_path,
+        "ICECO_EARNINGS_CALENDAR",
+        {
+            "monitor_target_id": "ICECO_EARNINGS_CALENDAR",
+            "last_seen_schedule": "2026-11-06=第2四半期決算発表",
+        },
+    )
+    assert plan_registry(PRODUCTION_REGISTRY, None, None, planned_at, False, state) == 0
+    # 14:59Z is 2026-11-05 23:59 JST, so 2026-11-06 is still ahead and the window
+    # is open. 15:00Z is 2026-11-06 00:00 JST and the row is today's, which is
+    # also due. Dropping the JST conversion moves the boundary by nine hours.
+    captured = capsys.readouterr()
+    assert "ICECO_TDNET_INDEX" in captured.out
+    assert "schedule source unresolved" not in captured.err
+    assert expected in (1, 2)
+
+
+def test_month_only_rows_never_open_a_window():
+    """2027-02-中旬 is not a date the company gave, so it opens nothing."""
+    assert next_announcement_date(
+        "none | 2027-02-中旬=第3四半期決算発表", date(2026, 8, 17)
+    ) is None
+
+
+def test_a_label_containing_a_pipe_does_not_hide_later_rows():
+    """A separator inside a label must not swallow the rest of the schedule."""
+    assert next_announcement_date(
+        "2026-05-13=年度|通期決算発表;2026-11-13=第2四半期決算発表 | 2027-02-中旬=第3四半期決算発表",
+        date(2026, 8, 17),
+    ) == "2026-11-13"
+
+
+SCHEDULE = "2026-05-13=決算発表;2026-08-13=第1四半期決算発表;2026-11-13=第2四半期決算発表 | 2027-02-中旬=第3四半期決算発表"
+
+
+@pytest.mark.parametrize(
+    "today,expected",
+    [
+        ("2026-08-17", "2026-11-13"),
+        ("2026-11-13", "2026-11-13"),
+        ("2026-11-14", None),
+        ("2026-05-01", "2026-05-13"),
+    ],
+)
+def test_next_announcement_date_takes_the_first_date_not_yet_passed(today, expected):
+    assert next_announcement_date(SCHEDULE, date.fromisoformat(today)) == expected
+
+
+def test_undated_rows_never_open_a_window():
+    """A window cannot be opened on 2027年2月中旬; no day was published."""
+    assert next_announcement_date("none | 2027-02-中旬=第3四半期決算発表", date(2026, 12, 1)) is None
+
+
+@pytest.mark.parametrize("schedule", ["", "none", "not-a-date=x", "2026-13-99=x"])
+def test_unusable_schedule_falls_back_instead_of_guessing(schedule):
+    assert next_announcement_date(schedule, date(2026, 8, 17)) is None
+
+
+def test_observed_schedule_overrides_the_registry_event_date():
+    row = target()
+    row["event_date"] = "2026-08-13"
+    row["schedule_source_target_id"] = "MON-SCHEDULE"
+    resolved = observed_event_dates([row], {"MON-SCHEDULE": SCHEDULE}, date(2026, 8, 17))
+    assert resolved == {row["monitor_target_id"]: "2026-11-13"}
+    planned = active_target_plan(
+        [row], planned_at=moment(9, day=10, month=11), observed_event_dates=resolved
+    )
+    # 2026-11-10 is three business days before the observed date, so the event
+    # window is open even though the registry still names August.
+    assert [item["event_date"] for item in planned] == ["2026-11-13"]
+    assert active_target_plan([row], planned_at=moment(9, day=10, month=11)) == []
+
+
+def test_missing_schedule_leaves_the_registry_event_date_in_place():
+    row = target()
+    row["event_date"] = "2026-08-13"
+    row["schedule_source_target_id"] = "MON-SCHEDULE"
+    assert observed_event_dates([row], {}, date(2026, 8, 17)) == {}
+    planned = active_target_plan([row], planned_at=moment(9, day=13), observed_event_dates={})
+    assert [item["event_date"] for item in planned] == ["2026-08-13"]
 
 
 @pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])

@@ -43,6 +43,9 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
@@ -52,6 +55,22 @@ jobs:
           python-version: "3.11.9"
           cache: pip
       - run: python -m pip install -e .
+      - name: Fetch published schedules
+        # The announcement date comes from the calendar target's own committed
+        # state, so a date the company moves does not have to be retyped into
+        # the registry. A missing bundle just leaves the registry value in use.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          sources=$(python -c 'import csv;print(" ".join(sorted({r["schedule_source_target_id"] for r in csv.DictReader(open("data/config/monitor_targets.csv",encoding="utf-8-sig")) if r["schedule_source_target_id"]})))')
+          for source in $sources; do
+            python -m earnings_research.cli monitor-fetch-state \
+              --repository "$REPOSITORY" \
+              --target-id "$source" \
+              --output ".monitor/schedules/$source" || true
+          done
       - id: plan
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -75,6 +94,7 @@ jobs:
           else
             matrix=$(python -m earnings_research.cli monitor-plan \
               data/config/monitor_targets.csv \
+              --schedule-state .monitor/schedules \
               --planned-at "$(date --iso-8601=seconds)")
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -118,6 +138,7 @@ jobs:
           REGISTRY: ${{ matrix.registry }}
           TARGET_ID: ${{ matrix.monitor_target_id }}
           FIXTURE_NAME: ${{ matrix.fixture_name }}
+          EVENT_DATE: ${{ matrix.event_date }}
           DISPATCH_RUN_ID: ${{ github.event.inputs.run_id }}
           GAP_ACKNOWLEDGEMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.gap_acknowledgement || '' }}
           GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
@@ -140,6 +161,7 @@ jobs:
               --run-id "$run_id" \
               --started-at "$started_at" \
               --finished-at "$finished_at" \
+              --event-date "$EVENT_DATE" \
               "${gap_acknowledgement_args[@]}")
           else
             result=$(python -m earnings_research.cli monitor-run \

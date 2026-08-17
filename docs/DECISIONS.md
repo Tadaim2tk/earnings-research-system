@@ -452,7 +452,7 @@ fingerprintはページ全体のdigestを使わず、抽出した日程を対象
 
 観測した日程から `ICECO_TDNET_INDEX` の `event_date` に 2026-11-13 を記録する。registryはHuman所有のread-only configであり、監視コードは書き込まない。
 
-Consequences: 平常日の取得は2 target×1枠=2 fetch/日、event windowとevent当日は7 fetch/日。日程が動けばfingerprintが変わりIssueが出て、本文の `earnings_schedule` に**変更後**の日程が出る。旧値は本文に出ないため、差分を見るには前世代のartifactを参照する必要がある。`analyze-earnings-handoff` は `earnings_calendar_html` でもdiscoveryを実行しない（日程ページに解析対象documentは無く、実行すればhardened adapter外の再取得になる）。**残る制約**: 日程が変わったとき、registryの `event_date` を書き換えるのは依然として人の作業である。planは registryだけを読み checkpointを見ないため、観測した日付をplan時点のwindow判定へ流すには「planは寛容に出し、monitorがstateを見てdue判定する」構造変更が要る。これは別ADRで扱う。
+Consequences: 平常日の取得は2 target×1枠=2 fetch/日、event windowとevent当日は7 fetch/日。日程が動けばfingerprintが変わりIssueが出て、本文の `earnings_schedule` に**変更後**の日程が出る。旧値は本文に出ないため、差分を見るには前世代のartifactを参照する必要がある。`analyze-earnings-handoff` は `earnings_calendar_html` でもdiscoveryを実行しない（日程ページに解析対象documentは無く、実行すればhardened adapter外の再取得になる）。日程が変わったときにregistryの `event_date` を書き換える人の作業は、ERS-ADR-0032で解消する。
 
 ## ERS-ADR-0030
 
@@ -481,3 +481,25 @@ Context: ERS-ADR-0028で追加した `report-pipeline-failure` は `needs.monito
 Decision: skipの条件を `needs.monitor.result == 'skipped' && needs.plan.outputs.matrix != '[]'` に限定する。matrixが空のskipはplan jobの設計どおりの正常終了であり、通知しない。plan jobの失敗とmonitor jobのcancelは従来どおり通知する。
 
 Consequences: 通常日の5枠は静かになる。matrixが空でないのにmonitor jobがskipされる状態（GitHub側の異常やmatrix展開の失敗）は引き続き通知される。誤報として起票済みの3件はcloseする。monitor jobとreport jobが同じ `needs.plan.outputs.matrix != '[]'` を参照することをtestで固定し、片方だけ変更されて再発することを防ぐ。
+
+## ERS-ADR-0032
+
+Date: 2026-08-17
+
+Status: Accepted
+
+Context: ERS-ADR-0029でカレンダーから決算発表予定日を読めるようにしたが、`event_date` はHuman所有のregistry列のままで、日程が動くたびに人が書き換える必要があった。planはregistryだけを読みcheckpointを見ないため、観測した日付がwindow判定へ届かなかった。四半期ごとに人が転記する運用は、そもそも監視を自動化した目的に反する。
+
+代案として「planは寛容に全targetを出し、monitorがstateを見てdue判定する」構造も検討した。これはjob起動が1日1回から6回へ増える。実際に必要なのは「planが日程を知ること」だけなので、planがschedule sourceのartifactを1件取得する方を採る。
+
+Decision: `monitor_target` に `schedule_source_target_id` 列を追加する。plan jobは、registryに現れるschedule sourceのbundleを `monitor-fetch-state` で取得し、その `last_seen_schedule` から「今日以降で最も早い発表日」を求めて `event_date` を上書きする。registryの `event_date` は fallback として残す。
+
+日が公表されていない行（`2027-02-中旬`）はISO日付として解釈できないためwindowを開く根拠にならない。日程が取れない、bundleが無い、artifactが期限切れ、checkpointがdictでない、いずれの場合もplanは失敗せずregistryの値へ落ちる。ただし**落ちたことをstderrに明示する**。fallbackは安全な方向だが、それが見えないまま古い日付で回り続けるのは、windowが開かない事故そのものである。
+
+解決した日付は matrix の `event_date` として monitor jobへ渡し、`monitor-run-live --event-date` で stale window の計算にも使う。planだけが観測日を使い monitor がregistry列を読むと、発表当日の閾値が12hではなく60hのままになる。
+
+`schedule_source_target_id` は自己参照、registry未登録、およびschedule source自身がschedule sourceを持つ連鎖を拒否する。plan jobに `actions: read` を付与する。
+
+registryは引き続きread-onlyであり、監視コードは書き込まない。観測した日付はmachine stateから毎回導出するのであって、registryへ反映するのではない。
+
+Consequences: 会社が発表日を動かすと、カレンダーtargetが次回観測でそれを取り込み、その日程でevent windowが開く。人の転記は不要になる。planのHTTPは1日あたりGitHub artifact取得1件だけ増え、外部サイトへのアクセスは増えない。取得したbundleは読むだけで、checkpointの更新も再アップロードもしない。schedule source自身は `schedule_source_target_id` を持たないので循環しない。

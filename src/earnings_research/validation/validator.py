@@ -1759,6 +1759,21 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
         if _clean(row.get("source_category", "")) == "event_document" and not _clean(row.get("earnings_event_id", "")):
             issues.append(ValidationIssue("monitor_target", row_number, "earnings_event_id", "event_document target requires earnings_event_id"))
 
+        schedule_source = _clean(row.get("schedule_source_target_id", ""))
+        if schedule_source:
+            sources = {
+                _clean(other.get("monitor_target_id", "")): _clean(
+                    other.get("schedule_source_target_id", "")
+                )
+                for other in rows
+            }
+            if schedule_source == _clean(row.get("monitor_target_id", "")):
+                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not be the target itself"))
+            elif schedule_source not in sources:
+                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must exist in the registry"))
+            elif sources[schedule_source]:
+                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not itself depend on another schedule source"))
+
         for column in ("automation_approved_by", "activation_approved_by"):
             value = _clean(row.get(column, ""))
             if value and not is_activation_authorizer(value):

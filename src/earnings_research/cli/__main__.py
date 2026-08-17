@@ -56,6 +56,7 @@ def main(argv=None) -> int:
     plan_parser.add_argument("--fixture-name")
     plan_parser.add_argument("--planned-at")
     plan_parser.add_argument("--force", action="store_true")
+    plan_parser.add_argument("--schedule-state", type=Path)
 
     fetch_parser = subparsers.add_parser("monitor-fetch-state", help="Fetch and verify prior GitHub artifact state.")
     fetch_parser.add_argument("--repository", required=True)
@@ -84,6 +85,7 @@ def main(argv=None) -> int:
     live_parser.add_argument("--started-at", required=True)
     live_parser.add_argument("--finished-at", required=True)
     live_parser.add_argument("--gap-acknowledgement", type=Path)
+    live_parser.add_argument("--event-date")
 
     acknowledge_parser = subparsers.add_parser(
         "monitor-acknowledge-gap", help="Record an append-only monitoring gap acknowledgement."
@@ -319,6 +321,7 @@ def main(argv=None) -> int:
                 args.fixture_name,
                 args.planned_at,
                 args.force,
+                args.schedule_state,
             )
         if args.command == "monitor-fetch-state":
             return fetch_state(args.repository, args.target_id, args.output)
@@ -346,6 +349,7 @@ def main(argv=None) -> int:
                 started_at=args.started_at,
                 finished_at=args.finished_at,
                 gap_acknowledgement_path=args.gap_acknowledgement,
+                event_date=args.event_date,
             )
         if args.command == "monitor-acknowledge-gap":
             return record_gap_acknowledgement(
