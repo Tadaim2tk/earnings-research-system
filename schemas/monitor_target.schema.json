@@ -21,6 +21,7 @@
     {"name": "schedule_profile", "type": "enum", "required": true, "allowed": ["prospective_event_v1"]},
     {"name": "change_response", "type": "enum", "required": true, "allowed": ["human_review", "autonomous_research_handoff"]},
     {"name": "event_date", "type": "date", "required": false},
+    {"name": "schedule_source_target_id", "type": "string", "required": false},
     {"name": "scheduled_session", "type": "enum", "required": false, "allowed": ["unknown", "before_open", "intraday", "after_close"]},
     {"name": "timezone", "type": "string", "required": true},
     {"name": "active_from", "type": "datetime", "required": true},

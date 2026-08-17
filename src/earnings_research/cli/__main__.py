@@ -56,6 +56,7 @@ def main(argv=None) -> int:
     plan_parser.add_argument("--fixture-name")
     plan_parser.add_argument("--planned-at")
     plan_parser.add_argument("--force", action="store_true")
+    plan_parser.add_argument("--schedule-state", type=Path)
 
     fetch_parser = subparsers.add_parser("monitor-fetch-state", help="Fetch and verify prior GitHub artifact state.")
     fetch_parser.add_argument("--repository", required=True)
@@ -319,6 +320,7 @@ def main(argv=None) -> int:
                 args.fixture_name,
                 args.planned_at,
                 args.force,
+                args.schedule_state,
             )
         if args.command == "monitor-fetch-state":
             return fetch_state(args.repository, args.target_id, args.output)

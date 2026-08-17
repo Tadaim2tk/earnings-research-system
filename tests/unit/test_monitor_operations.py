@@ -41,7 +41,13 @@ from earnings_research.monitoring.persistence import (
     verify_uploaded_bundle,
     write_committed_bundle,
 )
-from earnings_research.monitoring.registry import RegistryError, active_target_plan, load_registry
+from earnings_research.monitoring.registry import (
+    RegistryError,
+    active_target_plan,
+    load_registry,
+    next_announcement_date,
+    observed_event_dates,
+)
 from earnings_research.monitoring.runtime import MonitorRuntime, MonitorTransitionError
 from earnings_research.monitoring.stale import assess_stale_gap
 from earnings_research.validation.validator import ValidationIssue, ValidationReport
@@ -53,8 +59,8 @@ REGISTRY = ROOT / "tests" / "fixtures" / "monitor_operations" / "monitor_targets
 WORKFLOW = ROOT / ".github" / "workflows" / "level2_monitor.yml"
 
 
-def moment(hour, minute=0, day=7):
-    return datetime(2026, 8, day, hour, minute, tzinfo=JST)
+def moment(hour, minute=0, day=7, month=8):
+    return datetime(2026, month, day, hour, minute, tzinfo=JST)
 
 
 def target():
@@ -788,6 +794,56 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
+
+
+SCHEDULE = "2026-05-13=決算発表;2026-08-13=第1四半期決算発表;2026-11-13=第2四半期決算発表 | 2027-02-中旬=第3四半期決算発表"
+
+
+@pytest.mark.parametrize(
+    "today,expected",
+    [
+        ("2026-08-17", "2026-11-13"),
+        ("2026-11-13", "2026-11-13"),
+        ("2026-11-14", None),
+        ("2026-05-01", "2026-05-13"),
+    ],
+)
+def test_next_announcement_date_takes_the_first_date_not_yet_passed(today, expected):
+    assert next_announcement_date(SCHEDULE, date.fromisoformat(today)) == expected
+
+
+def test_undated_rows_never_open_a_window():
+    """A window cannot be opened on 2027年2月中旬; no day was published."""
+    assert next_announcement_date("none | 2027-02-中旬=第3四半期決算発表", date(2026, 12, 1)) is None
+
+
+@pytest.mark.parametrize("schedule", ["", "none", "not-a-date=x", "2026-13-99=x"])
+def test_unusable_schedule_falls_back_instead_of_guessing(schedule):
+    assert next_announcement_date(schedule, date(2026, 8, 17)) is None
+
+
+def test_observed_schedule_overrides_the_registry_event_date():
+    row = target()
+    row["event_date"] = "2026-08-13"
+    row["schedule_source_target_id"] = "MON-SCHEDULE"
+    resolved = observed_event_dates([row], {"MON-SCHEDULE": SCHEDULE}, date(2026, 8, 17))
+    assert resolved == {row["monitor_target_id"]: "2026-11-13"}
+    planned = active_target_plan(
+        [row], planned_at=moment(9, day=10, month=11), observed_event_dates=resolved
+    )
+    # 2026-11-10 is three business days before the observed date, so the event
+    # window is open even though the registry still names August.
+    assert [item["event_date"] for item in planned] == ["2026-11-13"]
+    assert active_target_plan([row], planned_at=moment(9, day=10, month=11)) == []
+
+
+def test_missing_schedule_leaves_the_registry_event_date_in_place():
+    row = target()
+    row["event_date"] = "2026-08-13"
+    row["schedule_source_target_id"] = "MON-SCHEDULE"
+    assert observed_event_dates([row], {}, date(2026, 8, 17)) == {}
+    planned = active_target_plan([row], planned_at=moment(9, day=13), observed_event_dates={})
+    assert [item["event_date"] for item in planned] == ["2026-08-13"]
 
 
 @pytest.mark.parametrize("hour", [1, 5, 9, 13, 17, 21])

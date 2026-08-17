@@ -2,9 +2,9 @@
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from earnings_research.monitoring.github_api import GitHubAPIClient
 from earnings_research.monitoring.handoff import write_research_handoff
@@ -17,8 +17,15 @@ from earnings_research.monitoring.notifications import (
 )
 from earnings_research.monitoring.operations import execute_live_run, execute_offline_run
 from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
-from earnings_research.monitoring.registry import active_target_plan, find_target, load_registry
+from earnings_research.monitoring.registry import (
+    active_target_plan,
+    find_target,
+    load_registry,
+    observed_event_dates,
+)
 from earnings_research.validation.validator import validate_monitor_bundle
+
+JST = timezone(timedelta(hours=9))
 
 
 def plan_registry(
@@ -27,10 +34,20 @@ def plan_registry(
     fixture_name: Optional[str],
     planned_at: Optional[str] = None,
     force: bool = False,
+    schedule_state_dir: Optional[Path] = None,
 ) -> int:
     rows = load_registry(registry_path)
     planned = _aware_datetime(planned_at, "planned_at") if planned_at else None
-    targets = active_target_plan(rows, planned_at=planned, force=force)
+    observed = {}
+    if schedule_state_dir is not None and planned is not None:
+        observed = observed_event_dates(
+            rows,
+            _published_schedules(Path(schedule_state_dir)),
+            planned.astimezone(JST).date(),
+        )
+    targets = active_target_plan(
+        rows, planned_at=planned, force=force, observed_event_dates=observed
+    )
     if target_id:
         targets = [target for target in targets if target.get("monitor_target_id") == target_id]
         if len(targets) != 1:
@@ -179,6 +196,27 @@ def build_handoff(bundle_dir: Path, output_path: Path) -> int:
     created = write_research_handoff(bundle, output_path)
     print(json.dumps({"handoff_required": created}, separators=(",", ":")))
     return 0
+
+
+def _published_schedules(state_dir: Path) -> Dict[str, str]:
+    """Read last_seen_schedule from every downloaded schedule-source bundle.
+
+    A missing or unreadable bundle simply contributes nothing, so planning falls
+    back to the registry column instead of failing the run.
+    """
+    schedules = {}
+    if not state_dir.is_dir():
+        return schedules
+    for checkpoint_path in sorted(state_dir.glob("**/checkpoint.json")):
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        target = str(checkpoint.get("monitor_target_id", ""))
+        schedule = str(checkpoint.get("last_seen_schedule", ""))
+        if target and schedule:
+            schedules[target] = schedule
+    return schedules
 
 
 def notify_state(
