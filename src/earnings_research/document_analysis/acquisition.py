@@ -1,0 +1,69 @@
+"""Which disclosure documents this pilot is allowed to retrieve, and how many.
+
+Acquisition policy lives here rather than in the analysis pipeline so that the
+question "may this document be fetched at all" is answered in one place, by
+data, before any request is made.
+
+The Human authorized retrieval from the publishers listed below (ERS-ADR-0033).
+The authorization is deliberately narrow. Only a document URL that a permitted
+index already handed over is retrieved; nothing is discovered by following
+links, no directory is walked, and a single run stops after a small number of
+documents. A refusal from the publisher ends the attempt instead of being
+retried.
+"""
+
+from typing import Dict, List, Optional
+from urllib.parse import urlsplit
+
+# Publishers of the statutory timely-disclosure documents themselves.
+AUTHORIZED_DOCUMENT_HOSTS = frozenset({"www.release.tdnet.info", "contents.xj-storage.jp"})
+
+# One announcement is one document, sometimes with supplementary material. A
+# handoff asking for more than this is malformed, and a malformed handoff must
+# not become a burst of requests.
+MAX_DOCUMENTS_PER_RUN = 4
+
+# A refusal is an instruction, not a transient error. Retrying it is what turns
+# one unwelcome request into a pattern.
+REFUSAL_STATUSES = frozenset({401, 403, 429, 451})
+
+
+class AcquisitionNotAuthorized(ValueError):
+    """The document is outside what the Human approved for retrieval."""
+
+
+def authorized_host(url: str) -> bool:
+    parts = urlsplit(url or "")
+    if parts.scheme != "https" or parts.username is not None or parts.password is not None:
+        return False
+    return (parts.hostname or "").lower() in AUTHORIZED_DOCUMENT_HOSTS
+
+
+def handed_over_documents(handoff: Dict) -> List[Dict[str, str]]:
+    """Return the documents a monitor handoff already named.
+
+    Returns an empty list when the handoff names nothing, which is the ordinary
+    case for a schedule page. Raises when it names something this pilot is not
+    allowed to retrieve, so an unexpected publisher is visible rather than
+    quietly skipped.
+    """
+    url = handoff.get("last_seen_document_url")
+    title = handoff.get("last_seen_title")
+    if not url or not title:
+        return []
+    if not authorized_host(str(url)):
+        raise AcquisitionNotAuthorized(
+            "document publisher is outside the approved list: %s"
+            % (urlsplit(str(url)).hostname or "unknown")
+        )
+    return [{"url": str(url), "title": str(title)}]
+
+
+def within_run_limit(documents: List[Dict[str, str]]) -> Optional[str]:
+    """Return the reason a batch exceeds the per-run bound, or None."""
+    if len(documents) > MAX_DOCUMENTS_PER_RUN:
+        return "handoff names %d documents, more than the %d allowed in one run" % (
+            len(documents),
+            MAX_DOCUMENTS_PER_RUN,
+        )
+    return None

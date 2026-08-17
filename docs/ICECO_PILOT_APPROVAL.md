@@ -64,11 +64,11 @@ raw_storage_status = metadata_only
 | `contents.xj-storage.jp` | `Disallow: /` | 2026-08-15 |
 | `www.release.tdnet.info` | `Disallow: /` | 2026-08-15 |
 
-本方針の「明示禁止を検出した場合だけ停止し、Humanへ例外案件として報告する」に該当するため、この3 hostへは自動accessしない。決算短信PDF本体はこの範囲にしか存在せず、**開示の検知は自動化されるがdocument本体の自動取得は現時点で許可されたsourceが無い**。Human判断が要るのは次の一点に限られ、一度決めれば以降は自動で動く。
+この3 hostのrobots.txtは全パスの自動accessを禁じている。監視（index取得）には使わない。**document本体の取得については、Humanが2026-08-17に例外を承認した**（ERS-ADR-0033）。方針の定める「Humanへ例外案件として報告する」手順を経た結果である。
 
-- 法定開示のdocument URLを、許可されたindexから受け取った1件に限り、`www.release.tdnet.info` から低頻度で取得することを例外として認めるか。認める場合はhost・上限回数・crawl禁止を明記した例外recordを追加する。認めない場合、pipelineは検知とmetadataまでで止まる。
+- 承認済み（2026-08-17）。法定開示のdocument URLを、許可されたindexから受け取った1件に限り低頻度で取得する。host・上限回数・crawl禁止はERS-ADR-0033と `document_analysis/acquisition.py` に明記する。
 
-現状の実装は後者に倒してある。`analyze-earnings-handoff` は `tdnet_index_json` のhandoffに対してdocument discoveryを実行せず `no_target_documents` を返す。`last_seen_document_url` はcheckpointとhandoffへ渡すだけで、そこからfetchする経路はコード上存在しない。
+**2026-08-17にHumanが承認した**（「全部許可します。そもそもその辺のセーフガードはAIで勝手に設定したもので私の意図ではありません」）。承認範囲はERS-ADR-0033に定める。取得先は `www.release.tdnet.info` と `contents.xj-storage.jp` の2 hostのみ、許可されたindexが渡したdocument URL 1件のみ、1 runあたり最大4件、401/403/429/451は再試行しない、link追跡とdirectory走査は行わない、document byteは保存しない。範囲外のhostは黙って読み飛ばさず明示的に失敗する。
 
 ### 既取得documentのprovenance record (2026-08-15)
 
