@@ -431,3 +431,19 @@ Decision: `monitor-notify-workflow-failure` を追加し、jobが失敗し通常
 monitor job内のstepは、jobがcancelされた場合（timeout含む）は `failure()` が偽になり発火しない。plan jobが失敗してmonitor jobがskipされた場合はstep自体が実行されない。この2つは「targetが1件も観測されない」最悪ケースなので、`needs: [plan, monitor]` の独立job `report-pipeline-failure` で通知する。monitor jobの `failure` は除外する。in-job stepが既に通知しており、含めると1つの障害で2 Issueになる。
 
 Consequences: 次の障害はHumanに届く。`run-monitor` step自体のcrash、`monitor-fetch-state` の失敗、Issue配信の失敗、plan jobの失敗、monitor jobのcancel／timeout、monitor jobのskip。届かない障害は次に限られる。monitor job内のcheckout／setup-python／pipが失敗した場合（CLIが存在しないため通知stepも実行できない。ただしこのときplan jobは成功しmonitor jobはfailureなのでworkflowは赤になる）、`report-pipeline-failure` job自身のcheckout／pipが失敗した場合、workflowが一度も起動しない場合（Actions停止、schedule無効化）。最後のケースは依然としてstale閾値が唯一の検知経路である。observation、robots、append-only、pending、stale閾値、承認gateは変更しない。
+
+## ERS-ADR-0029
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: ERS-ADR-0026で `ICECO_IR_CALENDAR` を含む3 targetをretireしたが、判定の根拠は「静的HTMLに資料一覧が無い」であり、日程についてではなかった。実測すると `https://www.iceco.co.jp/ir/calendar/` はserver-rendered HTMLに決算発表予定日を持つ（2026-05-13、2026-08-13、2026-11-13、および日付未確定の2027年2月中旬）。robots許可の承認済みドメインであり、当初設計の「発表予定日と日程変更の検知」という役割は成立していた。retireは役割の判定を誤ったものである。また `ICECO_TDNET_INDEX` の `event_date` は空で、次回発表日を誰かが手で入れる必要があった。
+
+Decision: 新category `earnings_calendar_html` と新target `ICECO_EARNINGS_CALENDAR` を追加する。既存 `company_ir_calendar` の意味は変えない（他targetへの副作用を避けるため）。parserは可視テキストから `YYYY年M月D日` と直後40文字以内の `決算発表` を対にして抽出し、定時株主総会などは除外する。`2027年2月中旬` のように日が無い行は日付を捏造せず `approximate_rows` として数える。`期`（2027年3月期）を日付末尾と誤認しないよう、日か上旬／中旬／下旬／初旬／末だけを日付部分として認める。
+
+fingerprintはページ全体のdigestではなく**抽出した日程だけ**を対象にする。page digestだとフッターやバナーの変更でも `change_detected` になり、日程監視がノイズになる。決算発表行が1件も取れない場合はparse失敗としfail-closedにする。
+
+観測した日程から `ICECO_TDNET_INDEX` の `event_date` に 2026-11-13 を記録する。registryはHuman所有のread-only configであり、監視コードは書き込まない。
+
+Consequences: 平常日の取得は2 target×1枠=2 fetch/日、event windowとevent当日は7 fetch/日。日程が動けばfingerprintが変わりIssueが出て、本文の `earnings_schedule` に新旧の日付が出る。`analyze-earnings-handoff` は `earnings_calendar_html` でもdiscoveryを実行しない（日程ページに解析対象documentは無く、実行すればhardened adapter外の再取得になる）。**残る制約**: 日程が変わったとき、registryの `event_date` を書き換えるのは依然として人の作業である。planは registryだけを読み checkpointを見ないため、観測した日付をplan時点のwindow判定へ流すには「planは寛容に出し、monitorがstateを見てdue判定する」構造変更が要る。これは別ADRで扱う。

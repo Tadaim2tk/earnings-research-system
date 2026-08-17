@@ -318,6 +318,11 @@ class MonitorRuntime:
                     "last_seen_document_url": observation.stable_metadata.get(
                         "latest_document_url", ""
                     ),
+                    # The published earnings schedule, so a moved announcement
+                    # date is readable without opening the page.
+                    "last_seen_schedule": observation.stable_metadata.get(
+                        "earnings_schedule", ""
+                    ),
                     "metadata_fingerprint": fingerprint_after,
                     "fingerprint_version": FINGERPRINT_VERSION,
                     "observed_etag": observation.etag or "",
@@ -343,6 +348,7 @@ def _empty_checkpoint(target_id: str, recorded_by: str) -> Dict[str, str]:
         "last_seen_title": "",
         "last_seen_published_at": "",
         "last_seen_document_url": "",
+        "last_seen_schedule": "",
         "metadata_fingerprint": "",
         "fingerprint_version": "",
         "observed_etag": "",

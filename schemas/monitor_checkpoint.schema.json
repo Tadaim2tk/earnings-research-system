@@ -20,6 +20,7 @@
     {"name": "last_seen_title", "type": "string", "required": false},
     {"name": "last_seen_published_at", "type": "datetime", "required": false},
     {"name": "last_seen_document_url", "type": "string", "required": false},
+    {"name": "last_seen_schedule", "type": "string", "required": false},
     {"name": "metadata_fingerprint", "type": "string", "required": false},
     {"name": "fingerprint_version", "type": "enum", "required": false, "allowed": ["metadata_v1"]},
     {"name": "observed_etag", "type": "string", "required": false},

@@ -245,6 +245,78 @@ def tdnet_payload(
     }
 
 
+CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+<tr><td>2026年5月13日</td><td>2026年3月期決算発表</td></tr>
+<tr><td>2026年6月24日</td><td>定時株主総会</td></tr>
+<tr><td>2026年8月13日</td><td>2027年3月期第1四半期決算発表</td></tr>
+<tr><td>2026年11月13日</td><td>2027年3月期第2四半期決算発表</td></tr>
+<tr><td>2027年2月中旬</td><td>2027年3月期第3四半期決算発表</td></tr>
+</table>
+<script>var d = "2099年1月1日 偽決算発表";</script>
+</body></html>"""
+
+
+def observe_calendar(html=CALENDAR_HTML):
+    row = target()
+    row["source_category"] = "earnings_calendar_html"
+    return observe_with(
+        lambda _request: httpx.Response(
+            200, text=html, headers={"content-type": "text/html; charset=utf-8"}
+        ),
+        target_row=row,
+    )
+
+
+def test_calendar_reads_announcement_dates_and_ignores_other_events():
+    result = observe_calendar()
+    assert isinstance(result, SourceObservation)
+    assert result.stable_metadata["earnings_schedule"] == (
+        "2026-05-13=2026年3月期決算発表;"
+        "2026-08-13=2027年3月期第1四半期決算発表;"
+        "2026-11-13=2027年3月期第2四半期決算発表"
+    )
+    # 定時株主総会 is not an announcement, and a month with no day is counted
+    # rather than invented.
+    assert result.stable_metadata["approximate_rows"] == "1"
+
+
+def test_calendar_ignores_dates_inside_script_tags():
+    assert "2099" not in observe_calendar().stable_metadata["earnings_schedule"]
+
+
+def test_calendar_fingerprint_moves_only_when_the_schedule_moves():
+    baseline = build_metadata_fingerprint(observe_calendar())
+    unrelated = CALENDAR_HTML.replace("<h1>IRカレンダー</h1>", "<h1>IRカレンダー</h1><p>更新しました</p>")
+    moved = CALENDAR_HTML.replace("2026年11月13日", "2026年11月20日")
+    assert build_metadata_fingerprint(observe_calendar(unrelated)) == baseline
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+def test_calendar_does_not_persist_the_page_body():
+    assert "page_content_sha256" not in observe_calendar().stable_metadata
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<html><head><title>IRカレンダー</title></head><body>準備中</body></html>",
+        "<html><head><title>IRカレンダー</title></head><body>2026年6月24日 定時株主総会</body></html>",
+    ],
+)
+def test_calendar_without_any_announcement_row_fails_closed(html):
+    result = observe_calendar(html)
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "parse_error"
+
+
+def test_calendar_rejects_an_impossible_date():
+    result = observe_calendar(CALENDAR_HTML.replace("2026年11月13日", "2026年11月31日"))
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "parse_error"
+
+
 TDNET_OBSERVED_AT = datetime(2026, 8, 15, 10, 0, tzinfo=JST)
 
 

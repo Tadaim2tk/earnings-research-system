@@ -31,6 +31,7 @@ def build_research_handoff(bundle: VerifiedMonitorBundle) -> Optional[Dict[str, 
         "last_seen_document_id": checkpoint.get("last_seen_document_id") or None,
         "last_seen_published_at": checkpoint.get("last_seen_published_at") or None,
         "last_seen_document_url": checkpoint.get("last_seen_document_url") or None,
+        "last_seen_schedule": checkpoint.get("last_seen_schedule") or None,
         "next_stages": [
             "document_discovery",
             "document_content_acquisition",
