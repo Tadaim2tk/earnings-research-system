@@ -340,7 +340,31 @@ def validate_monitor_registry(rows: List[Dict[str, str]]) -> ValidationReport:
                 issues.extend(_validate_value(spec.table, row_number, column, value))
     issues.extend(_validate_unique_key(spec.table, rows, spec.primary_key))
     issues.extend(_validate_monitor_target_rows(rows))
+    issues.extend(_validate_schedule_source_references(rows))
     return ValidationReport(issues)
+
+
+def _validate_schedule_source_references(rows: List[Dict[str, str]]) -> List[ValidationIssue]:
+    """Cross-row checks that only hold for a complete registry.
+
+    A committed bundle carries the one target it observed, so the source it
+    names is legitimately absent there. Running this per row would fail every
+    live run for a target that has a schedule source.
+    """
+    issues = []
+    sources = {
+        _clean(row.get("monitor_target_id", "")): _clean(row.get("schedule_source_target_id", ""))
+        for row in rows
+    }
+    for row_number, row in enumerate(rows, start=2):
+        schedule_source = _clean(row.get("schedule_source_target_id", ""))
+        if not schedule_source or schedule_source == _clean(row.get("monitor_target_id", "")):
+            continue
+        if schedule_source not in sources:
+            issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must exist in the registry"))
+        elif sources[schedule_source]:
+            issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not itself depend on another schedule source"))
+    return issues
 
 
 def _match_spec_for_file(path: Path, specs: Iterable[TableSpec]) -> TableSpec:
@@ -1760,19 +1784,8 @@ def _validate_monitor_target_rows(rows: List[Dict[str, str]]) -> List[Validation
             issues.append(ValidationIssue("monitor_target", row_number, "earnings_event_id", "event_document target requires earnings_event_id"))
 
         schedule_source = _clean(row.get("schedule_source_target_id", ""))
-        if schedule_source:
-            sources = {
-                _clean(other.get("monitor_target_id", "")): _clean(
-                    other.get("schedule_source_target_id", "")
-                )
-                for other in rows
-            }
-            if schedule_source == _clean(row.get("monitor_target_id", "")):
-                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not be the target itself"))
-            elif schedule_source not in sources:
-                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must exist in the registry"))
-            elif sources[schedule_source]:
-                issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not itself depend on another schedule source"))
+        if schedule_source and schedule_source == _clean(row.get("monitor_target_id", "")):
+            issues.append(ValidationIssue("monitor_target", row_number, "schedule_source_target_id", "schedule source must not be the target itself"))
 
         for column in ("automation_approved_by", "activation_approved_by"):
             value = _clean(row.get(column, ""))
