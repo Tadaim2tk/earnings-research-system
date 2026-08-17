@@ -520,9 +520,12 @@ Decision: `document_analysis/acquisition.py` に取得可否の方針をデー�
 - 取得するのは**許可されたindexが既に渡したdocument URLだけ**。link追跡もdirectory走査も行わない
 - 1 runあたり最大4件（`MAX_DOCUMENTS_PER_RUN`）。壊れたhandoffがrequestの束にならないようにする
 - 401 / 403 / 429 / 451 は拒否であって一時障害ではないので再試行しない
+- **redirectは1 hopずつ解決し、各hopの遷移先を同じ承認リストで検査する**。汎用fetcherは `follow_redirects=True` で自動追従するため、承認hostが任意のhostへ302すれば承認範囲が意味を失う（実測で確認: 承認hostから `elsewhere.invalid` への302がそのまま追従された）。hop上限は3
 - 決算短信・決算説明資料以外は取得前に除外する
 - document byteは従来どおり保存しない（`raw_document_retained: false`）
 
 解析入口は `document_analysis/disclosure.py` の `analyze_named_disclosure` に置き、handoffがdocumentを名指ししていればそれを読み、していなければ従来のdiscovery pipelineへ委譲する。`analyze-earnings-handoff` はこの入口を呼ぶので、workflowの記述は変わらない。
+
+取得は `document_analysis/guarded_fetch.py` の `GuardedDocumentFetcher` が担う。汎用の `TemporaryDocumentFetcher` は方針を知らないので、承認範囲の強制はこの層に置く。
 
 Consequences: 開示検知から構造化データ生成までが人手なしで通る。実測で、2026-08-13 15:30公開の第1四半期決算短信を実URLから取得・解析し、売上高15,584百万円（正規化 15,584,000,000 JPY、`q1_cumulative`、page/anchor付き）を含む34 metricを生成した。承認範囲外のhostは失敗するため、将来targetが増えても取得先が黙って広がることはない。低頻度という前提は、監視側の枠（平常日2 fetch/日）と1 runあたり4件の上限で担保される。

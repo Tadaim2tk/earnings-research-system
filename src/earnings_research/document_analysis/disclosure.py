@@ -15,6 +15,7 @@ from earnings_research.document_analysis.acquisition import (
     within_run_limit,
 )
 from earnings_research.document_analysis.discovery import classify_document
+from earnings_research.document_analysis.guarded_fetch import GuardedDocumentFetcher
 from earnings_research.document_analysis.pipeline import (
     analyze_document_url,
     analyze_handoff,
@@ -45,11 +46,14 @@ def analyze_named_disclosure(
         raise ValueError(limit_reason)
     analyzed = []
     excluded = 0
+    # The guarded fetcher re-checks every redirect hop against the approved
+    # publishers, which the generic fetcher does not.
+    fetcher = GuardedDocumentFetcher()
     for document in documents:
         if classify_document(document["title"], document["url"]) is None:
             excluded += 1
             continue
-        result = analyze_document_url(document["url"], document["title"], acquired_at)
+        result = analyze_document_url(document["url"], document["title"], acquired_at, fetcher)
         path = output_dir / (result.analysis_id + ".json")
         write_analysis(result, path)
         analyzed.append(str(path))
