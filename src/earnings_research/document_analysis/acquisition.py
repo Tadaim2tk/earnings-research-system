@@ -33,8 +33,22 @@ class AcquisitionNotAuthorized(ValueError):
 
 
 def authorized_host(url: str) -> bool:
-    parts = urlsplit(url or "")
+    text = url or ""
+    # A newline or a NUL in a URL is never legitimate here, and both have a long
+    # history of being read differently by different layers.
+    if any(character in text for character in "\n\r\t\x00") or text.strip() != text:
+        return False
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return False
     if parts.scheme != "https" or parts.username is not None or parts.password is not None:
+        return False
+    # A different port on an approved name is a different service.
+    try:
+        if parts.port not in (None, 443):
+            return False
+    except ValueError:
         return False
     return (parts.hostname or "").lower() in AUTHORIZED_DOCUMENT_HOSTS
 

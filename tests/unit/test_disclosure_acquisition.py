@@ -76,6 +76,14 @@ def test_a_batch_over_the_run_limit_is_refused():
     assert within_run_limit(batch[:MAX_DOCUMENTS_PER_RUN]) is None
 
 
+def test_the_run_limit_is_four_documents():
+    """Pins the number; the relative test above passes for any limit."""
+    assert MAX_DOCUMENTS_PER_RUN == 4
+    batch = [{"url": TDNET_PDF, "title": TITLE}]
+    assert within_run_limit(batch * 4) is None
+    assert within_run_limit(batch * 5) is not None
+
+
 def test_named_document_is_read_without_any_discovery(tmp_path, monkeypatch):
     calls = []
 
@@ -96,6 +104,26 @@ def test_named_document_is_read_without_any_discovery(tmp_path, monkeypatch):
     assert calls == [(TDNET_PDF, TITLE)]
     assert dispatch["status"] == "analysis_completed"
     assert dispatch["raw_document_retained"] is False
+
+
+def test_the_document_is_read_through_the_guarded_fetcher(tmp_path, monkeypatch):
+    """The generic fetcher follows redirects off the approved publishers."""
+    from earnings_research.document_analysis.guarded_fetch import GuardedDocumentFetcher
+
+    used = []
+
+    def fake_analyze(url, title, acquired_at=None, fetcher=None):
+        used.append(fetcher)
+        return _stub_analysis()
+
+    monkeypatch.setattr(
+        "earnings_research.document_analysis.disclosure.analyze_document_url", fake_analyze
+    )
+    analyze_named_disclosure(
+        handoff_path=write_handoff(tmp_path, handoff()), output_dir=tmp_path / "out"
+    )
+    assert len(used) == 1
+    assert isinstance(used[0], GuardedDocumentFetcher)
 
 
 def test_a_handoff_without_a_named_document_still_uses_discovery(tmp_path, monkeypatch):
