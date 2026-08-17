@@ -97,7 +97,8 @@ def analyze_document_url(
     return result
 
 
-_INDEX_ONLY_CATEGORIES = {"tdnet_index_json"}
+# Categories that publish metadata, never a document to analyze.
+_INDEX_ONLY_CATEGORIES = {"tdnet_index_json", "earnings_calendar_html"}
 
 
 def analyze_handoff(

@@ -7,7 +7,7 @@ import json
 import re
 import ssl
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.message import Message
 from html.parser import HTMLParser
 from typing import Callable, Dict, Mapping, Optional, Tuple
@@ -59,6 +59,8 @@ _SECRET_QUERY_KEYS = {
 _ALLOWED_CHARSETS = {"utf-8", "shift_jis", "cp932", "euc_jp", "iso2022_jp"}
 _ALLOWED_STABLE_METADATA_KEYS = {"category", "document_type", "language", "period"}
 _TDNET_INDEX_CATEGORY = "tdnet_index_json"
+_EARNINGS_CALENDAR_CATEGORY = "earnings_calendar_html"
+_MAX_SCHEDULE_ROWS = 12
 _JST = timezone(timedelta(hours=9))
 _PUBLISHED_AT_TOLERANCE = timedelta(minutes=5)
 
@@ -70,6 +72,35 @@ class LiveSourcePolicyError(ValueError):
         super().__init__(safe_message)
         self.error_code = error_code
         self.safe_message = safe_message
+
+
+class _VisibleTextHTMLParser(HTMLParser):
+    """Collect body text, dropping the elements that never carry schedule rows."""
+
+    _SKIPPED = {"script", "style", "head", "noscript", "template"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self.parts = []
+
+    def handle_starttag(self, tag, _attrs) -> None:
+        if tag.lower() in self._SKIPPED:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag) -> None:
+        if tag.lower() in self._SKIPPED and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data) -> None:
+        if not self._skip_depth:
+            self.parts.append(data)
+
+    @property
+    def segments(self) -> list:
+        """Text nodes kept apart, so a table cell stays one unit."""
+        cleaned = (re.sub(r"\s+", " ", part).strip() for part in self.parts)
+        return [part for part in cleaned if part]
 
 
 class _GenericHTMLParser(HTMLParser):
@@ -509,6 +540,8 @@ class LiveSourceAdapter:
                     source_category=source_category,
                     observed_at=context.observed_at,
                 )
+            elif source_category == _EARNINGS_CALENDAR_CATEGORY:
+                parsed = _parse_ir_calendar_html(text, media_type)
             else:
                 parsed = (
                     _parse_html(text)
@@ -531,7 +564,7 @@ class LiveSourceAdapter:
         # Generic pages keep only a digest for later comparisons. Disclosure
         # lists fingerprint their latest-item metadata instead; raw content is
         # never part of the persisted monitoring bundle.
-        if source_category != _TDNET_INDEX_CATEGORY:
+        if source_category not in (_TDNET_INDEX_CATEGORY, _EARNINGS_CALENDAR_CATEGORY):
             parsed["stable_metadata"]["page_content_sha256"] = hashlib.sha256(bytes(body)).hexdigest()
         length_mismatch = isinstance(declared_length, int) and declared_length != actual_length
         previous = context.previous_checkpoint
@@ -789,6 +822,82 @@ def _parse_html(text: str) -> Dict:
         "replacement_suspected": _truthy(corrected),
         "stable_metadata": stable_metadata,
     }
+
+
+# A row reads "2026年11月13日 2027年3月期第2四半期決算発表". The label between the
+# date and 決算発表 carries its own digits, so the date is matched first and the
+# label is read from a bounded window that stops at the next date.
+# 期 in "2027年3月期第2四半期" looks like a date tail, so only a day number or a
+# named part of the month counts as one.
+_SCHEDULE_DATE = re.compile(
+    r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(?:(\d{1,2})\s*日|(上旬|中旬|下旬|初旬|末))"
+)
+_SCHEDULE_LABEL_WINDOW = 40
+
+
+def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
+    """Fingerprint the published earnings schedule, not the whole page.
+
+    The page digest moves on any unrelated edit, which turns a schedule watch
+    into noise. Only the announced dates are compared, so a change means the
+    company moved a date or added a quarter.
+    """
+    if media_type != "text/html":
+        raise ValueError("earnings calendar must be served as HTML")
+    generic = _parse_html(text)
+    parser = _VisibleTextHTMLParser()
+    parser.feed(text)
+    parser.close()
+    segments = parser.segments
+    exact = []
+    approximate = []
+    for index, segment in enumerate(segments):
+        for match in _SCHEDULE_DATE.finditer(segment):
+            label = _schedule_label(segments, index, segment[match.end() :])
+            if label is None:
+                continue
+            year, month, day, vague = match.group(1), match.group(2), match.group(3), match.group(4)
+            if not day:
+                # Forms such as 2027年2月中旬 name no day. The part of the month
+                # is kept verbatim so a move to 下旬 is still a change, without
+                # inventing a date that was never published.
+                approximate.append("%s-%02d-%s=%s" % (year, int(month), vague, label))
+                continue
+            try:
+                parsed = date(int(year), int(month), int(day))
+            except ValueError as exc:
+                raise ValueError("IR calendar row has an invalid date") from exc
+            exact.append("%s=%s" % (parsed.isoformat(), label))
+    if not exact and not approximate:
+        raise ValueError("IR calendar contains no earnings announcement row")
+    if len(exact) + len(approximate) > _MAX_SCHEDULE_ROWS:
+        raise ValueError("IR calendar contains an implausible number of rows")
+    generic["stable_metadata"] = {
+        "earnings_schedule": ";".join(exact) if exact else "none",
+        "approximate_schedule": ";".join(approximate) if approximate else "none",
+    }
+    return generic
+
+
+def _schedule_label(segments, index: int, remainder: str) -> Optional[str]:
+    """Return the announcement label that belongs to this date, or None.
+
+    The label is the rest of the date's own text node, or the next one when the
+    date owns a cell of its own. Reading past that would let an unrelated
+    "決算発表資料はこちら" elsewhere on the page attach itself to a shareholder
+    meeting date. The stored label is truncated, never the row.
+    """
+    candidate = remainder.strip()
+    if not candidate and index + 1 < len(segments):
+        candidate = segments[index + 1]
+    if "決算発表" not in candidate:
+        return None
+    label = candidate[: candidate.index("決算発表") + len("決算発表")]
+    if not _is_meaningful_text(label):
+        return None
+    # The cell already bounds the label. Length bounds only what is stored, so a
+    # long but legitimate label keeps its row instead of vanishing in silence.
+    return _clean_text(label)[:_SCHEDULE_LABEL_WINDOW]
 
 
 def _parse_json(
