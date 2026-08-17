@@ -675,6 +675,15 @@ def test_unknown_workflow_failure_reason_is_rejected():
         )
 
 
+def test_monitor_job_and_pipeline_report_agree_on_an_empty_plan():
+    """The same empty matrix must skip the monitor job and stay silent."""
+    parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    monitor_condition = " ".join(parsed["jobs"]["monitor"]["if"].split())
+    report_condition = " ".join(parsed["jobs"]["report-pipeline-failure"]["if"].split())
+    assert monitor_condition == "needs.plan.outputs.matrix != '[]'"
+    assert "needs.plan.outputs.matrix != '[]'" in report_condition
+
+
 def test_pipeline_failure_job_covers_what_the_in_job_report_cannot():
     parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job = parsed["jobs"]["report-pipeline-failure"]
@@ -682,6 +691,10 @@ def test_pipeline_failure_job_covers_what_the_in_job_report_cannot():
     assert job["needs"] == ["plan", "monitor"]
     assert "needs.plan.result != 'success'" in condition
     assert "needs.monitor.result == 'cancelled'" in condition
+    # Nothing being due is the ordinary outcome on a day outside the window, so
+    # a skipped monitor job only counts when the plan actually produced targets.
+    assert "needs.monitor.result == 'skipped' && needs.plan.outputs.matrix != '[]'" in condition
+    assert "needs.monitor.result == 'skipped')" not in condition
     # A failed monitor job already reports itself, so covering it here would
     # deliver two Issues for one failure.
     assert "needs.monitor.result == 'failure'" not in condition

@@ -430,6 +430,8 @@ Decision: `monitor-notify-workflow-failure` を追加し、jobが失敗し通常
 
 monitor job内のstepは、jobがcancelされた場合（timeout含む）は `failure()` が偽になり発火しない。plan jobが失敗してmonitor jobがskipされた場合はstep自体が実行されない。この2つは「targetが1件も観測されない」最悪ケースなので、`needs: [plan, monitor]` の独立job `report-pipeline-failure` で通知する。monitor jobの `failure` は除外する。in-job stepが既に通知しており、含めると1つの障害で2 Issueになる。
 
+skipの扱いには条件を付ける。monitor jobは `needs.plan.outputs.matrix != '[]'` でskipされるため、**その日dueなtargetが無いという正常な結果でもskipになる**。matrixが空でないときのskipだけを異常として扱う（ERS-ADR-0031）。
+
 Consequences: 次の障害はHumanに届く。`run-monitor` step自体のcrash、`monitor-fetch-state` の失敗、Issue配信の失敗、plan jobの失敗、monitor jobのcancel／timeout、monitor jobのskip。届かない障害は次に限られる。monitor job内のcheckout／setup-python／pipが失敗した場合（CLIが存在しないため通知stepも実行できない。ただしこのときplan jobは成功しmonitor jobはfailureなのでworkflowは赤になる）、`report-pipeline-failure` job自身のcheckout／pipが失敗した場合、workflowが一度も起動しない場合（Actions停止、schedule無効化）。最後のケースは依然としてstale閾値が唯一の検知経路である。observation、robots、append-only、pending、stale閾値、承認gateは変更しない。
 
 ## ERS-ADR-0029
@@ -465,3 +467,17 @@ ERS-ADR-0029でカレンダーのfingerprintを日程だけに絞ったことで
 Decision: `content_ambiguous` のcheckpoint更新で、`replacement_detection` に加えて `observed_etag` / `observed_last_modified` / `observed_content_length` も観測値へ更新する。曖昧性の通知は従来どおり1回出すが、比較の基準は前へ進める。
 
 Consequences: 差替えの疑いは検知した時点で1回通知され、その後は新しい観測を基準に比較が続く。1回のページ編集が監視停止に育つことはなくなる。連続して曖昧な観測が続く場合は毎回通知される。`no_change` へ落とすことはせず、fingerprint比較、pending保持、stale閾値、承認gateは変更しない。この修正は全categoryに効く。
+
+## ERS-ADR-0031
+
+Date: 2026-08-17
+
+Status: Accepted
+
+Context: ERS-ADR-0028で追加した `report-pipeline-failure` は `needs.monitor.result == 'skipped'` を異常として扱っていた。しかしmonitor jobは `needs.plan.outputs.matrix != '[]'` を条件に持ち、**その日dueなtargetが1件も無い正常な結果でもskipになる**。通常日はJST 17:17枠しかdueにならないため、他の5枠すべてがこの条件に当たる。結果として2026-08-15から3日連続で `[ERS monitor] pipeline: workflow_failure` が起票された。dedupで1日1件に抑えられていたが、内容は誤りである。
+
+これは「何も観測していないrunを見逃さない」ための機構が、逆に「正常なrunを障害として報告する」側へ振れた例である。誤報が続く通知は読まれなくなり、本物の障害を隠す。
+
+Decision: skipの条件を `needs.monitor.result == 'skipped' && needs.plan.outputs.matrix != '[]'` に限定する。matrixが空のskipはplan jobの設計どおりの正常終了であり、通知しない。plan jobの失敗とmonitor jobのcancelは従来どおり通知する。
+
+Consequences: 通常日の5枠は静かになる。matrixが空でないのにmonitor jobがskipされる状態（GitHub側の異常やmatrix展開の失敗）は引き続き通知される。誤報として起票済みの3件はcloseする。monitor jobとreport jobが同じ `needs.plan.outputs.matrix != '[]'` を参照することをtestで固定し、片方だけ変更されて再発することを防ぐ。
