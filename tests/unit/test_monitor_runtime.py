@@ -361,6 +361,46 @@ def test_etag_conflict_without_explicit_flag_is_content_ambiguous():
     assert result.checkpoint_after["target_state"] == "degraded"
 
 
+def test_content_ambiguity_is_reported_once_and_does_not_latch():
+    """A single ambiguous observation must not hold the target in error.
+
+    The indicators that produced the ambiguity used to be discarded, so every
+    later run compared against the same stale pair and the target stayed in
+    error until it aged into a fatal stale stop.
+    """
+    resolved = run_sequence()["human_resolution"]
+    checkpoint = resolved.checkpoint_after
+    runs = resolved.monitor_runs
+    results = []
+    for index, hour in enumerate((15, 16, 17)):
+        observation = observe("changed", moment(hour))
+        assert isinstance(observation, SourceObservation)
+        observation = replace(
+            observation, etag="etag-example-conflict", replacement_suspected=False
+        )
+        outcome = MonitorRuntime().transition(
+            target=target(),
+            previous_checkpoint=checkpoint,
+            prior_runs=runs,
+            resolutions=resolved.monitor_resolutions,
+            observation=observation,
+            run_id="MRUN-EXAMPLE-LATCH-%03d" % index,
+            started_at=moment(hour),
+            finished_at=moment(hour, 1),
+        )
+        checkpoint = outcome.checkpoint_after
+        runs = outcome.monitor_runs
+        results.append(outcome)
+
+    assert results[0].monitor_run["error_code"] == "content_ambiguous"
+    assert [outcome.monitor_run["error_code"] for outcome in results[1:]] == ["", ""]
+    assert [outcome.checkpoint_after["target_state"] for outcome in results[1:]] == [
+        "healthy",
+        "healthy",
+    ]
+    assert results[-1].checkpoint_after["observed_etag"] == "etag-example-conflict"
+
+
 def test_fatal_error_never_claims_healthy_and_positive_bundle_passes():
     result = run_sequence()["fatal_error"]
     assert result.monitor_run["error_code"] == "state_unavailable"

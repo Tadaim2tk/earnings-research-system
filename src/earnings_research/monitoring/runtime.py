@@ -320,9 +320,7 @@ class MonitorRuntime:
                     ),
                     # The published earnings schedule, so a moved announcement
                     # date is readable without opening the page.
-                    "last_seen_schedule": observation.stable_metadata.get(
-                        "earnings_schedule", ""
-                    ),
+                    "last_seen_schedule": _schedule_summary(observation.stable_metadata),
                     "metadata_fingerprint": fingerprint_after,
                     "fingerprint_version": FINGERPRINT_VERSION,
                     "observed_etag": observation.etag or "",
@@ -331,9 +329,34 @@ class MonitorRuntime:
                     "replacement_detection": replacement_detection,
                 }
             )
+        elif error_code == "content_ambiguous" and isinstance(observation, SourceObservation):
+            # Report the ambiguity once, then adopt the indicators that produced
+            # it. Leaving the old values in place made every later run compare
+            # against the same stale pair, so one page edit held the target in
+            # error until it aged into a fatal stale stop.
+            checkpoint.update(
+                {
+                    "replacement_detection": replacement_detection,
+                    "observed_etag": observation.etag or "",
+                    "observed_last_modified": observation.last_modified or "",
+                    "observed_content_length": (
+                        "" if observation.content_length is None else str(observation.content_length)
+                    ),
+                }
+            )
         elif error_code == "content_ambiguous":
             checkpoint["replacement_detection"] = replacement_detection
         return run, checkpoint
+
+
+def _schedule_summary(stable_metadata) -> str:
+    """Join the dated and the month-only announcement rows for one field."""
+    parts = [
+        stable_metadata.get(key, "")
+        for key in ("earnings_schedule", "approximate_schedule")
+    ]
+    present = [part for part in parts if part and part != "none"]
+    return " | ".join(present)
 
 
 def _empty_checkpoint(target_id: str, recorded_by: str) -> Dict[str, str]:

@@ -442,8 +442,26 @@ Context: ERS-ADR-0026で `ICECO_IR_CALENDAR` を含む3 targetをretireしたが
 
 Decision: 新category `earnings_calendar_html` と新target `ICECO_EARNINGS_CALENDAR` を追加する。既存 `company_ir_calendar` の意味は変えない（他targetへの副作用を避けるため）。parserは可視テキストから `YYYY年M月D日` と直後40文字以内の `決算発表` を対にして抽出し、定時株主総会などは除外する。`2027年2月中旬` のように日が無い行は日付を捏造せず `approximate_rows` として数える。`期`（2027年3月期）を日付末尾と誤認しないよう、日か上旬／中旬／下旬／初旬／末だけを日付部分として認める。
 
-fingerprintはページ全体のdigestではなく**抽出した日程だけ**を対象にする。page digestだとフッターやバナーの変更でも `change_detected` になり、日程監視がノイズになる。決算発表行が1件も取れない場合はparse失敗としfail-closedにする。
+fingerprintはページ全体のdigestを使わず、抽出した日程を対象にする（generic parserが読む `<title>` とmetaは従来どおり残る）。page digestだとフッターやバナーの変更でも `change_detected` になり、日程監視がノイズになる。決算発表行が1件も取れない場合、およびHTML以外のcontent-typeで返された場合はfail-closedとする。
+
+ラベルは日付と同じテキストノードの残り、または日付がセルを占める場合は次のノードだけから取る。ページ内の別の場所にある「決算発表資料はこちら」が無関係な日付（定時株主総会など）に結び付くのを防ぐため、窓の長さではなくセル境界で区切る。ラベルが長い場合は行を捨てず、保存する文字列だけを切り詰める。
+
+日が無い行は件数ではなく値ごと `approximate_schedule` に記録する（`2027-02-中旬=...`）。件数だけだと、実ページで唯一日付未確定な第3四半期の行がどこへ動いても検知できない。日付の捏造はしない。
 
 観測した日程から `ICECO_TDNET_INDEX` の `event_date` に 2026-11-13 を記録する。registryはHuman所有のread-only configであり、監視コードは書き込まない。
 
-Consequences: 平常日の取得は2 target×1枠=2 fetch/日、event windowとevent当日は7 fetch/日。日程が動けばfingerprintが変わりIssueが出て、本文の `earnings_schedule` に新旧の日付が出る。`analyze-earnings-handoff` は `earnings_calendar_html` でもdiscoveryを実行しない（日程ページに解析対象documentは無く、実行すればhardened adapter外の再取得になる）。**残る制約**: 日程が変わったとき、registryの `event_date` を書き換えるのは依然として人の作業である。planは registryだけを読み checkpointを見ないため、観測した日付をplan時点のwindow判定へ流すには「planは寛容に出し、monitorがstateを見てdue判定する」構造変更が要る。これは別ADRで扱う。
+Consequences: 平常日の取得は2 target×1枠=2 fetch/日、event windowとevent当日は7 fetch/日。日程が動けばfingerprintが変わりIssueが出て、本文の `earnings_schedule` に**変更後**の日程が出る。旧値は本文に出ないため、差分を見るには前世代のartifactを参照する必要がある。`analyze-earnings-handoff` は `earnings_calendar_html` でもdiscoveryを実行しない（日程ページに解析対象documentは無く、実行すればhardened adapter外の再取得になる）。**残る制約**: 日程が変わったとき、registryの `event_date` を書き換えるのは依然として人の作業である。planは registryだけを読み checkpointを見ないため、観測した日付をplan時点のwindow判定へ流すには「planは寛容に出し、monitorがstateを見てdue判定する」構造変更が要る。これは別ADRで扱う。
+
+## ERS-ADR-0030
+
+Date: 2026-08-15
+
+Status: Accepted
+
+Context: `content_ambiguous` は、fingerprintが一致するのにETag・Last-Modified・Content-Lengthのいずれかが前回と食い違うときのエラーである。この経路ではcheckpointの `replacement_detection` しか更新されず、観測したindicatorは捨てられていた。したがって次回以降のrunも同じ古い値と比較し続け、**一度発生すると永久にerrorのまま**になる。`last_success_at` が凍結するため、通常日なら60営業時間で `state_unavailable` → `stopped`（FATAL）となり、Humanのgap acknowledgementなしには復帰しない。
+
+ERS-ADR-0029でカレンダーのfingerprintを日程だけに絞ったことで、この経路が現実に踏まれるようになった。日程以外のページ編集はfingerprintを動かさないが `observed_content_length` は動くためである。実測では、フッター文言の変更1回で3日後に `stopped` に到達した。実ページの応答にはETagもLast-Modifiedも無く、判定は本文バイト長だけに依存する。
+
+Decision: `content_ambiguous` のcheckpoint更新で、`replacement_detection` に加えて `observed_etag` / `observed_last_modified` / `observed_content_length` も観測値へ更新する。曖昧性の通知は従来どおり1回出すが、比較の基準は前へ進める。
+
+Consequences: 差替えの疑いは検知した時点で1回通知され、その後は新しい観測を基準に比較が続く。1回のページ編集が監視停止に育つことはなくなる。連続して曖昧な観測が続く場合は毎回通知される。`no_change` へ落とすことはせず、fingerprint比較、pending保持、stale閾値、承認gateは変更しない。この修正は全categoryに効く。

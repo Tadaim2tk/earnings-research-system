@@ -46,7 +46,7 @@ raw_storage_status = metadata_only
 | `ICECO_IR_ROOT` | https://www.iceco.co.jp/ir/ | retired (2026-08-15) |
 | `ICECO_RESULTS` | https://www.iceco.co.jp/ir/results/ | retired (2026-08-15) |
 
-旧3 targetの静的HTMLには動的に埋め込まれる資料情報がなく、2026-08-13 15:30の第1四半期決算短信を検知できなかった。ただし `/ir/calendar/` は決算発表予定日をserver-rendered HTMLで持っており、当初設計の「日程変更の検知」という役割は成立していた（ERS-ADR-0029）。同URLを新category `earnings_calendar_html` の `ICECO_EARNINGS_CALENDAR` として再開する。terms reviewは既存のiceco.co.jp根拠がそのまま有効である。行を削除するとcheckpointとartifactが孤児化するため `retired` として残し、`active_until` に終了時刻を記録する。旧行の承認欄は当時の事実として変更しない。
+旧3 targetの静的HTMLには動的に埋め込まれる資料情報がなく、2026-08-13 15:30の第1四半期決算短信を検知できなかった。ただし `/ir/calendar/` は決算発表予定日をserver-rendered HTMLで持っており、当初設計の「日程変更の検知」という役割は成立していた（ERS-ADR-0029）。同URLを新category `earnings_calendar_html` の `ICECO_EARNINGS_CALENDAR` として再開する。terms reviewは2026-08-09に記録した既存のiceco.co.jp根拠がそのまま有効であり、新しい確認は行っていない。行を削除するとcheckpointとartifactが孤児化するため `retired` として残し、`active_until` に終了時刻を記録する。旧行の承認欄は当時の事実として変更しない。
 
 ### 新sourceのcandidate-specific terms review (2026-08-15)
 

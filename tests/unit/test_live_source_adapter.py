@@ -277,9 +277,12 @@ def test_calendar_reads_announcement_dates_and_ignores_other_events():
         "2026-08-13=2027年3月期第1四半期決算発表;"
         "2026-11-13=2027年3月期第2四半期決算発表"
     )
-    # 定時株主総会 is not an announcement, and a month with no day is counted
-    # rather than invented.
-    assert result.stable_metadata["approximate_rows"] == "1"
+    # 定時株主総会 is not an announcement, and a month with no day keeps the
+    # published wording rather than being turned into a date.
+    assert result.stable_metadata["approximate_schedule"] == (
+        "2027-02-中旬=2027年3月期第3四半期決算発表"
+    )
+    assert "2027-02-15" not in result.stable_metadata["approximate_schedule"]
 
 
 def test_calendar_ignores_dates_inside_script_tags():
@@ -292,6 +295,67 @@ def test_calendar_fingerprint_moves_only_when_the_schedule_moves():
     moved = CALENDAR_HTML.replace("2026年11月13日", "2026年11月20日")
     assert build_metadata_fingerprint(observe_calendar(unrelated)) == baseline
     assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+@pytest.mark.parametrize(
+    "replacement", ["2027年2月下旬", "2027年3月中旬", "2027年3月上旬"]
+)
+def test_calendar_detects_a_move_between_undated_months(replacement):
+    """The undated row is the one most likely to move, so it cannot be silent."""
+    baseline = build_metadata_fingerprint(observe_calendar())
+    moved = CALENDAR_HTML.replace("2027年2月中旬", replacement)
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+def test_calendar_label_comes_from_the_date_own_row():
+    """An unrelated 決算発表 elsewhere must not attach to another date."""
+    html = """<html><head><title>IRカレンダー</title></head><body><table>
+    <tr><th>2026年11月13日</th><td>2027年3月期第2四半期決算発表</td></tr>
+    <tr><th>2027年6月23日</th><td>定時株主総会</td></tr></table>
+    <p>過去の決算発表資料はこちらをご覧ください。</p></body></html>"""
+    result = observe_calendar(html)
+    assert isinstance(result, SourceObservation)
+    assert result.stable_metadata["earnings_schedule"] == (
+        "2026-11-13=2027年3月期第2四半期決算発表"
+    )
+
+
+def test_calendar_keeps_a_long_label_row_and_truncates_the_stored_text():
+    """A verbose label must bound what is stored, not make the row disappear."""
+    long_label = "2027年3月期第3四半期ならびに通期の連結業績予想および配当予想の修正に関する決算発表"
+    html = CALENDAR_HTML.replace("2027年3月期第2四半期決算発表", long_label)
+    schedule = observe_calendar(html).stable_metadata["earnings_schedule"]
+    stored = [row for row in schedule.split(";") if row.startswith("2026-11-13=")]
+    assert len(stored) == 1
+    assert len(stored[0].split("=", 1)[1]) == 40
+
+
+def test_calendar_rejects_an_implausible_number_of_rows():
+    rows = "".join(
+        "<p>2026年%d月%d日</p><p>決算発表</p>" % ((index % 12) + 1, (index % 28) + 1)
+        for index in range(14)
+    )
+    result = observe_calendar(
+        "<html><head><title>IRカレンダー</title></head><body>%s</body></html>" % rows
+    )
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "parse_error"
+
+
+def test_calendar_served_as_json_fails_instead_of_degrading_silently():
+    """A content-type change must not quietly turn the schedule watch off."""
+    row = target()
+    row["source_category"] = "earnings_calendar_html"
+    result = observe_with(
+        lambda _request: httpx.Response(
+            200,
+            json={"title": "Doc", "document_id": "D9"},
+            headers={"content-type": "application/json"},
+        ),
+        target_row=row,
+    )
+    assert isinstance(result, ObservationFailure)
+    assert result.error_code == "parse_error"
 
 
 def test_calendar_does_not_persist_the_page_body():

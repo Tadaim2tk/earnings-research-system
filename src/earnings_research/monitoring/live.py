@@ -97,8 +97,10 @@ class _VisibleTextHTMLParser(HTMLParser):
             self.parts.append(data)
 
     @property
-    def text(self) -> str:
-        return re.sub(r"\s+", " ", " ".join(self.parts))
+    def segments(self) -> list:
+        """Text nodes kept apart, so a table cell stays one unit."""
+        cleaned = (re.sub(r"\s+", " ", part).strip() for part in self.parts)
+        return [part for part in cleaned if part]
 
 
 class _GenericHTMLParser(HTMLParser):
@@ -538,8 +540,8 @@ class LiveSourceAdapter:
                     source_category=source_category,
                     observed_at=context.observed_at,
                 )
-            elif source_category == _EARNINGS_CALENDAR_CATEGORY and media_type == "text/html":
-                parsed = _parse_ir_calendar_html(text)
+            elif source_category == _EARNINGS_CALENDAR_CATEGORY:
+                parsed = _parse_ir_calendar_html(text, media_type)
             else:
                 parsed = (
                     _parse_html(text)
@@ -833,47 +835,69 @@ _SCHEDULE_DATE = re.compile(
 _SCHEDULE_LABEL_WINDOW = 40
 
 
-def _parse_ir_calendar_html(text: str) -> Dict:
+def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
     """Fingerprint the published earnings schedule, not the whole page.
 
     The page digest moves on any unrelated edit, which turns a schedule watch
-    into noise. Only the announced earnings dates are compared, so a change
-    means the company moved a date or added a quarter.
+    into noise. Only the announced dates are compared, so a change means the
+    company moved a date or added a quarter.
     """
+    if media_type != "text/html":
+        raise ValueError("earnings calendar must be served as HTML")
     generic = _parse_html(text)
     parser = _VisibleTextHTMLParser()
     parser.feed(text)
     parser.close()
-    body = parser.text
-    rows = list(_SCHEDULE_DATE.finditer(body))
+    segments = parser.segments
     exact = []
-    approximate = 0
-    for index, match in enumerate(rows):
-        stop = rows[index + 1].start() if index + 1 < len(rows) else len(body)
-        window = body[match.end() : min(stop, match.end() + _SCHEDULE_LABEL_WINDOW)]
-        if "決算発表" not in window:
-            continue
-        label = _clean_text(window[: window.index("決算発表") + len("決算発表")])
-        year, month, day, vague = match.group(1), match.group(2), match.group(3), match.group(4)
-        if not day:
-            # Forms such as 2027年2月中旬 name no day. Counting them keeps the row
-            # visible without inventing a date.
-            approximate += 1
-            continue
-        try:
-            parsed = date(int(year), int(month), int(day))
-        except ValueError as exc:
-            raise ValueError("IR calendar row has an invalid date") from exc
-        exact.append("%s=%s" % (parsed.isoformat(), label))
+    approximate = []
+    for index, segment in enumerate(segments):
+        for match in _SCHEDULE_DATE.finditer(segment):
+            label = _schedule_label(segments, index, segment[match.end() :])
+            if label is None:
+                continue
+            year, month, day, vague = match.group(1), match.group(2), match.group(3), match.group(4)
+            if not day:
+                # Forms such as 2027年2月中旬 name no day. The part of the month
+                # is kept verbatim so a move to 下旬 is still a change, without
+                # inventing a date that was never published.
+                approximate.append("%s-%02d-%s=%s" % (year, int(month), vague, label))
+                continue
+            try:
+                parsed = date(int(year), int(month), int(day))
+            except ValueError as exc:
+                raise ValueError("IR calendar row has an invalid date") from exc
+            exact.append("%s=%s" % (parsed.isoformat(), label))
     if not exact and not approximate:
         raise ValueError("IR calendar contains no earnings announcement row")
-    if len(exact) + approximate > _MAX_SCHEDULE_ROWS:
+    if len(exact) + len(approximate) > _MAX_SCHEDULE_ROWS:
         raise ValueError("IR calendar contains an implausible number of rows")
     generic["stable_metadata"] = {
         "earnings_schedule": ";".join(exact) if exact else "none",
-        "approximate_rows": str(approximate),
+        "approximate_schedule": ";".join(approximate) if approximate else "none",
     }
     return generic
+
+
+def _schedule_label(segments, index: int, remainder: str) -> Optional[str]:
+    """Return the announcement label that belongs to this date, or None.
+
+    The label is the rest of the date's own text node, or the next one when the
+    date owns a cell of its own. Reading past that would let an unrelated
+    "決算発表資料はこちら" elsewhere on the page attach itself to a shareholder
+    meeting date. The stored label is truncated, never the row.
+    """
+    candidate = remainder.strip()
+    if not candidate and index + 1 < len(segments):
+        candidate = segments[index + 1]
+    if "決算発表" not in candidate:
+        return None
+    label = candidate[: candidate.index("決算発表") + len("決算発表")]
+    if not _is_meaningful_text(label):
+        return None
+    # The cell already bounds the label. Length bounds only what is stored, so a
+    # long but legitimate label keeps its row instead of vanishing in silence.
+    return _clean_text(label)[:_SCHEDULE_LABEL_WINDOW]
 
 
 def _parse_json(
