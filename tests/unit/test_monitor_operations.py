@@ -51,7 +51,12 @@ from earnings_research.monitoring.registry import (
 )
 from earnings_research.monitoring.runtime import MonitorRuntime, MonitorTransitionError
 from earnings_research.monitoring.stale import assess_stale_gap
-from earnings_research.validation.validator import ValidationIssue, ValidationReport
+from earnings_research.validation.validator import (
+    ValidationIssue,
+    ValidationReport,
+    _validate_monitor_target_rows,
+    validate_monitor_registry,
+)
 
 JST = timezone(timedelta(hours=9))
 ROOT = Path(__file__).resolve().parents[2]
@@ -796,6 +801,39 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
+
+
+def test_a_committed_bundle_carries_one_target_and_still_validates():
+    """Bundle validation sees one row; its schedule source is absent by design."""
+    row = dict(load_registry(PRODUCTION_REGISTRY)[0])
+    row["monitor_target_id"] = "LONE_TARGET"
+    row["schedule_source_target_id"] = "SOME_OTHER_TARGET"
+    assert _validate_monitor_target_rows([row]) == []
+
+
+def test_registry_validation_still_rejects_a_dangling_schedule_source():
+    rows = [dict(item) for item in load_registry(PRODUCTION_REGISTRY)]
+    rows[0]["schedule_source_target_id"] = "NOT_IN_REGISTRY"
+    report = validate_monitor_registry(rows)
+    assert not report.ok
+    assert any("schedule source must exist" in issue.message for issue in report.issues)
+
+
+def test_registry_validation_rejects_a_chain_of_schedule_sources():
+    rows = [dict(item) for item in load_registry(PRODUCTION_REGISTRY)]
+    by_id = {row["monitor_target_id"]: row for row in rows}
+    by_id["ICECO_EARNINGS_CALENDAR"]["schedule_source_target_id"] = "ICECO_TDNET_INDEX"
+    report = validate_monitor_registry(rows)
+    assert not report.ok
+    assert any("must not itself depend" in issue.message for issue in report.issues)
+
+
+def test_registry_validation_rejects_a_self_referencing_schedule_source():
+    rows = [dict(item) for item in load_registry(PRODUCTION_REGISTRY)]
+    rows[0]["schedule_source_target_id"] = rows[0]["monitor_target_id"]
+    report = validate_monitor_registry(rows)
+    assert not report.ok
+    assert any("must not be the target itself" in issue.message for issue in report.issues)
 
 
 def write_schedule_state(tmp_path, target_id, checkpoint):
