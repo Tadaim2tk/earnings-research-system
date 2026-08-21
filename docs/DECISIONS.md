@@ -531,3 +531,23 @@ Decision: `document_analysis/acquisition.py` に取得可否の方針をデー�
 人手起動の `analyze-earnings-document`（単体URL指定）は従来どおり汎用取得のままで、この承認範囲の外にある。自動運用経路ではないが、抜け道として残ることを記録する。
 
 Consequences: 開示検知から構造化データ生成までが人手なしで通る。実測で、2026-08-13 15:30公開の第1四半期決算短信を実URLから取得・解析し、売上高15,584百万円（正規化 15,584,000,000 JPY、`q1_cumulative`、page/anchor付き）を含む34 metricを生成した。承認範囲外のhostは失敗するため、将来targetが増えても取得先が黙って広がることはない。低頻度という前提は、監視側の枠（平常日2 fetch/日）と1 runあたり4件の上限で担保される。
+
+## ERS-ADR-0034
+
+Date: 2026-08-17
+
+Status: Accepted
+
+Context: baselineは `pre_event_score` と、それを生んだはずの `scoring_version` を並べて記録し、lockする。しかし `ERS-SCORE-0.1` は18構成要素のうち5つしか重みを定義しておらず、合計は0.12だった。したがってsampleの `pre_event_score`（47.5など）は**誰も再計算できない手書きの数字**であり、`scoring_version` はその数字に一度も触れていない名前でしかなかった。
+
+lockの目的は「後から検証できる形で事前の判断を固定する」ことである。再現できない数字をlockしても、commitmentの見た目だけが残って中身がない。`CLAUDE_AUDIT_CHECKLIST.md` の「score rootsが `scoring_version`／`score_definition`／`evidence` を通じて追跡可能であること」も、現状では成立していなかった。
+
+Decision: `scoring/pre_event.py` に導出を実装し、**lockされたbaselineは自身の `scoring_version` から再計算できなければならない**というvalidator規則を追加する。再現できない場合はblocking errorとする。draftは検討中なので対象外。
+
+重みは符号付きとする。スコアを下げる要素は負の重みを持つ（`meme_overheat_penalty` は既に -0.08 で記録されており、この読み方を裏付けている）。方向をデータに置くことで、覚えておくべき暗黙の規約を作らない。符号付き重みの合計は1.0でなければならない。全要素が同じ値なら合成スコアもその値になり、構成要素と同じ尺度に留まる。
+
+`missing_value_policy` は空欄の扱いを決める。`require` と `human_review` は機械が埋めてはならないので失敗させる。`neutral` は宣言されたmin/maxの中点を使い、`exclude_with_note` は要素ごと重みから外す。
+
+sampleの `ERS-SCORE-0.1` に不足13要素を追加して合計1.0にし、6件のbaselineの `pre_event_score` と `baseline_record_hash` を再計算した。追加した重みはchange_reasonのとおり **placeholderであり本番の重みではない**。架空企業のテストデータなので、これは方法論の決定ではない。実際の重みは、本番の scoring version を定義するときにHumanが決める。
+
+Consequences: lockされたスコアは監査時に再計算できる。`explain()` が要素ごとの寄与を返すので、スコアの内訳を後から説明できる。**本番運用の baseline をlockするには、全18要素を被覆し合計1.0になる scoring version が先に必要**になる。これは方法論の決定であり、機械が代行しない。2026-11-13のICECO Q2 baselineをlockする前に決める必要がある。
