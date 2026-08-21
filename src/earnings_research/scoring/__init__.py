@@ -1,4 +1,6 @@
-"""Reserved for future scoring implementations.
+"""Score derivation.
 
-No production score calculation is implemented in the initial milestone.
+`pre_event` reproduces a baseline's composite score from the weights its
+`scoring_version` declares, so a locked headline number can be recomputed
+rather than taken on trust.
 """

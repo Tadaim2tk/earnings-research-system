@@ -15,6 +15,14 @@ from earnings_research.identifiers import (
     is_activation_authorizer,
     is_human_identifier as _matches_human_identifier,
 )
+from earnings_research.scoring.pre_event import (
+    SCORE_MATCH_TOLERANCE,
+    ScoringError,
+    component_names,
+    coverage_gaps,
+    definitions_for,
+    derive_score,
+)
 from earnings_research.validation.spec import ColumnSpec, TableSpec
 
 JST = timezone(timedelta(hours=9))
@@ -207,6 +215,7 @@ def validate_dataset(dataset_dir: Path) -> ValidationReport:
 
     issues.extend(_validate_foreign_keys(specs, rows_by_table))
     issues.extend(_validate_scoring_versions(rows_by_table))
+    issues.extend(_validate_derivable_scores(load_spec("pre_earnings_baseline"), rows_by_table))
     issues.extend(_validate_score_effective_dates(rows_by_table))
     issues.extend(_validate_temporal_constraints(rows_by_table))
     baseline_issues = _validate_baseline_lock_constraints(
@@ -1712,6 +1721,53 @@ def _parse_baseline_version(value: str) -> Optional[int]:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def _validate_derivable_scores(
+    spec: TableSpec,
+    rows_by_table: Dict[str, List[Dict[str, str]]],
+) -> List[ValidationIssue]:
+    """A locked baseline must record a score its scoring version can reproduce.
+
+    Without this, `scoring_version` names a rule that never touched the number
+    beside it, and locking a headline score commits to nothing anyone can check.
+    Only locked rows are held to it; a draft is still being worked out.
+    """
+    issues = []
+    definitions = rows_by_table.get("score_definition", [])
+    components = component_names(column.name for column in spec.columns)
+    for row_number, row in enumerate(rows_by_table.get("pre_earnings_baseline", []), start=2):
+        if not _is_true(row.get("is_locked", "")):
+            continue
+        version = _clean(row.get("scoring_version", ""))
+        as_of = _parse_datetime(_clean(row.get("as_of_datetime", "")))
+        in_force = definitions_for(
+            definitions,
+            scoring_version=version,
+            as_of=as_of.date() if as_of else None,
+        )
+        if not in_force:
+            issues.append(ValidationIssue("pre_earnings_baseline", row_number, "scoring_version", "locked baseline names a scoring_version with no components in force"))
+            continue
+        gaps = coverage_gaps(components, in_force)
+        if gaps:
+            for gap in gaps:
+                issues.append(ValidationIssue("pre_earnings_baseline", row_number, "scoring_version", "locked baseline cannot be reproduced: %s" % gap))
+            continue
+        recorded = _clean(row.get("pre_event_score", ""))
+        try:
+            derived = derive_score(row, in_force)
+        except ScoringError as exc:
+            issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "locked baseline score cannot be derived: %s" % exc))
+            continue
+        try:
+            difference = abs(Decimal(recorded) - derived)
+        except (InvalidOperation, ValueError):
+            issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "pre_event_score is not a number"))
+            continue
+        if difference > SCORE_MATCH_TOLERANCE:
+            issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "pre_event_score %s does not match %s derived from %s" % (recorded, derived, version)))
+    return issues
 
 
 def _calculate_baseline_record_hash(row: Dict[str, str], spec: TableSpec) -> str:
