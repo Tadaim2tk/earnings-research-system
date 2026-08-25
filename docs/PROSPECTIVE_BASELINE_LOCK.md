@@ -62,6 +62,7 @@ Use of any prospective metadata activates the prospective validation rules. Exis
 - `baseline_record_hash` is a valid 64-character hexadecimal SHA-256 digest and matches canonical locked content.
 - `human_review_status=approved` with `reviewed_by` and `reviewed_at`.
 - At least one related formal evidence row exists and at least one is approved with `used_for_score=true`.
+- `pre_event_score` can be recomputed from the components and the weights its `scoring_version` declares. The scoring version must cover every scored component and its signed weights must sum to 1 (ERS-ADR-0034).
 - Related evidence contains the prospective metadata status bundle and every relevant timestamp is no later than `locked_at`.
 
 No `superseded` status is added. An older locked row remains immutable; a later locked row expresses replacement through `supersedes_baseline_id`.
