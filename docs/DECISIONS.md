@@ -550,4 +550,6 @@ Decision: `scoring/pre_event.py` に導出を実装し、**lockされたbaseline
 
 sampleの `ERS-SCORE-0.1` に不足13要素を追加して合計1.0にし、6件のbaselineの `pre_event_score` と `baseline_record_hash` を再計算した。追加した重みはchange_reasonのとおり **placeholderであり本番の重みではない**。架空企業のテストデータなので、これは方法論の決定ではない。実際の重みは、本番の scoring version を定義するときにHumanが決める。
 
+同じ問題が `pre_event_grade` と `pre_event_decision` にも残る。スコアからgradeへの閾値はどこにも定義されておらず、これらも導出できない。sampleのgradeは新しいスコアに対しても単調（37.2 D / 42.0 D / 53.2 C / 58.0 C / 79.1 B / 82.4 B）なので矛盾は生じていないが、再現可能ではない。閾値表は重みと同じく方法論の決定なので、本ADRでは決めない。
+
 Consequences: lockされたスコアは監査時に再計算できる。`explain()` が要素ごとの寄与を返すので、スコアの内訳を後から説明できる。**本番運用の baseline をlockするには、全18要素を被覆し合計1.0になる scoring version が先に必要**になる。これは方法論の決定であり、機械が代行しない。2026-11-13のICECO Q2 baselineをlockする前に決める必要がある。
