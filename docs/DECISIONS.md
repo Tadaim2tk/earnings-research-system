@@ -546,10 +546,16 @@ Decision: `scoring/pre_event.py` に導出を実装し、**lockされたbaseline
 
 重みは符号付きとする。スコアを下げる要素は負の重みを持つ（`meme_overheat_penalty` は既に -0.08 で記録されており、この読み方を裏付けている）。方向をデータに置くことで、覚えておくべき暗黙の規約を作らない。符号付き重みの合計は1.0でなければならない。全要素が同じ値なら合成スコアもその値になり、構成要素と同じ尺度に留まる。
 
-`missing_value_policy` は空欄の扱いを決める。`require` と `human_review` は機械が埋めてはならないので失敗させる。`neutral` は宣言されたmin/maxの中点を使い、`exclude_with_note` は要素ごと重みから外す。
+`missing_value_policy` は空欄の扱いを決める。`require` と `human_review` は機械が埋めてはならないので失敗させる。`neutral` は宣言されたmin/maxの中点を使い、`exclude_with_note` は要素ごと重みから外す。除外後に残る重みが宣言合計の半分（0.5）を下回る場合は失敗させる。残りが小さいまま再正規化すると生き残った要素が無制限に拡大され、実測では正の要素を全て除外しペナルティを最大にした行が100.0（最良）に、重み合計0.04では700.0になった。
+
+記録値と導出値は**厳密に一致**しなければならない。導出値は既に0.1刻みなので、許容差は丸めの余裕ではなく検出されない改竄になる。legacy形式のCSVにはlock hashが無いため、比較が見逃したものは回復できない。実測で、許容差0.05は導出58.0に対する58.05の記録を素通しした。
+
+符号付き重みの合計が1.0でも**値域は保証されない**。ペナルティがあるため合成値は構成要素の尺度（0〜100）を出うる（現行のplaceholder重みでは -24.0〜124.0）。尺度外になる行は失敗させる。`pre_event_score` 列はmin 0 / max 100なので、そのような行はどの値を書いてもlockできない。本番のscoring versionは値域が保たれるように重みを設計する必要がある。
 
 sampleの `ERS-SCORE-0.1` に不足13要素を追加して合計1.0にし、6件のbaselineの `pre_event_score` と `baseline_record_hash` を再計算した。追加した重みはchange_reasonのとおり **placeholderであり本番の重みではない**。架空企業のテストデータなので、これは方法論の決定ではない。実際の重みは、本番の scoring version を定義するときにHumanが決める。
 
 同じ問題が `pre_event_grade` と `pre_event_decision` にも残る。スコアからgradeへの閾値はどこにも定義されておらず、これらも導出できない。sampleのgradeは新しいスコアに対しても単調（37.2 D / 42.0 D / 53.2 C / 58.0 C / 79.1 B / 82.4 B）なので矛盾は生じていないが、再現可能ではない。閾値表は重みと同じく方法論の決定なので、本ADRでは決めない。
+
+既にlock済みのbaselineがある状態でこの規則を導入すると、`pre_event_score` と `baseline_record_hash` の両方を書き換える必要が生じ、それはlockが禁じる操作そのものになる。repo内の既存baselineはsampleだけなので今回は問題にならないが、本番データが存在する状態で同種の規則を追加する場合は、旧scoring versionを `effective_to` で閉じ、新しいversionで新しいbaselineを起こすこと。既存のlock行は書き換えない。
 
 Consequences: lockされたスコアは監査時に再計算できる。`explain()` が要素ごとの寄与を返すので、スコアの内訳を後から説明できる。**本番運用の baseline をlockするには、全18要素を被覆し合計1.0になる scoring version が先に必要**になる。これは方法論の決定であり、機械が代行しない。2026-11-13のICECO Q2 baselineをlockする前に決める必要がある。

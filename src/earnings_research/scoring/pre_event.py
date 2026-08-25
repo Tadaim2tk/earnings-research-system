@@ -17,7 +17,13 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 WEIGHT_SUM_TOLERANCE = Decimal("0.000001")
-SCORE_MATCH_TOLERANCE = Decimal("0.05")
+SCORE_QUANTUM = Decimal("0.1")
+# At least half the declared weight must survive exclusion. Renormalising by a
+# small remainder scales the survivors up without bound: dropping the positive
+# components and keeping the penalties turned the worst possible row into 100.
+MIN_SURVIVING_WEIGHT = Decimal("0.5")
+SCORE_MIN = Decimal("0")
+SCORE_MAX = Decimal("100")
 
 
 class ScoringError(ValueError):
@@ -77,10 +83,35 @@ def derive_score(
 ) -> Decimal:
     """Return the composite score implied by the components and their weights."""
     contributions, weight_total = _contributions(row, definitions)
-    if weight_total == 0:
-        raise ScoringError("no component carries weight")
+    if weight_total < MIN_SURVIVING_WEIGHT:
+        raise ScoringError(
+            "only %s of the declared weight survives exclusion, too little to rescale"
+            % _plain(weight_total)
+        )
     total = sum(value * weight for _name, value, weight in contributions)
-    return (total / weight_total).quantize(Decimal("0.1"))
+    score = (total / weight_total).quantize(SCORE_QUANTUM)
+    if not SCORE_MIN <= score <= SCORE_MAX:
+        # Signed weights summing to one bound the average, not the range: with
+        # penalties the composite can land outside the scale its components use,
+        # and such a row cannot be recorded in a column that stops at 100.
+        raise ScoringError(
+            "scoring version puts the composite at %s, outside the %s to %s component scale"
+            % (_plain(score), _plain(SCORE_MIN), _plain(SCORE_MAX))
+        )
+    return score
+
+
+def matches_recorded(recorded: str, derived: Decimal) -> bool:
+    """Exact equality: the derived value is already at the recorded precision.
+
+    A tolerance here is not rounding headroom, it is undetectable drift. The
+    legacy CSV shape carries no lock hash, so anything the comparison forgives
+    is unrecoverable.
+    """
+    try:
+        return Decimal(str(recorded).strip()) == derived
+    except (InvalidOperation, ValueError, AttributeError):
+        return False
 
 
 def explain(row: Dict[str, str], definitions: Dict[str, Dict[str, str]]) -> List[Tuple[str, Decimal, Decimal, Decimal]]:

@@ -16,7 +16,7 @@ from earnings_research.identifiers import (
     is_human_identifier as _matches_human_identifier,
 )
 from earnings_research.scoring.pre_event import (
-    SCORE_MATCH_TOLERANCE,
+    matches_recorded,
     ScoringError,
     component_names,
     coverage_gaps,
@@ -1760,12 +1760,7 @@ def _validate_derivable_scores(
         except ScoringError as exc:
             issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "locked baseline score cannot be derived: %s" % exc))
             continue
-        try:
-            difference = abs(Decimal(recorded) - derived)
-        except (InvalidOperation, ValueError):
-            issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "pre_event_score is not a number"))
-            continue
-        if difference > SCORE_MATCH_TOLERANCE:
+        if not matches_recorded(recorded, derived):
             issues.append(ValidationIssue("pre_earnings_baseline", row_number, "pre_event_score", "pre_event_score %s does not match %s derived from %s" % (recorded, derived, version)))
     return issues
 
