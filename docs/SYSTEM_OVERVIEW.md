@@ -24,13 +24,21 @@ The system stores research records, validation rules, sample data, and future in
 - Post-event returns and review outcomes
 - Provisional TSO snapshots from external files
 - Score definitions by version
+- Immutable legacy observational snapshots with explicit source repository, commit, row hash, and migration version
 
 ## Outputs
 
 - Validated CSV research records
 - Schema documentation
 - Validation reports
-- Future exports for TSO, notebooks, dashboards, or SQLite views
+- Reproducible legacy dashboards and future exports for notebooks or SQLite views
+- Legacy-only aggregation and reproducible dashboard, weekly report, and publication draft views
+
+## Legacy Research Layer
+
+Historical records migrated from `earnings-research-os` remain a separate `legacy_observational` cohort. Their raw values and Git provenance are retained, while normalization and derived aggregates are stored separately. They are useful for hypothesis exploration and point-in-time coverage studies, but they are not prospective baselines, formal evidence, or validated market-reaction records.
+
+The exact 254-row source snapshot, its 53-commit field history, 254 TSO point-in-time links, normalized legacy view, and reproducible reports are stored in ERS. The old daily AI selection, yfinance enrichment, GitHub Actions workflow, and automatic Issue publishing are not copied. See [LEGACY_OS_INTEGRATION.md](LEGACY_OS_INTEGRATION.md).
 
 ## Obsidian Knowledge Layer
 

@@ -559,3 +559,19 @@ sampleの `ERS-SCORE-0.1` に不足13要素を追加して合計1.0にし、6件
 既にlock済みのbaselineがある状態でこの規則を導入すると、`pre_event_score` と `baseline_record_hash` の両方を書き換える必要が生じ、それはlockが禁じる操作そのものになる。repo内の既存baselineはsampleだけなので今回は問題にならないが、本番データが存在する状態で同種の規則を追加する場合は、旧scoring versionを `effective_to` で閉じ、新しいversionで新しいbaselineを起こすこと。既存のlock行は書き換えない。
 
 Consequences: lockされたスコアは監査時に再計算できる。`explain()` が要素ごとの寄与を返すので、スコアの内訳を後から説明できる。**本番運用の baseline をlockするには、全18要素を被覆し合計1.0になる scoring version が先に必要**になる。これは方法論の決定であり、機械が代行しない。2026-11-13のICECO Q2 baselineをlockする前に決める必要がある。
+
+## ERS-ADR-0035
+
+Date: 2026-08-25
+
+Status: Accepted
+
+Approval: Humanは、`earnings-research-os`を別系統で維持せず、蓄積データと有用な研究出力能力をERSへ移植し、検証完了後に旧repositoryを停止・Archiveする方針を承認した。
+
+Context: 旧OSには254件の日本株決算記録、翌日・5日・20日価格反応、AI分類、dashboard、weekly report、note draft生成がある。一方、正確な発表時刻、formal evidence、baseline lock、provider provenance、corporate action確認を持たず、現在の厳密なERS recordと同じ品質を主張できない。旧workflowとAPI処理を丸ごと移すと、ERSで完成済みの監視、資料解析、評価、市場反応追跡と二重化する。
+
+Decision: [LEGACY_OS_INTEGRATION.md](LEGACY_OS_INTEGRATION.md)に従い、旧OSのGit repositoryはmergeしない。固定source commitの`records.csv`をbyte-for-byte snapshotとして保存し、全recordへ`dataset_origin=earnings-research-os`、`record_mode=legacy_observational`、source row hash、Git first-seen／last-changed provenanceを付ける。raw snapshot、normalized legacy view、derived aggregation／publishing viewを分離する。29列は[LEGACY_OS_COLUMN_MAPPING.md](LEGACY_OS_COLUMN_MAPPING.md)に従い、意味・時点・出典が不足する値をprospective schemaへ昇格させない。旧dashboard、weekly report、note draftの利用価値はERS側で再現するが、daily AI selection、yfinance enrichment、旧Actions、automatic Issue publishingは移植しない。
+
+TSOとの結合可能性は0件前提にせず、254件の`code + date`を候補としてcoverageを測る。ただし、発表時刻が無い行ではevent当日TSO値を使わず、source commit、row hash、recorded time、mapping versionを満たすpoint-in-time snapshotだけをread-onlyで結合する。legacyとprospectiveは既定で別cohortとし、TSOへ書き戻さない。
+
+Consequences: workflow run `32839916267`とcommit `a738d2ded66e790fba5d155b5f50a50df7a81dc6`を固定し、254件のlossless import、29項目のGit履歴、TSO context 254件、3出力のbyte-level parityをERS側で実装した。旧scheduled workflowはERS mainへのmerge後に停止し、旧データや履歴を削除しない。旧repositoryのArchiveはworkflow停止とmain再検証後の最終cutover操作とする。独立監査は統合能力が完成した時点で1回行う。

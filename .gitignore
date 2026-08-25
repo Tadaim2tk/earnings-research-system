@@ -12,6 +12,8 @@ build/
 *.egg-info/
 outputs/*
 !outputs/.gitkeep
+!outputs/historical_research/
+!outputs/historical_research/*
 data/raw/*
 data/interim/*
 data/processed/*
