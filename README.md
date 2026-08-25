@@ -21,6 +21,7 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - Locked pre-event expectation comparison, company-guidance revision checks, hypothesis review, and price-independent earnings evaluation
 - Source-neutral tracking of pre-event close, immediate reaction, next-business-day close, and fifth-business-day close
 - Append-only validation of pre-event forecasts with separated earnings, market-reaction, reason, and learning records
+- Lossless migration of 254 legacy `earnings-research-os` records, Git field history, 254 TSO point-in-time links, legacy-only aggregation, and reproducible publishing outputs
 
 ## Prospective Operations
 
@@ -32,6 +33,8 @@ Earnings Research System is an initial research foundation for recording pre-ear
 - [Earnings expectation evaluation](docs/EARNINGS_EXPECTATION_EVALUATION.md)
 - [Market reaction tracking](docs/MARKET_REACTION_TRACKING.md)
 - [Post-event learning review](docs/POST_EVENT_LEARNING_REVIEW.md)
+- [Legacy OS integration](docs/LEGACY_OS_INTEGRATION.md)
+- [Legacy OS column mapping](docs/LEGACY_OS_COLUMN_MAPPING.md)
 
 The first live pilot monitors ICECO public IR pages under the repository's low-frequency public-web policy. Human review remains an exception gate for explicit prohibitions, ambiguous terms, authentication, payment, private data, trading, or irreversible external actions. Price sourcing, formal evidence, event rows, and baseline lock remain separate.
 
@@ -77,6 +80,35 @@ Locked baseline rows can be compared with structured results through `evaluate-e
 Approved, normalized price observations can be processed through `track-market-reaction`. It keeps the four requested price milestones, uses a separate pre-announcement minute reference for intraday events, verifies actual occurrence and company identity, preserves pending milestones, and blocks return calculation while corporate actions remain unresolved. It retrieves no prices and retains no raw market-data files.
 
 `review-earnings-outcome` joins an immutable baseline and pre-event hypotheses with the earnings evaluation and market-reaction snapshot. It records forecast success, evidence-backed reasons, and next-event learning candidates without rewriting source records or changing production scoring rules.
+
+## Legacy Research
+
+The retired `earnings-research-os` dataset is stored under `data/historical_research/earnings_research_os/v1`. Its exact source CSV, source reports, TSO historical context inputs, normalized records, per-field Git history, and joined context view remain explicitly `legacy_observational`; they never become prospective baselines or formal evidence.
+
+Reproducible research views are under `outputs/historical_research`: dashboard, weekly report, note draft, publishing parity, and aggregation summary. The old daily AI selection and yfinance enrichment are not part of ERS.
+
+The migration can be reproduced from fixed commits with:
+
+```bash
+python -m earnings_research.cli migrate-legacy-os \
+  --source-repo /path/to/earnings-research-os \
+  --source-commit <frozen-commit> \
+  --source-run-id <github-actions-run-id> \
+  --tso-repo /path/to/tactical-swing-os \
+  --tso-commit <point-in-time-context-commit> \
+  --output-root data/historical_research/earnings_research_os/v1 \
+  --reports-output outputs/historical_research \
+  --migration-recorded-at <timezone-aware-datetime> \
+  --as-of-date <YYYY-MM-DD>
+```
+
+After the source repository is no longer active, the committed migration remains independently verifiable:
+
+```bash
+python -m earnings_research.cli verify-legacy-migration \
+  --output-root data/historical_research/earnings_research_os/v1 \
+  --reports-output outputs/historical_research
+```
 
 ## Sample Data
 

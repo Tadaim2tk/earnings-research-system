@@ -2,8 +2,9 @@
 
 import argparse
 import json
+import subprocess
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,7 @@ from earnings_research.earnings_evaluation import (
 from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
+from earnings_research.legacy_research import migrate_legacy_os, verify_legacy_migration
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
 from earnings_research.monitoring.operational_cli import (
@@ -200,6 +202,27 @@ def main(argv=None) -> int:
     carryover_parser.add_argument("--prepared-at", required=True)
     carryover_parser.add_argument("--output", required=True, type=Path)
 
+    legacy_parser = subparsers.add_parser(
+        "migrate-legacy-os",
+        help="Losslessly import the retired earnings-research-os dataset and publishing views.",
+    )
+    legacy_parser.add_argument("--source-repo", required=True, type=Path)
+    legacy_parser.add_argument("--source-commit", required=True)
+    legacy_parser.add_argument("--source-run-id", required=True)
+    legacy_parser.add_argument("--tso-repo", required=True, type=Path)
+    legacy_parser.add_argument("--tso-commit", required=True)
+    legacy_parser.add_argument("--output-root", required=True, type=Path)
+    legacy_parser.add_argument("--reports-output", required=True, type=Path)
+    legacy_parser.add_argument("--migration-recorded-at", required=True)
+    legacy_parser.add_argument("--as-of-date", required=True, type=date.fromisoformat)
+
+    legacy_verify_parser = subparsers.add_parser(
+        "verify-legacy-migration",
+        help="Verify committed legacy data, provenance, context links, and reports without source access.",
+    )
+    legacy_verify_parser.add_argument("--output-root", required=True, type=Path)
+    legacy_verify_parser.add_argument("--reports-output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -341,6 +364,34 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Baseline carryover preparation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "migrate-legacy-os":
+        try:
+            result = migrate_legacy_os(
+                source_repo=args.source_repo,
+                source_commit=args.source_commit,
+                source_run_id=args.source_run_id,
+                tso_repo=args.tso_repo,
+                tso_commit=args.tso_commit,
+                output_root=args.output_root,
+                reports_output=args.reports_output,
+                migration_recorded_at=args.migration_recorded_at,
+                as_of_date=args.as_of_date,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print("Legacy OS migration failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-legacy-migration":
+        try:
+            result = verify_legacy_migration(args.output_root, args.reports_output)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Legacy migration verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:

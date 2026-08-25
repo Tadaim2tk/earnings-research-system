@@ -1,0 +1,26 @@
+{
+  "outputs": {
+    "dashboard": {
+      "byte_equal": true,
+      "rendered_sha256": "c6caccd6c236a346af6eb32a2c7b7d9ecb67fd51c536bb9220c3f2f6b4aab5c2",
+      "source_commit": "a738d2ded66e790fba5d155b5f50a50df7a81dc6",
+      "source_sha256": "c6caccd6c236a346af6eb32a2c7b7d9ecb67fd51c536bb9220c3f2f6b4aab5c2"
+    },
+    "note_draft": {
+      "byte_equal": true,
+      "rendered_sha256": "34c98a2500d48112ce757d8e06204cbb42d24acc6758bac32c901202bf6c1aa7",
+      "source_commit": "e4d4a397a84b22223542b418da50473871c68306",
+      "source_sha256": "34c98a2500d48112ce757d8e06204cbb42d24acc6758bac32c901202bf6c1aa7"
+    },
+    "weekly_report": {
+      "byte_equal": true,
+      "rendered_sha256": "c62c8ecef80ec481dfa14c549722e30da3a2a21f559691bf3e17f367f3f992b9",
+      "source_commit": "e4d4a397a84b22223542b418da50473871c68306",
+      "source_sha256": "c62c8ecef80ec481dfa14c549722e30da3a2a21f559691bf3e17f367f3f992b9"
+    }
+  },
+  "record_count": 254,
+  "schema_version": "legacy_publishing_parity_v1",
+  "source_commit": "a738d2ded66e790fba5d155b5f50a50df7a81dc6",
+  "tso_context_link_count": 254
+}

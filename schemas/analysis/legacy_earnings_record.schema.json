@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ers/legacy_earnings_record.schema.json",
+  "title": "Legacy Earnings Research Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "legacy_record_id", "dataset_origin", "record_mode",
+    "source_row_number", "source_row_sha256", "source_snapshot_commit",
+    "source_first_seen_commit", "source_last_changed_commit", "mapping_version",
+    "raw_record", "normalized_identity", "normalized_classifications",
+    "normalized_prices", "normalization_warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": "legacy_earnings_record_v1"},
+    "legacy_record_id": {"type": "string", "pattern": "^ERSO-[0-9A-F]{20}$"},
+    "dataset_origin": {"const": "earnings-research-os"},
+    "record_mode": {"const": "legacy_observational"},
+    "source_row_number": {"type": "integer", "minimum": 2},
+    "source_row_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_snapshot_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_first_seen_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_last_changed_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "mapping_version": {"const": "earnings-research-os-29-column-v1"},
+    "raw_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "date", "quarter", "rank", "surprise", "company_forecast", "rc1", "rc2", "rc3", "narrative", "judge", "buy_condition", "exit_condition", "memo", "prev_close", "next_open", "next_close", "d5_close", "d20_close", "gap", "ret_d1", "ret_d5", "ret_d20", "shodo", "reaction", "result", "error_type", "review_note"],
+      "properties": {
+        "code": {"type": "string"}, "name": {"type": "string"}, "date": {"type": "string"},
+        "quarter": {"type": "string"}, "rank": {"type": "string"}, "surprise": {"type": "string"},
+        "company_forecast": {"type": "string"}, "rc1": {"type": "string"}, "rc2": {"type": "string"},
+        "rc3": {"type": "string"}, "narrative": {"type": "string"}, "judge": {"type": "string"},
+        "buy_condition": {"type": "string"}, "exit_condition": {"type": "string"}, "memo": {"type": "string"},
+        "prev_close": {"type": "string"}, "next_open": {"type": "string"}, "next_close": {"type": "string"},
+        "d5_close": {"type": "string"}, "d20_close": {"type": "string"}, "gap": {"type": "string"},
+        "ret_d1": {"type": "string"}, "ret_d5": {"type": "string"}, "ret_d20": {"type": "string"},
+        "shodo": {"type": "string"}, "reaction": {"type": "string"}, "result": {"type": "string"},
+        "error_type": {"type": "string"}, "review_note": {"type": "string"}
+      }
+    },
+    "normalized_identity": {"type": "object"},
+    "normalized_classifications": {"type": "object"},
+    "normalized_prices": {"type": "object"},
+    "normalization_warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}
