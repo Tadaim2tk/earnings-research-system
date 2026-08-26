@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -257,8 +257,13 @@ def build_context_views(records, link_bytes: bytes, context_bytes: bytes):
         context = contexts_by_id.get(link.get("snapshot_id"))
         if context is None:
             raise ValueError("TSO point-in-time link references a missing context snapshot")
+        if link.get("snapshot_usable_from_utc") != context.get("usable_from_utc"):
+            raise ValueError("TSO link usable-from timestamp does not match its context snapshot")
         cutoff = _utc_datetime(link["decision_cutoff_utc"])
-        usable = _utc_datetime(link["snapshot_usable_from_utc"])
+        event_date = date.fromisoformat(raw["date"])
+        if cutoff.date() >= event_date:
+            raise ValueError("TSO decision cutoff is not anchored to a prior legacy event date")
+        usable = _utc_datetime(context["usable_from_utc"])
         if usable > cutoff:
             raise ValueError("TSO context became usable after the legacy decision cutoff")
         views.append({
@@ -407,6 +412,7 @@ def build_import(
         "tso_context_snapshot_count": len(contexts),
         "tso_join_status_counts": dict(sorted(Counter(row["join_status"] for row in links).items())),
         "output_sha256": {name: sha256_bytes(content) for name, content in sorted(files.items())},
+        "reports_sha256": {},
         "prospective_records_created": 0,
         "formal_evidence_created": 0,
         "tso_writeback_performed": False,

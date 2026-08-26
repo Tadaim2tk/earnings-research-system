@@ -609,3 +609,15 @@ Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.m
 正式ルールのreview候補条件はtarget 50件、全適格群50件、2 event quarter以上、supported判定2回連続とする。ただし条件到達は自動昇格ではない。台帳、trial、statusはweight、rank、売買ルールを変更せず、TSOへ書き戻さない。
 
 Consequences: 新しい決算eventが完了するたび、記録済み特徴と成熟済みreturnに該当する仮説だけを追記評価できる。発表前特徴が無い仮説、未成熟期間、corporate action等で比較不能なreturnは母数にも失敗にも入らない。statusはtrial正本から再計算でき、後からカウンタだけを書き換えられない。PR #50の監査履歴は`独立監査未完了＋追加機械検証後にmerge`と記録し、Passへ昇格させない。
+
+## ERS-ADR-0038
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Context: PR #48(ERS-ADR-0035の実装)へのCodexレビューでP1指摘2件が判明した。(1) `migration_manifest.json`の`output_sha256`は`output_root`配下のみを対象とし、`reports_output`側の`dashboard.md`／`weekly_report.md`／`note_draft.md`／`aggregation_summary.json`はhash対象外だった。`verify_legacy_migration`はこれらの存在確認のみで内容を検証しないため、生成後に改変してもstatus=verifiedを返し、独立監査で謳った検証保証が実装で満たされていなかった。(2) `build_context_views`のfuture-leak検査は`decision_cutoff_utc`と`snapshot_usable_from_utc`をどちらもTSOリンク由来の値同士で比較しており、リンクがevent当日以降のcutoffを主張しても、また実際のcontext snapshotより早い`snapshot_usable_from_utc`を詐称してコピーしても、`context`側の実際のtimestampと突き合わせないため検知できなかった。
+
+Decision: `migration_manifest.json`に`reports_sha256`を追加し、`reports_output`配下5ファイル(dashboard.md／weekly_report.md／note_draft.md／aggregation_summary.json／publishing_parity.json)のSHA-256をmigration時に記録する。`verify_legacy_migration`は既存の存在確認を、記録済みhashとの一致検証に置き換える(`legacy_migration_manifest.schema.json`の`required`にも追加)。`build_context_views`は、`link`の`snapshot_usable_from_utc`が参照先`context`の`usable_from_utc`と一致することを必須にし、future-leak判定は`context`側の実測値で行う。加えて`decision_cutoff_utc`が、対象legacy recordの`date`より前の暦日に収まることを要求する(発表日当日以降のcutoffはLEGACY_OS_INTEGRATION.mdの「発表日前までに確定したpoint-in-time snapshotだけを候補にする」に反するため拒否)。
+
+Consequences: 生成済みdashboard／weekly report／note draft／aggregation summary／publishing parityの改変はcutover検証で確実に検知される。TSO context joinは、リンクデータの自己無矛盾性だけでなく、参照先snapshotの実際のtimestampとlegacy event日付の両方に対して検証されるようになる。既存fixtureの`decision_cutoff_utc`はevent前日へ更新し、`tests/unit/test_legacy_research.py`に3件(report hash改変拒否、publishing_parity.json改変拒否、cutoff/usable-from突合せ拒否)を追加した。旧cohort境界・schema拒否・TSO writeback禁止など既存の不変条件は変更しない。
