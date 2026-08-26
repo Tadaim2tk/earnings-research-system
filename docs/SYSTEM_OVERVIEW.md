@@ -33,12 +33,15 @@ The system stores research records, validation rules, sample data, and future in
 - Validation reports
 - Reproducible legacy dashboards and future exports for notebooks or SQLite views
 - Legacy-only aggregation and reproducible dashboard, weekly report, and publication draft views
+- Reproducible legacy research knowledge with horizon-specific coverage, small-sample boundaries, exception patterns, and publishing digests
 
 ## Legacy Research Layer
 
 Historical records migrated from `earnings-research-os` remain a separate `legacy_observational` cohort. Their raw values and Git provenance are retained, while normalization and derived aggregates are stored separately. They are useful for hypothesis exploration and point-in-time coverage studies, but they are not prospective baselines, formal evidence, or validated market-reaction records.
 
 The exact 254-row source snapshot, its 53-commit field history, 254 TSO point-in-time links, normalized legacy view, and reproducible reports are stored in ERS. The old daily AI selection, yfinance enrichment, GitHub Actions workflow, and automatic Issue publishing are not copied. See [LEGACY_OS_INTEGRATION.md](LEGACY_OS_INTEGRATION.md).
+
+The research knowledge layer measures rank, narrative, judge, reaction, market context, combinations, and D1-to-D20 transitions without mixing missing horizons or treating repeated companies as independent. It emits learning candidates only; it does not change scoring, ranks, trading rules, or TSO. See [LEGACY_RESEARCH_KNOWLEDGE.md](LEGACY_RESEARCH_KNOWLEDGE.md).
 
 ## Obsidian Knowledge Layer
 

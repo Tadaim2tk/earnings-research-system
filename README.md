@@ -110,6 +110,20 @@ python -m earnings_research.cli verify-legacy-migration \
   --reports-output outputs/historical_research
 ```
 
+The frozen cohort can be converted into descriptive, human-readable research knowledge without entering prospective schemas or changing scoring and trading rules:
+
+```bash
+python -m earnings_research.cli analyze-legacy-research \
+  --input-root data/historical_research/earnings_research_os/v1 \
+  --output-dir outputs/historical_research
+
+python -m earnings_research.cli verify-legacy-research \
+  --input-root data/historical_research/earnings_research_os/v1 \
+  --output-dir outputs/historical_research
+```
+
+See [Legacy Research Knowledge](docs/LEGACY_RESEARCH_KNOWLEDGE.md) for missing-value, repeated-company, small-sample, and interpretation boundaries.
+
 ## Sample Data
 
 `data/samples/` contains fictional companies only. The samples include a social-media overheat case, a conservative-guidance case, a value-trap case, an intraday upward-revision case, a good-earnings sell-the-news case, evidence/source lineage rows, KPI observations, a NO_TRADE decision, a controlled missing-value example, and an invalidated hypothesis that is preserved as an appended record.

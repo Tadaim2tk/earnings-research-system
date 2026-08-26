@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ers/legacy_research_knowledge.schema.json",
+  "title": "Legacy research knowledge",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_origin",
+    "record_mode",
+    "source_commit",
+    "tso_source_commit",
+    "analysis_scope",
+    "coverage",
+    "repeated_company_control",
+    "classification_lineage",
+    "market_bucketing",
+    "single_dimension_results",
+    "combination_results",
+    "exception_patterns",
+    "initial_to_d20_transitions",
+    "learning"
+  ],
+  "properties": {
+    "schema_version": {"const": "legacy_research_knowledge_v1"},
+    "dataset_origin": {"const": "earnings-research-os"},
+    "record_mode": {"const": "legacy_observational"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "tso_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "analysis_scope": {
+      "type": "object",
+      "required": ["purpose", "prospective_records_included", "causal_claims_generated", "multivariate_model_fitted", "automatic_scoring_or_trading_changes", "reaction_definition"],
+      "properties": {
+        "purpose": {"const": "descriptive_measurement_hypothesis_generation"},
+        "prospective_records_included": {"const": 0},
+        "causal_claims_generated": {"const": 0},
+        "multivariate_model_fitted": {"const": false},
+        "automatic_scoring_or_trading_changes": {"const": false},
+        "reaction_definition": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "coverage": {"$ref": "#/$defs/summary"},
+    "repeated_company_control": {"type": "object"},
+    "classification_lineage": {"type": "object"},
+    "market_bucketing": {"type": "object"},
+    "single_dimension_results": {"type": "object"},
+    "combination_results": {"type": "object"},
+    "exception_patterns": {"type": "object"},
+    "initial_to_d20_transitions": {"type": "object"},
+    "learning": {
+      "type": "object",
+      "required": ["candidates", "next_hypotheses", "weight_changes_generated", "rank_rule_changes_generated", "trading_rules_generated"],
+      "properties": {
+        "selection_thresholds": {"type": "object"},
+        "candidates": {"type": "array"},
+        "next_hypotheses": {"type": "array"},
+        "weight_changes_generated": {"const": 0},
+        "rank_rule_changes_generated": {"const": 0},
+        "trading_rules_generated": {"const": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "required": ["record_count", "distinct_ticker_count", "repeated_ticker_count", "repeated_observation_count", "distinct_context_snapshot_count", "repeated_context_observation_count", "horizons"],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 0},
+        "distinct_ticker_count": {"type": "integer", "minimum": 0},
+        "repeated_ticker_count": {"type": "integer", "minimum": 0},
+        "repeated_observation_count": {"type": "integer", "minimum": 0},
+        "distinct_context_snapshot_count": {"type": "integer", "minimum": 0},
+        "repeated_context_observation_count": {"type": "integer", "minimum": 0},
+        "horizons": {
+          "type": "object",
+          "required": ["d1", "d5", "d20"],
+          "properties": {
+            "d1": {"$ref": "#/$defs/horizon"},
+            "d5": {"$ref": "#/$defs/horizon"},
+            "d20": {"$ref": "#/$defs/horizon"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "horizon": {
+      "type": "object",
+      "required": ["available_count", "missing_count", "distinct_ticker_count", "distinct_context_snapshot_count", "effective_unit_count", "mean_return", "positive_rate", "sample_grade", "sample_grade_basis", "conclusion_boundary"],
+      "properties": {
+        "available_count": {"type": "integer", "minimum": 0},
+        "missing_count": {"type": "integer", "minimum": 0},
+        "distinct_ticker_count": {"type": "integer", "minimum": 0},
+        "repeated_observation_count": {"type": "integer", "minimum": 0},
+        "distinct_context_snapshot_count": {"type": "integer", "minimum": 0},
+        "repeated_context_observation_count": {"type": "integer", "minimum": 0},
+        "effective_unit_count": {"type": "integer", "minimum": 0},
+        "mean_return": {"type": ["number", "null"]},
+        "median_return": {"type": ["number", "null"]},
+        "ticker_balanced_mean_return": {"type": ["number", "null"]},
+        "context_balanced_mean_return": {"type": ["number", "null"]},
+        "positive_count": {"type": "integer", "minimum": 0},
+        "negative_count": {"type": "integer", "minimum": 0},
+        "zero_count": {"type": "integer", "minimum": 0},
+        "positive_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "sample_grade": {"enum": ["insufficient", "limited", "descriptive"]},
+        "sample_grade_basis": {"const": "minimum_of_distinct_tickers_and_context_snapshots"},
+        "conclusion_boundary": {"enum": ["hypothesis_only", "descriptive_not_causal"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}
