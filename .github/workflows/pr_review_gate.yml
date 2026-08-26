@@ -1,0 +1,46 @@
+name: Codex review gate
+
+# レビュー到着前マージ事故(ERS #48, 2026-08-25: マージ4分後にCodexレビュー着=P1指摘2件が
+# 「PRの修正」でなく「mainの負債」になり、後日PR #53で回収した)の構造対策。TSO #119と同型。
+#
+# 設計判断: ブランチ保護のrequired checkにはしない(このrepoもクラウド正本へボットが
+# コミットする運用のため)。このcheckをPRに常設し、マージ手順側の恒久ルール
+# 「全checks完了を待ってからマージ」で効かせる。チェックが黄色の間はマージしない、が運用上の合意。
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  wait-for-codex-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for Codex review (arrival = green early, max 20 min)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # chatgpt-codex-connector[bot] のレビューが届いたら即成功。
+          # 20分待っても届かなければ「レビューなしPR」として成功にする
+          # (Codex側の停止で全マージが詰まるのを防ぐ。締め切りは緩く、既定は待つ)。
+          # レビューは現在のhead SHAに対するものだけを数える(Codex P1指摘への対応:
+          # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ。
+          # Codexが更新コミットを再レビューしない場合はタイムアウト通過となる)。
+          for i in $(seq 1 40); do
+            n=$(gh api "repos/$REPO/pulls/$PR/reviews" \
+              --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
+              2>/dev/null || echo 0)
+            if [ "$n" -gt 0 ]; then
+              echo "Codex review arrived: $n review(s). Read it before merging."
+              exit 0
+            fi
+            echo "waiting for Codex review... ($i/40)"
+            sleep 30
+          done
+          echo "No Codex review within 20 min — gate passes as a no-review PR."
