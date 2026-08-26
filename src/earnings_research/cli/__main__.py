@@ -24,7 +24,12 @@ from earnings_research.earnings_evaluation import (
 from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
-from earnings_research.legacy_research import migrate_legacy_os, verify_legacy_migration
+from earnings_research.legacy_research import (
+    migrate_legacy_os,
+    verify_legacy_migration,
+    verify_research_outputs,
+    write_research_outputs,
+)
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
 from earnings_research.monitoring.operational_cli import (
@@ -223,6 +228,20 @@ def main(argv=None) -> int:
     legacy_verify_parser.add_argument("--output-root", required=True, type=Path)
     legacy_verify_parser.add_argument("--reports-output", required=True, type=Path)
 
+    legacy_research_parser = subparsers.add_parser(
+        "analyze-legacy-research",
+        help="Generate descriptive research knowledge from the frozen legacy observational cohort.",
+    )
+    legacy_research_parser.add_argument("--input-root", required=True, type=Path)
+    legacy_research_parser.add_argument("--output-dir", required=True, type=Path)
+
+    legacy_research_verify_parser = subparsers.add_parser(
+        "verify-legacy-research",
+        help="Rebuild and verify committed legacy research knowledge outputs.",
+    )
+    legacy_research_verify_parser.add_argument("--input-root", required=True, type=Path)
+    legacy_research_verify_parser.add_argument("--output-dir", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -392,6 +411,24 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Legacy migration verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "analyze-legacy-research":
+        try:
+            result = write_research_outputs(args.input_root, args.output_dir)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Legacy research analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-legacy-research":
+        try:
+            result = verify_research_outputs(args.input_root, args.output_dir)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Legacy research verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:

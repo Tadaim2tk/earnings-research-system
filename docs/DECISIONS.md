@@ -575,3 +575,19 @@ Decision: [LEGACY_OS_INTEGRATION.md](LEGACY_OS_INTEGRATION.md)に従い、旧OS�
 TSOとの結合可能性は0件前提にせず、254件の`code + date`を候補としてcoverageを測る。ただし、発表時刻が無い行ではevent当日TSO値を使わず、source commit、row hash、recorded time、mapping versionを満たすpoint-in-time snapshotだけをread-onlyで結合する。legacyとprospectiveは既定で別cohortとし、TSOへ書き戻さない。
 
 Consequences: workflow run `32839916267`とcommit `a738d2ded66e790fba5d155b5f50a50df7a81dc6`を固定し、254件のlossless import、29項目のGit履歴、TSO context 254件、3出力のbyte-level parityをERS側で実装した。旧scheduled workflowはERS mainへのmerge後に停止し、旧データや履歴を削除しない。旧repositoryのArchiveはworkflow停止とmain再検証後の最終cutover操作とする。独立監査は統合能力が完成した時点で1回行う。
+
+## ERS-ADR-0036
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Approval: Humanは、旧OS統合能力を完成として閉じ、254件のlegacy決算研究、当時のTSO市場コンテキスト、D1／D5／D20リターンから、人間が読める研究知識を生成する次工程を承認した。今回は測定、仮説生成、学習候補までとし、weight、rank基準、売買ルールを変更しない。
+
+Context: 固定datasetは254件だが、D1は245件、D5は242件、D20は139件だけが利用可能である。欠損を0や失敗として扱うと、未成熟な8月記録を成績不良へ誤分類する。同一銘柄も3銘柄で反復しており、全行を独立した254社として扱えない。旧rank等の分類はprospective lockを持たず、時点と評価基準の安定性を現行ERSと同等には主張できない。TSO市場変数同士も相関し得る。
+
+Decision: [LEGACY_RESEARCH_KNOWLEDGE.md](LEGACY_RESEARCH_KNOWLEDGE.md)に従い、各期間で利用可能件数、欠損件数、異なる銘柄数、異なるTSO snapshot数、観測平均、中央値、上昇率、銘柄均等平均、snapshot均等平均を保存する。小標本は異なる銘柄数とsnapshot数の小さい方により`insufficient`／`limited`／`descriptive`へ分け、実効母数30未満を強い結論へ使わない。rank、narrative、judge、reaction、市場環境、組み合わせ、高rank下落、低rank上昇、D1からD20の反転を記述する。市場環境は単変量と組み合わせを分離し、多変量因果効果を推定しない。月別結果はdrift確認専用とし、学習候補へ自動昇格させない。
+
+機械可読な`research_knowledge.json`と、人間向け`research_report.md`、weekly／note向けdigestを生成する。学習候補には元の分類、母数、平均との差、時点上の役割、解釈境界を付ける。prospective record、formal evidence、scoring weight、rank rule、trading rule、TSO writebackは生成しない。
+
+Consequences: 旧観測から再現可能な研究知識を得られる一方、出力は正式ルールではない。候補を採用するには、固定定義と完全な価格観測を持つprospective検証が別途必要になる。旧weekly／noteのbyte parity出力は変更せず、新しいdigestを別ファイルとして提供する。
