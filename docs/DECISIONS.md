@@ -591,3 +591,21 @@ Decision: [LEGACY_RESEARCH_KNOWLEDGE.md](LEGACY_RESEARCH_KNOWLEDGE.md)に従い�
 機械可読な`research_knowledge.json`と、人間向け`research_report.md`、weekly／note向けdigestを生成する。学習候補には元の分類、母数、平均との差、時点上の役割、解釈境界を付ける。prospective record、formal evidence、scoring weight、rank rule、trading rule、TSO writebackは生成しない。
 
 Consequences: 旧観測から再現可能な研究知識を得られる一方、出力は正式ルールではない。候補を採用するには、固定定義と完全な価格観測を持つprospective検証が別途必要になる。旧weekly／noteのbyte parity出力は変更せず、新しいdigestを別ファイルとして提供する。
+
+## ERS-ADR-0037
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Approval: Humanは、PR #50で生成した19件のlegacy学習候補を、pre-eventとpost-eventを分離したappend-only prospective仮説台帳へ登録し、新しい決算ごとに自動評価する能力を承認した。weight、rank基準、売買ルールは変更しない。
+
+Context: 19候補は旧254件のカテゴリ別成績と全体平均との差から得た記述的傾向である。単一eventのTODOへすると条件や成功判定が後から動き得る。reactionは発表後情報であり、rank、narrative、judge、TSO historical contextと混ぜて発表前評価へ使うとfuture leakageになる。またカテゴリ対全体の仮説は、1件だけで支持・棄却を決められない。
+
+Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md)に従い、仮説定義、event単位のappend-only trial、再計算可能なstatus snapshotを分離する。19候補を一対一でversion 1へ固定し、source researchのSHA-256、historical母数・効果量・sample grade、比較式、最低母数、判定閾値を保持する。reaction 8件はpost-event、残り11件はpre-eventとし、pre-event値は発表前timestampを必須にする。欠損、未成熟、比較不能は失敗へ変換しない。
+
+カテゴリ平均との差はhistoricalと同じく対象群対全適格群で測る。判定開始はtarget 30件・全適格群30件。方向を維持しhistorical効果の50%以上ならsupported、同方向だが小さければweakened、反転ならrejectedとする。low-discriminationは平均差0.5ポイント以内かつ上昇率差5ポイント以内をsupportedとする。Primaryは方向性があり、historical effective unit 20以上、平均差2%以上または上昇率差10%以上の6件とする。
+
+正式ルールのreview候補条件はtarget 50件、全適格群50件、2 event quarter以上、supported判定2回連続とする。ただし条件到達は自動昇格ではない。台帳、trial、statusはweight、rank、売買ルールを変更せず、TSOへ書き戻さない。
+
+Consequences: 新しい決算eventが完了するたび、記録済み特徴と成熟済みreturnに該当する仮説だけを追記評価できる。発表前特徴が無い仮説、未成熟期間、corporate action等で比較不能なreturnは母数にも失敗にも入らない。statusはtrial正本から再計算でき、後からカウンタだけを書き換えられない。PR #50の監査履歴は`独立監査未完了＋追加機械検証後にmerge`と記録し、Passへ昇格させない。
