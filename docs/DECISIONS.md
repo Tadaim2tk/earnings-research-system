@@ -621,3 +621,17 @@ Context: PR #48(ERS-ADR-0035の実装)へのCodexレビューでP1指摘2件が�
 Decision: `migration_manifest.json`に`reports_sha256`を追加し、`reports_output`配下5ファイル(dashboard.md／weekly_report.md／note_draft.md／aggregation_summary.json／publishing_parity.json)のSHA-256をmigration時に記録する。`verify_legacy_migration`は既存の存在確認を、記録済みhashとの一致検証に置き換える(`legacy_migration_manifest.schema.json`の`required`にも追加)。`build_context_views`は、`link`の`snapshot_usable_from_utc`が参照先`context`の`usable_from_utc`と一致することを必須にし、future-leak判定は`context`側の実測値で行う。加えて`decision_cutoff_utc`が、対象legacy recordの`date`より前の暦日に収まることを要求する(発表日当日以降のcutoffはLEGACY_OS_INTEGRATION.mdの「発表日前までに確定したpoint-in-time snapshotだけを候補にする」に反するため拒否)。
 
 Consequences: 生成済みdashboard／weekly report／note draft／aggregation summary／publishing parityの改変はcutover検証で確実に検知される。TSO context joinは、リンクデータの自己無矛盾性だけでなく、参照先snapshotの実際のtimestampとlegacy event日付の両方に対して検証されるようになる。既存fixtureの`decision_cutoff_utc`はevent前日へ更新し、`tests/unit/test_legacy_research.py`に3件(report hash改変拒否、publishing_parity.json改変拒否、cutoff/usable-from突合せ拒否)を追加した。旧cohort境界・schema拒否・TSO writeback禁止など既存の不変条件は変更しない。
+
+## ERS-ADR-0039
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Approval: Humanは、レビュー到着前マージ事故（ERS #48: マージ4分後にCodexレビュー着、P1指摘2件がmainの負債となりPR #53で回収）の再発防止として、PRごとのCodexレビュー待機checkの導入を承認した（tactical-swing-os #119と同型・同日導入）。
+
+Context: このリポジトリにはPRトリガーのCIが無く、マージを止める仕組みが存在しなかった。Codexのレビューは通常PR作成から数分で届くが、それより先にマージできてしまうため、指摘が「PRの修正」ではなく「mainの負債」として積まれる時間構造があった。ブランチ保護のrequired check化は、ボットがmainへ直接コミットする運用を弾くため採用できない。
+
+Decision: `.github/workflows/pr_review_gate.yml` を常設する。PRの現在のhead SHAに対する chatgpt-codex-connector[bot] のレビュー到着で即成功、未到着でも20分で成功して通す（fail-open。Codex側の停止で全マージが詰まることを防ぐ意図的な緩い締め切り）。レビュー一覧の取得はページネーションを跨いで数える。強制力はブランチ保護ではなく、マージ手順の恒久ルール「全checksの完了を待ち、届いたレビューを読み、指摘はPR内で処理してからマージする」との組で持たせる。
+
+Consequences: マージは最大20分遅延しうるが、レビューが届き次第すぐ緑になる。Codexがレビューを出さないPRはタイムアウト通過し、レビュー無しであることが明示される。fail-openである以上、checkの緑はレビュー済みを意味しない — 手順側の「読む」義務が本体であり、checkは時間を確保する装置である。

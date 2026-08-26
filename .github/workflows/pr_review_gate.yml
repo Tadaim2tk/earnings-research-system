@@ -33,9 +33,9 @@ jobs:
           # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ。
           # Codexが更新コミットを再レビューしない場合はタイムアウト通過となる)。
           for i in $(seq 1 40); do
-            n=$(gh api "repos/$REPO/pulls/$PR/reviews" \
+            n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
-              2>/dev/null || echo 0)
+              2>/dev/null | awk '{s+=$1} END {print s+0}')
             if [ "$n" -gt 0 ]; then
               echo "Codex review arrived: $n review(s). Read it before merging."
               exit 0
