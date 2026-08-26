@@ -73,7 +73,7 @@ def make_source(tmp_path):
     return repo, commit_all(repo, "enrich")
 
 
-def make_tso(tmp_path, future=False, wrong_name=False):
+def make_tso(tmp_path, future=False, wrong_name=False, bad_cutoff=False, spoofed_usable=False):
     repo = tmp_path / "tso"
     init_repo(repo)
     context_fields = [
@@ -81,13 +81,20 @@ def make_tso(tmp_path, future=False, wrong_name=False):
         "usable_from_utc", "source_run_id", "risk_on_score", "risk_off_score", "status",
         "source_artifact_id",
     ]
+    # The context row always carries the snapshot's real usable-from timestamp.
+    real_usable = "2026-06-10 01:00:00 UTC" if (future or spoofed_usable) else "2026-06-09 22:00:05 UTC"
     contexts = [{
         "snapshot_id": "MCTX-1", "provenance": "historical_artifact_join", "context_date": "2026-06-09",
         "generated_at_utc": "2026-06-09 22:00:00 UTC", "generated_at_jst": "2026-06-10 07:00:00 JST",
-        "usable_from_utc": "2026-06-10 01:00:00 UTC" if future else "2026-06-09 22:00:05 UTC",
+        "usable_from_utc": real_usable,
         "source_run_id": "10", "risk_on_score": "55", "risk_off_score": "45", "status": "ok",
         "source_artifact_id": "20",
     }]
+    # spoofed_usable: the link claims an early usable-from time even though the
+    # referenced context snapshot's real usable-from time is later (future leak).
+    link_usable = "2026-06-09 22:00:05 UTC" if spoofed_usable else real_usable
+    # bad_cutoff: decision_cutoff_utc is not anchored to a day prior to the legacy event date.
+    cutoff = "2026-06-10 00:00:00 UTC" if bad_cutoff else "2026-06-09 23:00:00 UTC"
     link_fields = [
         "ers_code", "ers_name", "ers_date", "ers_quarter", "decision_cutoff_utc", "join_status",
         "snapshot_id", "provenance", "snapshot_usable_from_utc", "snapshot_generated_at_utc",
@@ -98,9 +105,9 @@ def make_tso(tmp_path, future=False, wrong_name=False):
     for code, name in (("1111", "違う会社" if wrong_name else "架空会社"), ("2222", "別の架空会社")):
         links.append({
             "ers_code": code, "ers_name": name, "ers_date": "2026-06-10", "ers_quarter": "1Q",
-            "decision_cutoff_utc": "2026-06-10 00:00:00 UTC", "join_status": "ok",
+            "decision_cutoff_utc": cutoff, "join_status": "ok",
             "snapshot_id": "MCTX-1", "provenance": "historical_artifact_join",
-            "snapshot_usable_from_utc": contexts[0]["usable_from_utc"],
+            "snapshot_usable_from_utc": link_usable,
             "snapshot_generated_at_utc": contexts[0]["generated_at_utc"], "lag_hours": "2",
             "snapshot_status": "ok", "snapshot_max_asset_staleness_days": "0",
             "source_artifact_id": "20", "source_run_id": "10",
@@ -166,6 +173,25 @@ def test_context_future_leak_and_identity_mismatch_are_rejected(tmp_path):
         build_import(source, source_commit, "source-run-1", bad_tso, bad_commit, "2026-08-26T08:00:00+09:00")
 
 
+def test_context_cutoff_and_usable_from_are_cross_checked(tmp_path):
+    source, source_commit = make_source(tmp_path)
+    # decision_cutoff_utc must be anchored to a day prior to the legacy event date,
+    # not merely trusted as whatever the TSO link supplies.
+    other = tmp_path / "other_bad_cutoff"
+    other.mkdir()
+    bad_cutoff_tso, bad_cutoff_commit = make_tso(other, bad_cutoff=True)
+    with pytest.raises(ValueError, match="not anchored to a prior legacy event date"):
+        build_import(source, source_commit, "source-run-1", bad_cutoff_tso, bad_cutoff_commit, "2026-08-26T08:00:00+09:00")
+    # snapshot_usable_from_utc on the link must match the referenced context row's own
+    # usable_from_utc; a link that copies an early time while the real snapshot became
+    # usable later must not be trusted.
+    spoofed = tmp_path / "spoofed_usable"
+    spoofed.mkdir()
+    spoofed_tso, spoofed_commit = make_tso(spoofed, spoofed_usable=True)
+    with pytest.raises(ValueError, match="does not match its context snapshot"):
+        build_import(source, source_commit, "source-run-1", spoofed_tso, spoofed_commit, "2026-08-26T08:00:00+09:00")
+
+
 def test_schema_rejects_prospective_promotion(tmp_path):
     source, source_commit = make_source(tmp_path)
     tso, tso_commit = make_tso(tmp_path)
@@ -208,4 +234,33 @@ def test_verifier_rejects_tampered_committed_data(tmp_path):
     with (output / "legacy_records.jsonl").open("a", encoding="utf-8") as handle:
         handle.write("{}\n")
     with pytest.raises(ValueError, match="hash mismatch"):
+        verify_legacy_migration(output, reports)
+
+
+def test_verifier_rejects_tampered_report_outputs(tmp_path):
+    source, source_commit = make_source(tmp_path)
+    tso, tso_commit = make_tso(tmp_path)
+    output = tmp_path / "migration"
+    reports = tmp_path / "reports"
+    migrate_legacy_os(source, source_commit, "source-run-1", tso, tso_commit, output, reports,
+                      "2026-08-26T08:00:00+09:00", date(2026, 6, 10))
+    verify_legacy_migration(output, reports)
+    (reports / "dashboard.md").write_text("tampered dashboard\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="legacy report output hash mismatch: dashboard.md"):
+        verify_legacy_migration(output, reports)
+
+
+def test_verifier_rejects_tampered_publishing_parity(tmp_path):
+    source, source_commit = make_source(tmp_path)
+    tso, tso_commit = make_tso(tmp_path)
+    output = tmp_path / "migration"
+    reports = tmp_path / "reports"
+    migrate_legacy_os(source, source_commit, "source-run-1", tso, tso_commit, output, reports,
+                      "2026-08-26T08:00:00+09:00", date(2026, 6, 10))
+    parity_path = reports / "publishing_parity.json"
+    tampered = json.loads(parity_path.read_text(encoding="utf-8"))
+    for item in tampered["outputs"].values():
+        item["byte_equal"] = True
+    parity_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(ValueError, match="legacy report output hash mismatch: publishing_parity.json"):
         verify_legacy_migration(output, reports)

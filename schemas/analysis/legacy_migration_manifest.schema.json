@@ -9,7 +9,7 @@
     "frozen_source_commit", "source_workflow_run_id", "source_sha256", "source_row_count",
     "source_column_count", "source_header", "source_history_commit_count",
     "tso_repository", "tso_source_commit", "tso_link_row_count",
-    "tso_context_snapshot_count", "output_sha256", "prospective_records_created",
+    "tso_context_snapshot_count", "output_sha256", "reports_sha256", "prospective_records_created",
     "formal_evidence_created", "tso_writeback_performed"
   ],
   "properties": {
@@ -37,6 +37,7 @@
     "tso_context_snapshot_count": {"type": "integer", "minimum": 1},
     "tso_join_status_counts": {"type": "object"},
     "output_sha256": {"type": "object"},
+    "reports_sha256": {"type": "object"},
     "prospective_records_created": {"const": 0},
     "formal_evidence_created": {"const": 0},
     "tso_writeback_performed": {"const": false}
