@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "HorizonReturn": {
+      "properties": {
+        "horizon": {
+          "enum": [
+            "D1",
+            "D5",
+            "D20"
+          ],
+          "title": "Horizon",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "return_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Value"
+        },
+        "source_record_id": {
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "comparable",
+            "not_comparable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "horizon",
+        "status",
+        "observed_at",
+        "source_record_id"
+      ],
+      "title": "HorizonReturn",
+      "type": "object"
+    },
+    "PostEventFeatures": {
+      "properties": {
+        "captured_at": {
+          "format": "date-time",
+          "title": "Captured At",
+          "type": "string"
+        },
+        "reaction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reaction"
+        }
+      },
+      "required": [
+        "captured_at"
+      ],
+      "title": "PostEventFeatures",
+      "type": "object"
+    },
+    "PreEventFeatures": {
+      "properties": {
+        "captured_at": {
+          "format": "date-time",
+          "title": "Captured At",
+          "type": "string"
+        },
+        "dollar_environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dollar Environment"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge"
+        },
+        "narrative": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Narrative"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "risk_balance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Risk Balance"
+        },
+        "volatility_environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Volatility Environment"
+        }
+      },
+      "required": [
+        "captured_at"
+      ],
+      "title": "PreEventFeatures",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "completed_at": {
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "event_occurred_at": {
+      "format": "date-time",
+      "title": "Event Occurred At",
+      "type": "string"
+    },
+    "event_quarter": {
+      "pattern": "^\\d{4}-Q[1-4]$",
+      "title": "Event Quarter",
+      "type": "string"
+    },
+    "observation_id": {
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "post_event_features": {
+      "$ref": "#/$defs/PostEventFeatures"
+    },
+    "pre_event_features": {
+      "$ref": "#/$defs/PreEventFeatures"
+    },
+    "production_rules_modified": {
+      "const": false,
+      "default": false,
+      "title": "Production Rules Modified",
+      "type": "boolean"
+    },
+    "prospective_record": {
+      "const": true,
+      "default": true,
+      "title": "Prospective Record",
+      "type": "boolean"
+    },
+    "returns": {
+      "items": {
+        "$ref": "#/$defs/HorizonReturn"
+      },
+      "title": "Returns",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "prospective_hypothesis_event_observation_v1",
+      "default": "prospective_hypothesis_event_observation_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scoring_weights_modified": {
+      "const": false,
+      "default": false,
+      "title": "Scoring Weights Modified",
+      "type": "boolean"
+    },
+    "source_record_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Source Record Ids",
+      "type": "array"
+    },
+    "ticker": {
+      "title": "Ticker",
+      "type": "string"
+    },
+    "trade_decision_included": {
+      "const": false,
+      "default": false,
+      "title": "Trade Decision Included",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "observation_id",
+    "earnings_event_id",
+    "company_name",
+    "ticker",
+    "event_quarter",
+    "event_occurred_at",
+    "completed_at",
+    "pre_event_features",
+    "post_event_features",
+    "returns",
+    "source_record_ids"
+  ],
+  "title": "CompletedEventObservation",
+  "type": "object"
+}

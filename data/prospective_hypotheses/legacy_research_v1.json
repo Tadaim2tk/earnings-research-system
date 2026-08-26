@@ -1,0 +1,741 @@
+{
+  "frozen_at": "2026-08-26T17:41:00+09:00",
+  "hypotheses": [
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D5",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.095858,
+        "positive_rate_delta_vs_overall": 0.407146
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 34,
+        "distinct_context_snapshot_count": 22,
+        "distinct_ticker_count": 34,
+        "effective_unit_count": 22
+      },
+      "hypothesis_id": "LRH-F0BC6EF58E4F",
+      "hypothesis_text": "reaction=GU継続に該当する新ERS決算群は、D5で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "primary",
+      "source_candidate_id": "reaction:GU継続:d5:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GU継続"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D20",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.089813,
+        "positive_rate_delta_vs_overall": 0.282014
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 20,
+        "distinct_context_snapshot_count": 13,
+        "distinct_ticker_count": 20,
+        "effective_unit_count": 13
+      },
+      "hypothesis_id": "LRH-B2C8DB154A51",
+      "hypothesis_text": "reaction=GU継続に該当する新ERS決算群は、D20で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "secondary",
+      "source_candidate_id": "reaction:GU継続:d20:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GU継続"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "judge",
+      "evaluation_horizon": "D20",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.040461,
+        "positive_rate_delta_vs_overall": 0.101062
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 21,
+        "distinct_context_snapshot_count": 15,
+        "distinct_ticker_count": 21,
+        "effective_unit_count": 15
+      },
+      "hypothesis_id": "LRH-4780863CC489",
+      "hypothesis_text": "judge=押し目待ちに該当する新ERS決算群は、D20で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "judge:押し目待ち:d20:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "押し目待ち"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D20",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.036324,
+        "positive_rate_delta_vs_overall": 0.082014
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 35,
+        "distinct_context_snapshot_count": 22,
+        "distinct_ticker_count": 35,
+        "effective_unit_count": 22
+      },
+      "hypothesis_id": "LRH-5D1520A8D9E7",
+      "hypothesis_text": "rank=B+に該当する新ERS決算群は、D20で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "primary",
+      "source_candidate_id": "rank:B+:d20:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "B+"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D20",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.034361,
+        "positive_rate_delta_vs_overall": 0.177666
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 23,
+        "distinct_context_snapshot_count": 15,
+        "distinct_ticker_count": 23,
+        "effective_unit_count": 15
+      },
+      "hypothesis_id": "LRH-58699D195B3F",
+      "hypothesis_text": "reaction=GU失速に該当する新ERS決算群は、D20で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "secondary",
+      "source_candidate_id": "reaction:GU失速:d20:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GU失速"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "dollar_environment",
+      "evaluation_horizon": "D20",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.028344,
+        "positive_rate_delta_vs_overall": 0.116629
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 52,
+        "distinct_context_snapshot_count": 13,
+        "distinct_ticker_count": 52,
+        "effective_unit_count": 13
+      },
+      "hypothesis_id": "LRH-9AAA1AF53CF5",
+      "hypothesis_text": "dollar_environment=strongに該当する新ERS決算群は、D20で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "dollar_environment:strong:d20:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "strong"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D5",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.023874,
+        "positive_rate_delta_vs_overall": 0.109408
+      },
+      "historical_sample_grade": "descriptive",
+      "historical_sample_size": {
+        "available_count": 65,
+        "distinct_context_snapshot_count": 36,
+        "distinct_ticker_count": 65,
+        "effective_unit_count": 36
+      },
+      "hypothesis_id": "LRH-1FAC1BF1B0A4",
+      "hypothesis_text": "rank=B+に該当する新ERS決算群は、D5で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "primary",
+      "source_candidate_id": "rank:B+:d5:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "B+"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D5",
+      "expected_direction": "higher_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.019489,
+        "positive_rate_delta_vs_overall": 0.121808
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 67,
+        "distinct_context_snapshot_count": 29,
+        "distinct_ticker_count": 66,
+        "effective_unit_count": 29
+      },
+      "hypothesis_id": "LRH-EBA90C7DF0FF",
+      "hypothesis_text": "reaction=フラットに該当する新ERS決算群は、D5で平均リターンが比較群より高い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "primary",
+      "source_candidate_id": "reaction:フラット:d5:potentially_favorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "フラット"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D20",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.106971,
+        "positive_rate_delta_vs_overall": -0.437986
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 25,
+        "distinct_context_snapshot_count": 15,
+        "distinct_ticker_count": 25,
+        "effective_unit_count": 15
+      },
+      "hypothesis_id": "LRH-8C862D2450DC",
+      "hypothesis_text": "reaction=GD継続に該当する新ERS決算群は、D20で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "secondary",
+      "source_candidate_id": "reaction:GD継続:d20:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GD継続"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D5",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.078679,
+        "positive_rate_delta_vs_overall": -0.364096
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 54,
+        "distinct_context_snapshot_count": 28,
+        "distinct_ticker_count": 54,
+        "effective_unit_count": 28
+      },
+      "hypothesis_id": "LRH-48D753C8BA01",
+      "hypothesis_text": "reaction=GD継続に該当する新ERS決算群は、D5で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "primary",
+      "source_candidate_id": "reaction:GD継続:d5:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GD継続"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D5",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.020085,
+        "positive_rate_delta_vs_overall": -0.162707
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 48,
+        "distinct_context_snapshot_count": 29,
+        "distinct_ticker_count": 48,
+        "effective_unit_count": 29
+      },
+      "hypothesis_id": "LRH-0D21BDB84C10",
+      "hypothesis_text": "reaction=GD反発に該当する新ERS決算群は、D5で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "primary",
+      "source_candidate_id": "reaction:GD反発:d5:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GD反発"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "reaction",
+      "evaluation_horizon": "D20",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.019014,
+        "positive_rate_delta_vs_overall": -0.133371
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 26,
+        "distinct_context_snapshot_count": 18,
+        "distinct_ticker_count": 26,
+        "effective_unit_count": 18
+      },
+      "hypothesis_id": "LRH-5A6294F6BF05",
+      "hypothesis_text": "reaction=GD反発に該当する新ERS決算群は、D20で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "post_event",
+      "priority": "secondary",
+      "source_candidate_id": "reaction:GD反発:d20:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "GD反発"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D20",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.015581,
+        "positive_rate_delta_vs_overall": -0.069006
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 49,
+        "distinct_context_snapshot_count": 21,
+        "distinct_ticker_count": 48,
+        "effective_unit_count": 21
+      },
+      "hypothesis_id": "LRH-F2116C35FC02",
+      "hypothesis_text": "rank=Bに該当する新ERS決算群は、D20で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "rank:B:d20:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "B"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D5",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.010802,
+        "positive_rate_delta_vs_overall": -0.070445
+      },
+      "historical_sample_grade": "descriptive",
+      "historical_sample_size": {
+        "available_count": 84,
+        "distinct_context_snapshot_count": 35,
+        "distinct_ticker_count": 83,
+        "effective_unit_count": 35
+      },
+      "hypothesis_id": "LRH-6BECCAD1055B",
+      "hypothesis_text": "rank=Bに該当する新ERS決算群は、D5で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "rank:B:d5:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "B"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D5",
+      "expected_direction": "lower_than_comparator",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.010333,
+        "positive_rate_delta_vs_overall": -0.055207
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 50,
+        "distinct_context_snapshot_count": 25,
+        "distinct_ticker_count": 50,
+        "effective_unit_count": 25
+      },
+      "hypothesis_id": "LRH-3B39C7979531",
+      "hypothesis_text": "rank=Aに該当する新ERS決算群は、D5で平均リターンが比較群より低い。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "rank:A:d5:potentially_unfavorable",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "A"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "judge",
+      "evaluation_horizon": "D20",
+      "expected_direction": "no_material_difference",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.001253,
+        "positive_rate_delta_vs_overall": -0.024159
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 81,
+        "distinct_context_snapshot_count": 23,
+        "distinct_ticker_count": 79,
+        "effective_unit_count": 23
+      },
+      "hypothesis_id": "LRH-6DAC29CBD5B2",
+      "hypothesis_text": "judge=監視に該当する新ERS決算群は、D20で比較群との実質的な差が小さい。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "judge:監視:d20:low_discrimination",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "監視"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "dollar_environment",
+      "evaluation_horizon": "D5",
+      "expected_direction": "no_material_difference",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": -0.002353,
+        "positive_rate_delta_vs_overall": 0.030817
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 83,
+        "distinct_context_snapshot_count": 11,
+        "distinct_ticker_count": 81,
+        "effective_unit_count": 11
+      },
+      "hypothesis_id": "LRH-A2C89AB6732F",
+      "hypothesis_text": "dollar_environment=weakに該当する新ERS決算群は、D5で比較群との実質的な差が小さい。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "dollar_environment:weak:d5:low_discrimination",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "weak"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "judge",
+      "evaluation_horizon": "D5",
+      "expected_direction": "no_material_difference",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.00245,
+        "positive_rate_delta_vs_overall": -0.002234
+      },
+      "historical_sample_grade": "descriptive",
+      "historical_sample_size": {
+        "available_count": 148,
+        "distinct_context_snapshot_count": 37,
+        "distinct_ticker_count": 146,
+        "effective_unit_count": 37
+      },
+      "hypothesis_id": "LRH-D5DB85F1F1FB",
+      "hypothesis_text": "judge=監視に該当する新ERS決算群は、D5で比較群との実質的な差が小さい。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "judge:監視:d5:low_discrimination",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "監視"
+    },
+    {
+      "assessment_rule": {
+        "comparison_basis": "target_vs_all_eligible_events",
+        "minimum_comparator_trials": 30,
+        "minimum_target_trials": 30,
+        "no_material_mean_delta": 0.005,
+        "no_material_positive_rate_delta": 0.05,
+        "retained_effect_ratio": 0.5
+      },
+      "automatic_rank_rule_change": false,
+      "automatic_trading_rule_change": false,
+      "automatic_weight_change": false,
+      "definition_status": "active",
+      "dimension": "rank",
+      "evaluation_horizon": "D20",
+      "expected_direction": "no_material_difference",
+      "frozen_at": "2026-08-26T17:41:00+09:00",
+      "historical_effect": {
+        "mean_return_delta_vs_overall": 0.002923,
+        "positive_rate_delta_vs_overall": -0.041796
+      },
+      "historical_sample_grade": "limited",
+      "historical_sample_size": {
+        "available_count": 21,
+        "distinct_context_snapshot_count": 13,
+        "distinct_ticker_count": 21,
+        "effective_unit_count": 13
+      },
+      "hypothesis_id": "LRH-CEAA48970E0B",
+      "hypothesis_text": "rank=Aに該当する新ERS決算群は、D20で比較群との実質的な差が小さい。",
+      "hypothesis_version": 1,
+      "origin": "legacy_research",
+      "phase": "pre_event",
+      "priority": "secondary",
+      "source_candidate_id": "rank:A:d20:low_discrimination",
+      "target_scope": "new_ers_japanese_equity_earnings",
+      "target_value": "A"
+    }
+  ],
+  "promotion_review_policy": {
+    "automatic_promotion": false,
+    "minimum_comparator_trials": 50,
+    "minimum_consecutive_supported_evaluations": 2,
+    "minimum_distinct_event_quarters": 2,
+    "minimum_target_trials": 50,
+    "note": "条件到達は別の統治レビュー候補になるだけで、weight・rank・売買ルールを自動変更しない。"
+  },
+  "registry_id": "ERS-PROSPECTIVE-HYPOTHESES-LEGACY-V1",
+  "registry_version": 1,
+  "schema_version": "prospective_hypothesis_registry_v1",
+  "source_candidate_count": 19,
+  "source_research_path": "outputs/historical_research/research_knowledge.json",
+  "source_research_sha256": "daa07946fbeff41ba37906024739939f1b756587ef0f4d7da811b43cde7d2df2"
+}

@@ -1,0 +1,252 @@
+{
+  "$defs": {
+    "HypothesisStatus": {
+      "properties": {
+        "comparator_mean_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Comparator Mean Return"
+        },
+        "comparator_observations": {
+          "minimum": 0,
+          "title": "Comparator Observations",
+          "type": "integer"
+        },
+        "comparator_positive_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Comparator Positive Rate"
+        },
+        "distinct_event_quarters": {
+          "minimum": 0,
+          "title": "Distinct Event Quarters",
+          "type": "integer"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_version": {
+          "title": "Hypothesis Version",
+          "type": "integer"
+        },
+        "last_evaluated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Evaluated At"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "pre_event",
+            "post_event"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "primary",
+            "secondary"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "production_review_eligible": {
+          "const": false,
+          "default": false,
+          "title": "Production Review Eligible",
+          "type": "boolean"
+        },
+        "prospective_effect": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Prospective Effect"
+        },
+        "prospective_failures": {
+          "minimum": 0,
+          "title": "Prospective Failures",
+          "type": "integer"
+        },
+        "prospective_positive_rate_effect": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Prospective Positive Rate Effect"
+        },
+        "prospective_successes": {
+          "minimum": 0,
+          "title": "Prospective Successes",
+          "type": "integer"
+        },
+        "prospective_trials": {
+          "minimum": 0,
+          "title": "Prospective Trials",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "insufficient",
+            "supported",
+            "weakened",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_mean_return": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Mean Return"
+        },
+        "target_positive_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Positive Rate"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "hypothesis_version",
+        "phase",
+        "priority",
+        "status",
+        "prospective_trials",
+        "prospective_successes",
+        "prospective_failures",
+        "comparator_observations",
+        "target_mean_return",
+        "comparator_mean_return",
+        "prospective_effect",
+        "target_positive_rate",
+        "comparator_positive_rate",
+        "prospective_positive_rate_effect",
+        "distinct_event_quarters",
+        "last_evaluated_at",
+        "note"
+      ],
+      "title": "HypothesisStatus",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "automatic_rank_rule_change": {
+      "const": false,
+      "default": false,
+      "title": "Automatic Rank Rule Change",
+      "type": "boolean"
+    },
+    "automatic_trading_rule_change": {
+      "const": false,
+      "default": false,
+      "title": "Automatic Trading Rule Change",
+      "type": "boolean"
+    },
+    "automatic_weight_change": {
+      "const": false,
+      "default": false,
+      "title": "Automatic Weight Change",
+      "type": "boolean"
+    },
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "hypotheses": {
+      "items": {
+        "$ref": "#/$defs/HypothesisStatus"
+      },
+      "title": "Hypotheses",
+      "type": "array"
+    },
+    "registry_id": {
+      "title": "Registry Id",
+      "type": "string"
+    },
+    "registry_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Registry Sha256",
+      "type": "string"
+    },
+    "registry_version": {
+      "title": "Registry Version",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "prospective_hypothesis_status_v1",
+      "default": "prospective_hypothesis_status_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_trial_bundle_count": {
+      "minimum": 0,
+      "title": "Source Trial Bundle Count",
+      "type": "integer"
+    },
+    "source_trial_bundle_sha256": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Trial Bundle Sha256",
+      "type": "array"
+    }
+  },
+  "required": [
+    "registry_id",
+    "registry_version",
+    "registry_sha256",
+    "evaluated_at",
+    "source_trial_bundle_count",
+    "source_trial_bundle_sha256",
+    "hypotheses"
+  ],
+  "title": "HypothesisStatusSnapshot",
+  "type": "object"
+}

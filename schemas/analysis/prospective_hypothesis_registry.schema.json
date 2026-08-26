@@ -1,0 +1,351 @@
+{
+  "$defs": {
+    "AssessmentRule": {
+      "properties": {
+        "comparison_basis": {
+          "const": "target_vs_all_eligible_events",
+          "title": "Comparison Basis",
+          "type": "string"
+        },
+        "minimum_comparator_trials": {
+          "minimum": 1,
+          "title": "Minimum Comparator Trials",
+          "type": "integer"
+        },
+        "minimum_target_trials": {
+          "minimum": 1,
+          "title": "Minimum Target Trials",
+          "type": "integer"
+        },
+        "no_material_mean_delta": {
+          "minimum": 0.0,
+          "title": "No Material Mean Delta",
+          "type": "number"
+        },
+        "no_material_positive_rate_delta": {
+          "minimum": 0.0,
+          "title": "No Material Positive Rate Delta",
+          "type": "number"
+        },
+        "retained_effect_ratio": {
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0,
+          "title": "Retained Effect Ratio",
+          "type": "number"
+        }
+      },
+      "required": [
+        "comparison_basis",
+        "minimum_target_trials",
+        "minimum_comparator_trials",
+        "retained_effect_ratio",
+        "no_material_mean_delta",
+        "no_material_positive_rate_delta"
+      ],
+      "title": "AssessmentRule",
+      "type": "object"
+    },
+    "HistoricalEffect": {
+      "properties": {
+        "mean_return_delta_vs_overall": {
+          "title": "Mean Return Delta Vs Overall",
+          "type": "number"
+        },
+        "positive_rate_delta_vs_overall": {
+          "title": "Positive Rate Delta Vs Overall",
+          "type": "number"
+        }
+      },
+      "required": [
+        "mean_return_delta_vs_overall",
+        "positive_rate_delta_vs_overall"
+      ],
+      "title": "HistoricalEffect",
+      "type": "object"
+    },
+    "HistoricalSample": {
+      "properties": {
+        "available_count": {
+          "minimum": 0,
+          "title": "Available Count",
+          "type": "integer"
+        },
+        "distinct_context_snapshot_count": {
+          "minimum": 0,
+          "title": "Distinct Context Snapshot Count",
+          "type": "integer"
+        },
+        "distinct_ticker_count": {
+          "minimum": 0,
+          "title": "Distinct Ticker Count",
+          "type": "integer"
+        },
+        "effective_unit_count": {
+          "minimum": 0,
+          "title": "Effective Unit Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available_count",
+        "effective_unit_count",
+        "distinct_ticker_count",
+        "distinct_context_snapshot_count"
+      ],
+      "title": "HistoricalSample",
+      "type": "object"
+    },
+    "HypothesisDefinition": {
+      "properties": {
+        "assessment_rule": {
+          "$ref": "#/$defs/AssessmentRule"
+        },
+        "automatic_rank_rule_change": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Rank Rule Change",
+          "type": "boolean"
+        },
+        "automatic_trading_rule_change": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Trading Rule Change",
+          "type": "boolean"
+        },
+        "automatic_weight_change": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Weight Change",
+          "type": "boolean"
+        },
+        "definition_status": {
+          "const": "active",
+          "default": "active",
+          "title": "Definition Status",
+          "type": "string"
+        },
+        "dimension": {
+          "enum": [
+            "rank",
+            "narrative",
+            "judge",
+            "reaction",
+            "risk_balance",
+            "volatility_environment",
+            "dollar_environment"
+          ],
+          "title": "Dimension",
+          "type": "string"
+        },
+        "evaluation_horizon": {
+          "enum": [
+            "D1",
+            "D5",
+            "D20"
+          ],
+          "title": "Evaluation Horizon",
+          "type": "string"
+        },
+        "expected_direction": {
+          "enum": [
+            "higher_than_comparator",
+            "lower_than_comparator",
+            "no_material_difference"
+          ],
+          "title": "Expected Direction",
+          "type": "string"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        },
+        "historical_effect": {
+          "$ref": "#/$defs/HistoricalEffect"
+        },
+        "historical_sample_grade": {
+          "enum": [
+            "insufficient",
+            "limited",
+            "descriptive"
+          ],
+          "title": "Historical Sample Grade",
+          "type": "string"
+        },
+        "historical_sample_size": {
+          "$ref": "#/$defs/HistoricalSample"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_text": {
+          "title": "Hypothesis Text",
+          "type": "string"
+        },
+        "hypothesis_version": {
+          "minimum": 1,
+          "title": "Hypothesis Version",
+          "type": "integer"
+        },
+        "origin": {
+          "const": "legacy_research",
+          "title": "Origin",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "pre_event",
+            "post_event"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "primary",
+            "secondary"
+          ],
+          "title": "Priority",
+          "type": "string"
+        },
+        "source_candidate_id": {
+          "title": "Source Candidate Id",
+          "type": "string"
+        },
+        "target_scope": {
+          "const": "new_ers_japanese_equity_earnings",
+          "title": "Target Scope",
+          "type": "string"
+        },
+        "target_value": {
+          "title": "Target Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "hypothesis_version",
+        "origin",
+        "source_candidate_id",
+        "hypothesis_text",
+        "phase",
+        "priority",
+        "target_scope",
+        "dimension",
+        "target_value",
+        "expected_direction",
+        "evaluation_horizon",
+        "historical_sample_size",
+        "historical_effect",
+        "historical_sample_grade",
+        "frozen_at",
+        "assessment_rule"
+      ],
+      "title": "HypothesisDefinition",
+      "type": "object"
+    },
+    "PromotionReviewPolicy": {
+      "properties": {
+        "automatic_promotion": {
+          "const": false,
+          "default": false,
+          "title": "Automatic Promotion",
+          "type": "boolean"
+        },
+        "minimum_comparator_trials": {
+          "minimum": 1,
+          "title": "Minimum Comparator Trials",
+          "type": "integer"
+        },
+        "minimum_consecutive_supported_evaluations": {
+          "minimum": 1,
+          "title": "Minimum Consecutive Supported Evaluations",
+          "type": "integer"
+        },
+        "minimum_distinct_event_quarters": {
+          "minimum": 1,
+          "title": "Minimum Distinct Event Quarters",
+          "type": "integer"
+        },
+        "minimum_target_trials": {
+          "minimum": 1,
+          "title": "Minimum Target Trials",
+          "type": "integer"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minimum_target_trials",
+        "minimum_comparator_trials",
+        "minimum_distinct_event_quarters",
+        "minimum_consecutive_supported_evaluations",
+        "note"
+      ],
+      "title": "PromotionReviewPolicy",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "frozen_at": {
+      "format": "date-time",
+      "title": "Frozen At",
+      "type": "string"
+    },
+    "hypotheses": {
+      "items": {
+        "$ref": "#/$defs/HypothesisDefinition"
+      },
+      "minItems": 1,
+      "title": "Hypotheses",
+      "type": "array"
+    },
+    "promotion_review_policy": {
+      "$ref": "#/$defs/PromotionReviewPolicy"
+    },
+    "registry_id": {
+      "title": "Registry Id",
+      "type": "string"
+    },
+    "registry_version": {
+      "minimum": 1,
+      "title": "Registry Version",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "prospective_hypothesis_registry_v1",
+      "default": "prospective_hypothesis_registry_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_candidate_count": {
+      "minimum": 1,
+      "title": "Source Candidate Count",
+      "type": "integer"
+    },
+    "source_research_path": {
+      "title": "Source Research Path",
+      "type": "string"
+    },
+    "source_research_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Research Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "registry_id",
+    "registry_version",
+    "source_research_path",
+    "source_research_sha256",
+    "source_candidate_count",
+    "frozen_at",
+    "hypotheses",
+    "promotion_review_policy"
+  ],
+  "title": "HypothesisRegistry",
+  "type": "object"
+}

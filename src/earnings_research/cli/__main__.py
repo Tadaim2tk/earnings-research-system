@@ -30,6 +30,12 @@ from earnings_research.legacy_research import (
     verify_research_outputs,
     write_research_outputs,
 )
+from earnings_research.prospective_hypotheses import (
+    build_registry_file,
+    evaluate_observation_file,
+    summarize_trials_file,
+    verify_registry_file,
+)
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
 from earnings_research.monitoring.operational_cli import (
@@ -242,6 +248,40 @@ def main(argv=None) -> int:
     legacy_research_verify_parser.add_argument("--input-root", required=True, type=Path)
     legacy_research_verify_parser.add_argument("--output-dir", required=True, type=Path)
 
+    hypothesis_registry_parser = subparsers.add_parser(
+        "build-hypothesis-registry",
+        help="Freeze legacy learning candidates as prospective hypothesis definitions.",
+    )
+    hypothesis_registry_parser.add_argument("--knowledge", required=True, type=Path)
+    hypothesis_registry_parser.add_argument("--frozen-at", required=True)
+    hypothesis_registry_parser.add_argument("--output", required=True, type=Path)
+
+    hypothesis_verify_parser = subparsers.add_parser(
+        "verify-hypothesis-registry",
+        help="Verify a frozen prospective hypothesis registry against legacy research.",
+    )
+    hypothesis_verify_parser.add_argument("--knowledge", required=True, type=Path)
+    hypothesis_verify_parser.add_argument("--registry", required=True, type=Path)
+
+    hypothesis_evaluate_parser = subparsers.add_parser(
+        "evaluate-hypothesis-event",
+        help="Append prospective hypothesis trials for one completed earnings event.",
+    )
+    hypothesis_evaluate_parser.add_argument("--registry", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--observation", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--trials-dir", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--recorded-at", required=True)
+    hypothesis_evaluate_parser.add_argument("--output", required=True, type=Path)
+
+    hypothesis_summary_parser = subparsers.add_parser(
+        "summarize-hypothesis-registry",
+        help="Derive current hypothesis status from append-only event trials.",
+    )
+    hypothesis_summary_parser.add_argument("--registry", required=True, type=Path)
+    hypothesis_summary_parser.add_argument("--trials-dir", required=True, type=Path)
+    hypothesis_summary_parser.add_argument("--evaluated-at", required=True)
+    hypothesis_summary_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -429,6 +469,73 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Legacy research verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "build-hypothesis-registry":
+        try:
+            registry = build_registry_file(
+                args.knowledge,
+                args.output,
+                datetime.fromisoformat(args.frozen_at),
+            )
+            print(json.dumps({
+                "registry_id": registry.registry_id,
+                "hypothesis_count": len(registry.hypotheses),
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Hypothesis registry generation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-hypothesis-registry":
+        try:
+            registry = verify_registry_file(args.knowledge, args.registry)
+            print(json.dumps({
+                "registry_id": registry.registry_id,
+                "hypothesis_count": len(registry.hypotheses),
+                "status": "verified",
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Hypothesis registry verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "evaluate-hypothesis-event":
+        try:
+            bundle = evaluate_observation_file(
+                args.registry,
+                args.observation,
+                args.trials_dir,
+                args.output,
+                datetime.fromisoformat(args.recorded_at),
+            )
+            print(json.dumps({
+                "earnings_event_id": bundle.earnings_event_id,
+                "trial_count": len(bundle.trials),
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Hypothesis event evaluation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "summarize-hypothesis-registry":
+        try:
+            snapshot = summarize_trials_file(
+                args.registry,
+                args.trials_dir,
+                args.output,
+                datetime.fromisoformat(args.evaluated_at),
+            )
+            print(json.dumps({
+                "registry_id": snapshot.registry_id,
+                "hypothesis_count": len(snapshot.hypotheses),
+                "output": str(args.output),
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Hypothesis summary generation failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     try:

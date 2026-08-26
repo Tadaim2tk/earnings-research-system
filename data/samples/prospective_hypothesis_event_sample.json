@@ -1,0 +1,55 @@
+{
+  "company_name": "架空研究株式会社",
+  "completed_at": "2026-09-30T17:00:00+09:00",
+  "earnings_event_id": "EE-FICTIONAL-2026-Q1",
+  "event_occurred_at": "2026-08-31T15:30:00+09:00",
+  "event_quarter": "2026-Q1",
+  "observation_id": "HPO-FICTIONAL-2026-Q1",
+  "post_event_features": {
+    "captured_at": "2026-09-01T15:30:00+09:00",
+    "reaction": "GU継続"
+  },
+  "pre_event_features": {
+    "captured_at": "2026-08-31T14:00:00+09:00",
+    "dollar_environment": "strong",
+    "judge": "押し目待ち",
+    "narrative": "整合",
+    "rank": "B+",
+    "risk_balance": "risk_on",
+    "volatility_environment": "high"
+  },
+  "production_rules_modified": false,
+  "prospective_record": true,
+  "returns": [
+    {
+      "horizon": "D1",
+      "observed_at": "2026-09-01T15:30:00+09:00",
+      "return_value": 0.03,
+      "source_record_id": "MR-FICTIONAL-D1",
+      "status": "comparable"
+    },
+    {
+      "horizon": "D5",
+      "observed_at": "2026-09-07T15:30:00+09:00",
+      "return_value": 0.06,
+      "source_record_id": "MR-FICTIONAL-D5",
+      "status": "comparable"
+    },
+    {
+      "horizon": "D20",
+      "observed_at": "2026-09-29T15:30:00+09:00",
+      "return_value": 0.11,
+      "source_record_id": "MR-FICTIONAL-D20",
+      "status": "comparable"
+    }
+  ],
+  "schema_version": "prospective_hypothesis_event_observation_v1",
+  "scoring_weights_modified": false,
+  "source_record_ids": [
+    "BASELINE-FICTIONAL-2026-Q1",
+    "EVAL-FICTIONAL-2026-Q1",
+    "REACTION-FICTIONAL-2026-Q1"
+  ],
+  "ticker": "9999",
+  "trade_decision_included": false
+}
