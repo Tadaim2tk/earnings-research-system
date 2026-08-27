@@ -1,5 +1,6 @@
 import csv
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,17 +24,84 @@ from earnings_research.prospective_hypotheses.pipeline import (
     load_trial_bundles,
     verify_registry_file,
 )
+from earnings_research.validation.validator import _calculate_baseline_record_hash, load_spec
 
 
 ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "outputs/historical_research/research_knowledge.json"
 REGISTRY = ROOT / "data/prospective_hypotheses/legacy_research_v1.json"
 OBSERVATION = ROOT / "data/samples/prospective_hypothesis_event_sample.json"
-BASELINE = ROOT / "data/samples/prospective_baseline/pre_earnings_baseline_sample.csv"
+SAMPLES = ROOT / "data/samples"
+PROSPECTIVE_BASELINE_SAMPLES = SAMPLES / "prospective_baseline"
 STAGED_D1 = ROOT / "data/samples/prospective_hypothesis_event_d1_sample.json"
 STAGED_D5 = ROOT / "data/samples/prospective_hypothesis_event_d5_sample.json"
 STAGED_D20 = ROOT / "data/samples/prospective_hypothesis_event_d20_sample.json"
 JST = timezone(timedelta(hours=9))
+
+
+def _read_csv(path):
+    with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader.fieldnames or []), list(reader)
+
+
+def _write_csv(path, fieldnames, rows):
+    with Path(path).open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+@pytest.fixture
+def authoritative_dataset(tmp_path):
+    dataset = tmp_path / "authoritative-dataset"
+    shutil.copytree(SAMPLES, dataset)
+
+    baseline_path = dataset / "pre_earnings_baseline_sample.csv"
+    _, baseline_rows = _read_csv(baseline_path)
+    fixture_fields, fixture_rows = _read_csv(
+        PROSPECTIVE_BASELINE_SAMPLES / "pre_earnings_baseline_sample.csv"
+    )
+    fixtures_by_id = {row["baseline_id"]: row for row in fixture_rows}
+    existing_ids = {row["baseline_id"] for row in baseline_rows}
+    normalized = []
+    spec = load_spec("pre_earnings_baseline")
+    for source in baseline_rows:
+        if source["baseline_id"] in fixtures_by_id:
+            normalized.append(dict(fixtures_by_id[source["baseline_id"]]))
+            continue
+        row = {field: source.get(field, "") for field in fixture_fields}
+        row.update({
+            "baseline_status": "locked",
+            "lock_hash_algorithm": "sha256",
+            "human_review_status": "approved",
+            "reviewed_by": "test-reviewer",
+            "reviewed_at": row["locked_at"],
+            "recorded_at": row["locked_at"],
+        })
+        row["baseline_record_hash"] = _calculate_baseline_record_hash(row, spec)
+        normalized.append(row)
+    normalized.extend(row for row in fixture_rows if row["baseline_id"] not in existing_ids)
+    _write_csv(baseline_path, fixture_fields, normalized)
+
+    evidence_path = dataset / "evidence_sample.csv"
+    _, evidence_rows = _read_csv(evidence_path)
+    evidence_fields, fixture_evidence = _read_csv(
+        PROSPECTIVE_BASELINE_SAMPLES / "evidence_sample.csv"
+    )
+    normalized_evidence = []
+    for source in evidence_rows:
+        row = {field: source.get(field, "") for field in evidence_fields}
+        row.update({
+            "evidence_status": "original",
+            "content_hash_status": "not_recorded",
+            "raw_storage_status": "metadata_only",
+            "license_status": "not_applicable",
+        })
+        normalized_evidence.append(row)
+    normalized_evidence.extend(fixture_evidence)
+    _write_csv(evidence_path, evidence_fields, normalized_evidence)
+    return dataset
 
 
 def registry():
@@ -121,22 +189,22 @@ def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
     assert all(item.reason == "required_pre_event_field_missing" for item in judge_results)
 
 
-def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_path):
+def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_path, authoritative_dataset):
     trials = tmp_path / "trials"
     output = trials / "event-d20.json"
     evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST), BASELINE
+        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset
     )
     with pytest.raises(ValueError, match="increment by one"):
         evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), BASELINE
+            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset
         )
     other = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     other_path = tmp_path / "other.json"
     other_path.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(FileExistsError, match="already"):
         evaluate_observation_file(
-            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), BASELINE
+            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset
         )
     replay = json.loads(OBSERVATION.read_text(encoding="utf-8"))
     replay["observation_id"] = "HPO-FICTIONAL-REPLAY"
@@ -146,23 +214,23 @@ def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_pa
     replay_path.write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="horizon must advance"):
         evaluate_observation_file(
-            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST), BASELINE
+            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST), authoritative_dataset
         )
 
 
-def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path):
+def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path, authoritative_dataset):
     trials = tmp_path / "trials"
     d1 = evaluate_observation_file(
-        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), BASELINE
+        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset
     )
     assert d1.trials == []
     d5 = evaluate_observation_file(
-        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST), BASELINE
+        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST), authoritative_dataset
     )
     assert d5.trials
     assert {item.evaluation_horizon for item in d5.trials} == {"D5"}
     d20 = evaluate_observation_file(
-        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST), BASELINE
+        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset
     )
     assert d20.trials
     assert {item.evaluation_horizon for item in d20.trials} == {"D20"}
@@ -180,11 +248,11 @@ def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path):
         )
 
 
-def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path):
+def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path, authoritative_dataset):
     for field, expected in (("pre_event", "frozen pre-event"), ("return", "matured return")):
         trials = tmp_path / field
         evaluate_observation_file(
-            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), BASELINE
+            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset
         )
         changed = json.loads(STAGED_D5.read_text(encoding="utf-8"))
         if field == "pre_event":
@@ -200,7 +268,7 @@ def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path)
                 trials,
                 trials / "02-d5.json",
                 datetime(2026, 9, 7, 18, tzinfo=JST),
-                BASELINE,
+                authoritative_dataset,
             )
 
 
@@ -357,7 +425,7 @@ def test_json_schema_rejects_missing_stage_return_and_future_horizon():
         jsonschema.validate(payload, schema)
 
 
-def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path):
+def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path, authoritative_dataset):
     trials = tmp_path / "trials"
     payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     payload["pre_event_features"]["baseline_id"] = "BASE-NOT-FOUND"
@@ -371,27 +439,70 @@ def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path):
             trials,
             trials / "missing.json",
             datetime(2026, 9, 1, 18, tzinfo=JST),
-            BASELINE,
+            authoritative_dataset,
         )
-    baseline_rows = list(csv.DictReader(BASELINE.open(encoding="utf-8")))
+    changed_dataset = tmp_path / "tampered-dataset"
+    shutil.copytree(authoritative_dataset, changed_dataset)
+    changed_baseline = changed_dataset / "pre_earnings_baseline_sample.csv"
+    baseline_rows = list(csv.DictReader(changed_baseline.open(encoding="utf-8")))
     baseline_rows[2]["baseline_record_hash"] = "0" * 64
-    changed_baseline = tmp_path / "pre_earnings_baseline.csv"
     with changed_baseline.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=baseline_rows[0].keys())
         writer.writeheader()
         writer.writerows(baseline_rows)
-    with pytest.raises(ValueError, match="authoritative baseline validation failed"):
+    with pytest.raises(ValueError, match="authoritative dataset validation failed"):
         evaluate_observation_file(
             REGISTRY,
             STAGED_D1,
             trials,
             trials / "tampered.json",
             datetime(2026, 9, 1, 18, tzinfo=JST),
-            changed_baseline,
+            changed_dataset,
         )
 
 
-def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
+def test_append_requires_complete_dataset_and_current_baseline_tail(tmp_path, authoritative_dataset):
+    incomplete = tmp_path / "incomplete-dataset"
+    incomplete.mkdir()
+    shutil.copy2(
+        authoritative_dataset / "pre_earnings_baseline_sample.csv",
+        incomplete / "pre_earnings_baseline_sample.csv",
+    )
+    with pytest.raises(ValueError, match="authoritative dataset validation failed"):
+        evaluate_observation_file(
+            REGISTRY,
+            STAGED_D1,
+            tmp_path / "incomplete-trials",
+            tmp_path / "incomplete.json",
+            datetime(2026, 9, 1, 18, tzinfo=JST),
+            incomplete,
+        )
+
+    payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
+    _, baseline_rows = _read_csv(authoritative_dataset / "pre_earnings_baseline_sample.csv")
+    superseded = next(row for row in baseline_rows if row["baseline_id"] == "BASE-ASTER-001")
+    payload["pre_event_features"].update({
+        "baseline_id": superseded["baseline_id"],
+        "baseline_version": 1,
+        "baseline_record_hash": superseded["baseline_record_hash"],
+        "captured_at": superseded["as_of_datetime"],
+        "locked_at": superseded["locked_at"],
+    })
+    payload["source_record_ids"][0] = superseded["baseline_id"]
+    superseded_observation = tmp_path / "superseded-observation.json"
+    superseded_observation.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="current prospective baseline tail"):
+        evaluate_observation_file(
+            REGISTRY,
+            superseded_observation,
+            tmp_path / "superseded-trials",
+            tmp_path / "superseded.json",
+            datetime(2026, 9, 1, 18, tzinfo=JST),
+            authoritative_dataset,
+        )
+
+
+def test_v1_trial_bundle_remains_readable_and_counted(tmp_path, authoritative_dataset):
     generated = evaluate_observation(
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
     )
@@ -423,7 +534,7 @@ def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
         trials,
         trials / "staged-d1.json",
         datetime(2026, 10, 1, 18, tzinfo=JST),
-        BASELINE,
+        authoritative_dataset,
     )
     assert len(load_trial_bundles(trials)) == 2
     v1_schema = json.loads(
@@ -433,7 +544,7 @@ def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
     jsonschema.validate(legacy.model_dump(mode="json"), v1_schema)
 
 
-def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
+def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path, authoritative_dataset):
     assert main([
         "verify-hypothesis-registry", "--knowledge", str(KNOWLEDGE), "--registry", str(REGISTRY)
     ]) == 0
@@ -444,7 +555,7 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
         "evaluate-hypothesis-event",
         "--registry", str(REGISTRY),
         "--observation", str(OBSERVATION),
-        "--baseline", str(BASELINE),
+        "--dataset", str(authoritative_dataset),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
         "--evaluated-at", "2026-10-01T09:00:00+09:00",

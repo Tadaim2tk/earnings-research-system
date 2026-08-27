@@ -22,7 +22,7 @@ from .models import (
 from earnings_research.validation.validator import (
     _calculate_baseline_record_hash,
     load_spec,
-    validate_file,
+    validate_dataset,
 )
 from .registry import build_registry, load_knowledge
 
@@ -105,21 +105,45 @@ def _trial_keys(bundles):
     }
 
 
-def _verify_authoritative_baseline(baseline_path, observation):
-    baseline_path = Path(baseline_path)
-    report = validate_file(baseline_path)
+def _read_dataset_table(dataset_dir, table):
+    path = Path(dataset_dir) / load_spec(table).file
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _verify_authoritative_baseline(dataset_dir, observation):
+    dataset_dir = Path(dataset_dir)
+    report = validate_dataset(dataset_dir)
     if not report.ok:
         raise ValueError(
-            "authoritative baseline validation failed: "
+            "authoritative dataset validation failed: "
             + "; ".join(issue.format() for issue in report.issues)
         )
-    with baseline_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.DictReader(handle))
+    rows = _read_dataset_table(dataset_dir, "pre_earnings_baseline")
     expected_id = observation.pre_event_features.baseline_id
     matches = [row for row in rows if row.get("baseline_id", "").strip() == expected_id]
     if len(matches) != 1:
         raise ValueError("baseline_id must resolve to exactly one authoritative row")
     row = matches[0]
+    event_id = observation.earnings_event_id
+    prospective_rows = [
+        item for item in rows
+        if item.get("earnings_event_id", "").strip() == event_id
+        and item.get("baseline_status", "").strip()
+    ]
+    superseded_ids = {
+        item.get("supersedes_baseline_id", "").strip()
+        for item in prospective_rows
+        if item.get("supersedes_baseline_id", "").strip()
+    }
+    current_tails = [
+        item for item in prospective_rows
+        if item.get("baseline_id", "").strip() not in superseded_ids
+    ]
+    if len(current_tails) != 1:
+        raise ValueError("earnings event must have exactly one current prospective baseline tail")
+    if current_tails[0].get("baseline_id", "").strip() != expected_id:
+        raise ValueError("event observation must reference the current prospective baseline tail")
     if row.get("earnings_event_id", "").strip() != observation.earnings_event_id:
         raise ValueError("authoritative baseline belongs to a different earnings event")
     if row.get("baseline_version", "").strip() != f"v{observation.pre_event_features.baseline_version}":
@@ -127,7 +151,7 @@ def _verify_authoritative_baseline(baseline_path, observation):
     if row.get("is_locked", "").strip().lower() != "true":
         raise ValueError("authoritative baseline must be locked")
     status = row.get("baseline_status", "").strip()
-    if status and status != "locked":
+    if status != "locked":
         raise ValueError("authoritative prospective baseline must have locked status")
     try:
         locked_at = datetime.fromisoformat(row.get("locked_at", "").strip())
@@ -162,6 +186,50 @@ def _verify_authoritative_baseline(baseline_path, observation):
         raise ValueError(
             "pre-event hypothesis fields lack an authoritative mapping: " + ", ".join(supplied)
         )
+
+    event_rows = [
+        item for item in _read_dataset_table(dataset_dir, "earnings_event")
+        if item.get("earnings_event_id", "").strip() == event_id
+    ]
+    if len(event_rows) != 1:
+        raise ValueError("earnings_event_id must resolve to exactly one authoritative event row")
+    event_row = event_rows[0]
+    if event_row.get("fiscal_period", "").strip() != observation.event_quarter.replace("-", ""):
+        raise ValueError("event observation quarter does not match the authoritative event")
+    company_rows = [
+        item for item in _read_dataset_table(dataset_dir, "company_master")
+        if item.get("company_id", "").strip() == event_row.get("company_id", "").strip()
+    ]
+    if len(company_rows) != 1:
+        raise ValueError("authoritative event company must resolve to exactly one company row")
+    company_row = company_rows[0]
+    if (
+        company_row.get("company_name", "").strip() != observation.company_name
+        or company_row.get("ticker", "").strip() != observation.ticker
+    ):
+        raise ValueError("event observation company identity does not match the authoritative dataset")
+
+    status_rows = [
+        item for item in _read_dataset_table(dataset_dir, "event_status_history")
+        if item.get("earnings_event_id", "").strip() == event_id
+    ]
+    superseded_status_ids = {
+        item.get("supersedes_status_record_id", "").strip()
+        for item in status_rows
+        if item.get("supersedes_status_record_id", "").strip()
+    }
+    current_statuses = [
+        item for item in status_rows
+        if item.get("event_status_record_id", "").strip() not in superseded_status_ids
+    ]
+    if len(current_statuses) != 1 or current_statuses[0].get("event_status", "").strip() != "occurred":
+        raise ValueError("authoritative event must have exactly one current occurred status")
+    try:
+        occurred_at = datetime.fromisoformat(current_statuses[0].get("occurred_at", "").strip())
+    except ValueError as exc:
+        raise ValueError("authoritative event occurred_at is invalid") from exc
+    if occurred_at != observation.event_occurred_at:
+        raise ValueError("event observation occurrence time does not match the authoritative dataset")
     return row
 
 
@@ -228,13 +296,13 @@ def evaluate_observation_file(
     trials_dir: Path,
     output_path: Path,
     recorded_at: datetime,
-    baseline_path: Path,
+    dataset_dir: Path,
 ):
     registry = HypothesisRegistry.model_validate_json(Path(registry_path).read_text(encoding="utf-8"))
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
-    _verify_authoritative_baseline(baseline_path, observation)
+    _verify_authoritative_baseline(dataset_dir, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(
@@ -255,7 +323,7 @@ def evaluate_observation_and_status_file(
     status_output_path: Path,
     recorded_at: datetime,
     evaluated_at: datetime,
-    baseline_path: Path,
+    dataset_dir: Path,
 ):
     trials_dir = Path(trials_dir)
     if Path(trial_output_path).parent.resolve() != trials_dir.resolve():
@@ -268,7 +336,7 @@ def evaluate_observation_and_status_file(
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
-    _verify_authoritative_baseline(baseline_path, observation)
+    _verify_authoritative_baseline(dataset_dir, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(

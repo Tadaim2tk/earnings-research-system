@@ -1,7 +1,7 @@
 {
-  "company_name": "架空研究株式会社",
+  "company_name": "Aster Cloud Works",
   "earnings_event_id": "EVT-ASTER-2026Q1",
-  "event_occurred_at": "2026-08-31T15:30:00+09:00",
+  "event_occurred_at": "2026-08-08T15:30:00+09:00",
   "event_quarter": "2026-Q1",
   "observation_id": "HPO-FICTIONAL-STAGED-D5",
   "observation_stage": "D5",
@@ -50,6 +50,6 @@
     "REACTION-FICTIONAL-STAGED"
   ],
   "supersedes_observation_id": "HPO-FICTIONAL-STAGED-D1",
-  "ticker": "9998",
+  "ticker": "ASTR",
   "trade_decision_included": false
 }

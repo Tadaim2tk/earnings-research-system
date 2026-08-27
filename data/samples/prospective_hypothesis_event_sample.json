@@ -1,8 +1,8 @@
 {
-  "company_name": "架空研究株式会社",
-  "earnings_event_id": "EVT-HOKUTO-2026Q1",
-  "event_occurred_at": "2026-08-31T15:30:00+09:00",
-  "event_quarter": "2026-Q1",
+  "company_name": "Minato Legacy Retail",
+  "earnings_event_id": "EVT-MINATO-2026Q2",
+  "event_occurred_at": "2026-08-12T15:00:00+09:00",
+  "event_quarter": "2026-Q2",
   "observation_id": "HPO-FICTIONAL-2026-Q1",
   "observation_stage": "D20",
   "observation_version": 1,
@@ -12,15 +12,15 @@
     "reaction": "GU継続"
   },
   "pre_event_features": {
-    "baseline_id": "BASE-HOKUTO-001",
-    "baseline_record_hash": "75d861a773563f8968bba2896d6a901aeb83deed98fd8ff785391bacad5a8cb5",
+    "baseline_id": "BASE-MINATO-001",
+    "baseline_record_hash": "ec46a6c31673dd8ac4bd9651158d1ed4c39f9b7a048be2a5317333acbe82dcc8",
     "baseline_version": 1,
-    "captured_at": "2026-08-04T17:30:00+09:00",
+    "captured_at": "2026-08-11T17:00:00+09:00",
     "dollar_environment": null,
     "judge": null,
-    "locked_at": "2026-08-04T18:00:00+09:00",
+    "locked_at": "2026-08-11T18:00:00+09:00",
     "narrative": null,
-    "rank": "B",
+    "rank": "D",
     "risk_balance": null,
     "volatility_environment": null
   },
@@ -52,11 +52,11 @@
   "schema_version": "prospective_hypothesis_event_observation_v2",
   "scoring_weights_modified": false,
   "source_record_ids": [
-    "BASE-HOKUTO-001",
+    "BASE-MINATO-001",
     "EVAL-FICTIONAL-2026-Q1",
     "REACTION-FICTIONAL-2026-Q1"
   ],
   "supersedes_observation_id": null,
-  "ticker": "9999",
+  "ticker": "MNTO",
   "trade_decision_included": false
 }

@@ -40,7 +40,7 @@
 - `volatility_environment`
 - `dollar_environment`
 
-これらは `event_occurred_at` 以前にlockされたbaselineの値だけを使う。baseline ID、version、record hash、`locked_at`を必須とし、`captured_at <= locked_at <= event_occurred_at`を検証する。trial追記時は正本のbaseline CSVを必須入力とし、通常のbaseline validatorを通したうえでID、event、version、lock状態、lock時刻、canonical record hashを観測値と突合する。`rank`は正本の`pre_event_grade`と一致する場合だけ使う。旧`judge`やTSO市場環境など正式mappingのない特徴は未記録として母数外にし、自己申告のID・時刻・hash・特徴値だけではtrialを作らない。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
+これらは `event_occurred_at` 以前にlockされたbaselineの値だけを使う。baseline ID、version、record hash、`locked_at`を必須とし、`captured_at <= locked_at <= event_occurred_at`を検証する。trial追記時は正本の完全なERS datasetを必須入力とし、dataset全体のvalidatorを通したうえで、同一eventの唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical record hashを観測値と突合する。単独baseline CSVやsuperseded済みversionではtrialを作らない。`rank`は正本の`pre_event_grade`と一致する場合だけ使う。旧`judge`やTSO市場環境など正式mappingのない特徴は未記録として母数外にし、自己申告のID・時刻・hash・特徴値だけではtrialを作らない。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
 
 ### post_event
 
@@ -158,7 +158,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
 python3 -m earnings_research.cli evaluate-hypothesis-event \
   --registry data/prospective_hypotheses/legacy_research_v1.json \
   --observation completed_event.json \
-  --baseline data/pre_earnings_baseline.csv \
+  --dataset data/current_dataset \
   --trials-dir data/prospective_hypothesis_trials \
   --recorded-at 2026-09-30T18:00:00+09:00 \
   --evaluated-at 2026-09-30T18:00:00+09:00 \
