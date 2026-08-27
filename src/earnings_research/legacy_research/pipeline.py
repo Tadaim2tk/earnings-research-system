@@ -34,6 +34,10 @@ def migrate_legacy_os(
         name: hashlib.sha256(content).hexdigest()
         for name, content in source_outputs.items()
     })
+    manifest["reports_sha256"] = {
+        name: hashlib.sha256(content).hexdigest()
+        for name, content in sorted(reports.items())
+    }
     files["migration_manifest.json"] = json.dumps(
         manifest, ensure_ascii=False, indent=2, sort_keys=True
     ).encode("utf-8") + b"\n"
@@ -86,12 +90,15 @@ def verify_legacy_migration(output_root: Path, reports_output: Path):
             raise ValueError("normalized legacy record escaped its cohort")
         if context.get("legacy_record_id") != record.get("legacy_record_id") or context.get("join_status") != "ok":
             raise ValueError("legacy TSO context view does not match its record")
+    reports_hashes = manifest.get("reports_sha256", {})
+    for name in ("dashboard.md", "weekly_report.md", "note_draft.md", "aggregation_summary.json", "publishing_parity.json"):
+        expected = reports_hashes.get(name)
+        path = reports_output / name
+        if not expected or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"legacy report output hash mismatch: {name}")
     parity = json.loads((reports_output / "publishing_parity.json").read_text(encoding="utf-8"))
     if not all(item.get("byte_equal") for item in parity.get("outputs", {}).values()):
         raise ValueError("legacy publishing parity is not complete")
-    for name in ("dashboard.md", "weekly_report.md", "note_draft.md", "aggregation_summary.json"):
-        if not (reports_output / name).is_file():
-            raise ValueError(f"legacy research output is missing: {name}")
     aggregation = json.loads((reports_output / "aggregation_summary.json").read_text(encoding="utf-8"))
     if aggregation.get("record_count") != expected_count or aggregation.get("prospective_records_included") != 0:
         raise ValueError("legacy aggregation count or cohort is invalid")
