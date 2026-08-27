@@ -1,3 +1,4 @@
+import csv
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "outputs/historical_research/research_knowledge.json"
 REGISTRY = ROOT / "data/prospective_hypotheses/legacy_research_v1.json"
 OBSERVATION = ROOT / "data/samples/prospective_hypothesis_event_sample.json"
+BASELINE = ROOT / "data/samples/prospective_baseline/pre_earnings_baseline_sample.csv"
 STAGED_D1 = ROOT / "data/samples/prospective_hypothesis_event_d1_sample.json"
 STAGED_D5 = ROOT / "data/samples/prospective_hypothesis_event_d5_sample.json"
 STAGED_D20 = ROOT / "data/samples/prospective_hypothesis_event_d20_sample.json"
@@ -89,15 +91,16 @@ def test_completed_event_creates_target_and_overall_comparison_trials():
     bundle = evaluate_observation(
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
     )
-    assert len(bundle.trials) == 19
-    assert all(item.eligible_for_hypothesis for item in bundle.hypothesis_eligibility)
+    assert len(bundle.trials) == 14
+    assert sum(item.reason == "required_pre_event_field_missing" for item in bundle.hypothesis_eligibility) == 5
     assert {item.phase for item in bundle.trials} == {"pre_event", "post_event"}
     assert all(item.evaluation_horizon in {"D5", "D20"} for item in bundle.trials)
-    b_plus_d5 = next(
+    gu_d5 = next(
         item for item in bundle.trials
-        if item.observed_dimension == "rank" and item.evaluation_horizon == "D5" and item.cohort == "target"
+        if item.observed_dimension == "reaction" and item.observed_value == "GU継続"
+        and item.evaluation_horizon == "D5" and item.cohort == "target"
     )
-    assert b_plus_d5.individual_outcome == "success"
+    assert gu_d5.individual_outcome == "success"
 
 
 def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
@@ -122,20 +125,18 @@ def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_pa
     trials = tmp_path / "trials"
     output = trials / "event-d20.json"
     evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
+        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST), BASELINE
     )
     with pytest.raises(ValueError, match="increment by one"):
         evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), BASELINE
         )
-    other = json.loads(OBSERVATION.read_text(encoding="utf-8"))
-    other["earnings_event_id"] = "EE-FICTIONAL-OTHER"
-    other["observation_id"] = "HPO-FICTIONAL-OTHER"
+    other = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     other_path = tmp_path / "other.json"
     other_path.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(FileExistsError, match="already"):
         evaluate_observation_file(
-            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), BASELINE
         )
     replay = json.loads(OBSERVATION.read_text(encoding="utf-8"))
     replay["observation_id"] = "HPO-FICTIONAL-REPLAY"
@@ -145,23 +146,23 @@ def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_pa
     replay_path.write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="horizon must advance"):
         evaluate_observation_file(
-            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST)
+            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST), BASELINE
         )
 
 
 def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path):
     trials = tmp_path / "trials"
     d1 = evaluate_observation_file(
-        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST)
+        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), BASELINE
     )
     assert d1.trials == []
     d5 = evaluate_observation_file(
-        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST)
+        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST), BASELINE
     )
     assert d5.trials
     assert {item.evaluation_horizon for item in d5.trials} == {"D5"}
     d20 = evaluate_observation_file(
-        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST)
+        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST), BASELINE
     )
     assert d20.trials
     assert {item.evaluation_horizon for item in d20.trials} == {"D20"}
@@ -183,11 +184,11 @@ def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path)
     for field, expected in (("pre_event", "frozen pre-event"), ("return", "matured return")):
         trials = tmp_path / field
         evaluate_observation_file(
-            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST)
+            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), BASELINE
         )
         changed = json.loads(STAGED_D5.read_text(encoding="utf-8"))
         if field == "pre_event":
-            changed["pre_event_features"]["rank"] = "A"
+            changed["pre_event_features"]["captured_at"] = "2026-08-07T20:59:00+09:00"
         else:
             changed["returns"][0]["return_value"] = -0.25
         changed_path = tmp_path / f"changed-{field}.json"
@@ -199,6 +200,7 @@ def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path)
                 trials,
                 trials / "02-d5.json",
                 datetime(2026, 9, 7, 18, tzinfo=JST),
+                BASELINE,
             )
 
 
@@ -219,7 +221,11 @@ def test_not_comparable_horizon_is_structured_and_not_a_failure():
     ]
     assert d20_results
     assert all(item.eligible_for_hypothesis is False for item in d20_results)
-    assert all(item.reason == "horizon_not_comparable" for item in d20_results)
+    assert any(item.reason == "horizon_not_comparable" for item in d20_results)
+    assert all(
+        item.reason in {"horizon_not_comparable", "required_pre_event_field_missing"}
+        for item in d20_results
+    )
 
 
 def _bundle_for(definition, index, target, value):
@@ -334,6 +340,57 @@ def test_json_schema_rejects_v2_observation_without_predecessor():
         jsonschema.validate(payload, schema)
 
 
+def test_json_schema_rejects_missing_stage_return_and_future_horizon():
+    schema = json.loads(
+        (ROOT / "schemas/analysis/prospective_hypothesis_event_observation.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    payload = json.loads(STAGED_D20.read_text(encoding="utf-8"))
+    payload["returns"] = [item for item in payload["returns"] if item["horizon"] == "D1"]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
+    payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
+    payload["returns"].append(
+        next(item for item in json.loads(STAGED_D5.read_text(encoding="utf-8"))["returns"] if item["horizon"] == "D5")
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
+
+
+def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path):
+    trials = tmp_path / "trials"
+    payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
+    payload["pre_event_features"]["baseline_id"] = "BASE-NOT-FOUND"
+    payload["source_record_ids"][0] = "BASE-NOT-FOUND"
+    observation_path = tmp_path / "missing-baseline.json"
+    observation_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="resolve to exactly one"):
+        evaluate_observation_file(
+            REGISTRY,
+            observation_path,
+            trials,
+            trials / "missing.json",
+            datetime(2026, 9, 1, 18, tzinfo=JST),
+            BASELINE,
+        )
+    baseline_rows = list(csv.DictReader(BASELINE.open(encoding="utf-8")))
+    baseline_rows[2]["baseline_record_hash"] = "0" * 64
+    changed_baseline = tmp_path / "pre_earnings_baseline.csv"
+    with changed_baseline.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=baseline_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(baseline_rows)
+    with pytest.raises(ValueError, match="authoritative baseline validation failed"):
+        evaluate_observation_file(
+            REGISTRY,
+            STAGED_D1,
+            trials,
+            trials / "tampered.json",
+            datetime(2026, 9, 1, 18, tzinfo=JST),
+            changed_baseline,
+        )
+
+
 def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
     generated = evaluate_observation(
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
@@ -359,13 +416,14 @@ def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
         registry(), loaded, datetime(2026, 10, 1, 9, tzinfo=JST)
     )
     assert snapshot.source_trial_bundle_count == 1
-    assert sum(item.comparator_observations for item in snapshot.hypotheses) == 19
+    assert sum(item.comparator_observations for item in snapshot.hypotheses) == 14
     evaluate_observation_file(
         REGISTRY,
         STAGED_D1,
         trials,
         trials / "staged-d1.json",
         datetime(2026, 10, 1, 18, tzinfo=JST),
+        BASELINE,
     )
     assert len(load_trial_bundles(trials)) == 2
     v1_schema = json.loads(
@@ -386,6 +444,7 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
         "evaluate-hypothesis-event",
         "--registry", str(REGISTRY),
         "--observation", str(OBSERVATION),
+        "--baseline", str(BASELINE),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
         "--evaluated-at", "2026-10-01T09:00:00+09:00",

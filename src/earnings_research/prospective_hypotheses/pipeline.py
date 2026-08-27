@@ -1,5 +1,6 @@
 """File boundaries for registry generation, append-only evaluation, and summaries."""
 
+import csv
 import json
 import os
 import tempfile
@@ -17,6 +18,11 @@ from .models import (
     HypothesisRegistry,
     HypothesisTrialBundle,
     HypothesisTrialBundleV1,
+)
+from earnings_research.validation.validator import (
+    _calculate_baseline_record_hash,
+    load_spec,
+    validate_file,
 )
 from .registry import build_registry, load_knowledge
 
@@ -99,6 +105,66 @@ def _trial_keys(bundles):
     }
 
 
+def _verify_authoritative_baseline(baseline_path, observation):
+    baseline_path = Path(baseline_path)
+    report = validate_file(baseline_path)
+    if not report.ok:
+        raise ValueError(
+            "authoritative baseline validation failed: "
+            + "; ".join(issue.format() for issue in report.issues)
+        )
+    with baseline_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    expected_id = observation.pre_event_features.baseline_id
+    matches = [row for row in rows if row.get("baseline_id", "").strip() == expected_id]
+    if len(matches) != 1:
+        raise ValueError("baseline_id must resolve to exactly one authoritative row")
+    row = matches[0]
+    if row.get("earnings_event_id", "").strip() != observation.earnings_event_id:
+        raise ValueError("authoritative baseline belongs to a different earnings event")
+    if row.get("baseline_version", "").strip() != f"v{observation.pre_event_features.baseline_version}":
+        raise ValueError("authoritative baseline version does not match the event observation")
+    if row.get("is_locked", "").strip().lower() != "true":
+        raise ValueError("authoritative baseline must be locked")
+    status = row.get("baseline_status", "").strip()
+    if status and status != "locked":
+        raise ValueError("authoritative prospective baseline must have locked status")
+    try:
+        locked_at = datetime.fromisoformat(row.get("locked_at", "").strip())
+    except ValueError as exc:
+        raise ValueError("authoritative baseline locked_at is invalid") from exc
+    if locked_at != observation.pre_event_features.locked_at:
+        raise ValueError("authoritative baseline lock timestamp does not match the event observation")
+    if locked_at >= observation.event_occurred_at:
+        raise ValueError("authoritative baseline must be locked before the event occurs")
+    spec = load_spec("pre_earnings_baseline")
+    canonical_hash = _calculate_baseline_record_hash(row, spec)
+    declared_hash = row.get("baseline_record_hash", "").strip()
+    if declared_hash != canonical_hash:
+        raise ValueError("authoritative baseline hash does not match its canonical locked content")
+    if observation.pre_event_features.baseline_record_hash != canonical_hash:
+        raise ValueError("event observation baseline hash does not match the authoritative baseline")
+    if expected_id not in observation.source_record_ids:
+        raise ValueError("event observation source_record_ids must include the authoritative baseline_id")
+    features = observation.pre_event_features
+    recorded_rank = row.get("pre_event_grade", "").strip() or None
+    if features.rank != recorded_rank:
+        raise ValueError("event observation rank must match authoritative pre_event_grade")
+    unsupported = {
+        "narrative": features.narrative,
+        "judge": features.judge,
+        "risk_balance": features.risk_balance,
+        "volatility_environment": features.volatility_environment,
+        "dollar_environment": features.dollar_environment,
+    }
+    supplied = sorted(name for name, value in unsupported.items() if value is not None)
+    if supplied:
+        raise ValueError(
+            "pre-event hypothesis fields lack an authoritative mapping: " + ", ".join(supplied)
+        )
+    return row
+
+
 def _validate_observation_chain(existing, observation):
     if any(
         isinstance(item, HypothesisTrialBundleV1)
@@ -162,11 +228,13 @@ def evaluate_observation_file(
     trials_dir: Path,
     output_path: Path,
     recorded_at: datetime,
+    baseline_path: Path,
 ):
     registry = HypothesisRegistry.model_validate_json(Path(registry_path).read_text(encoding="utf-8"))
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
+    _verify_authoritative_baseline(baseline_path, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(
@@ -187,6 +255,7 @@ def evaluate_observation_and_status_file(
     status_output_path: Path,
     recorded_at: datetime,
     evaluated_at: datetime,
+    baseline_path: Path,
 ):
     trials_dir = Path(trials_dir)
     if Path(trial_output_path).parent.resolve() != trials_dir.resolve():
@@ -199,6 +268,7 @@ def evaluate_observation_and_status_file(
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
+    _verify_authoritative_baseline(baseline_path, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(

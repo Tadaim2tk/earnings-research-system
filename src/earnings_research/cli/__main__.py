@@ -269,6 +269,7 @@ def main(argv=None) -> int:
     )
     hypothesis_evaluate_parser.add_argument("--registry", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--observation", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--baseline", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--trials-dir", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--recorded-at", required=True)
     hypothesis_evaluate_parser.add_argument("--evaluated-at", required=True)
@@ -513,6 +514,7 @@ def main(argv=None) -> int:
                 args.status_output,
                 datetime.fromisoformat(args.recorded_at),
                 datetime.fromisoformat(args.evaluated_at),
+                args.baseline,
             )
             print(json.dumps({
                 "earnings_event_id": bundle.earnings_event_id,

@@ -216,6 +216,132 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D1"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D1"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D5"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D5"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D20"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D20"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5",
+                    "D20"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
     }
   ],
   "properties": {

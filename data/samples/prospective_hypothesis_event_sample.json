@@ -1,6 +1,6 @@
 {
   "company_name": "架空研究株式会社",
-  "earnings_event_id": "EE-FICTIONAL-2026-Q1",
+  "earnings_event_id": "EVT-HOKUTO-2026Q1",
   "event_occurred_at": "2026-08-31T15:30:00+09:00",
   "event_quarter": "2026-Q1",
   "observation_id": "HPO-FICTIONAL-2026-Q1",
@@ -12,17 +12,17 @@
     "reaction": "GU継続"
   },
   "pre_event_features": {
-    "baseline_id": "BASELINE-FICTIONAL-2026-Q1",
-    "baseline_record_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseline_id": "BASE-HOKUTO-001",
+    "baseline_record_hash": "75d861a773563f8968bba2896d6a901aeb83deed98fd8ff785391bacad5a8cb5",
     "baseline_version": 1,
-    "captured_at": "2026-08-31T14:00:00+09:00",
-    "dollar_environment": "strong",
-    "judge": "押し目待ち",
-    "locked_at": "2026-08-31T14:30:00+09:00",
-    "narrative": "整合",
-    "rank": "B+",
-    "risk_balance": "risk_on",
-    "volatility_environment": "high"
+    "captured_at": "2026-08-04T17:30:00+09:00",
+    "dollar_environment": null,
+    "judge": null,
+    "locked_at": "2026-08-04T18:00:00+09:00",
+    "narrative": null,
+    "rank": "B",
+    "risk_balance": null,
+    "volatility_environment": null
   },
   "production_rules_modified": false,
   "prospective_record": true,
@@ -52,7 +52,7 @@
   "schema_version": "prospective_hypothesis_event_observation_v2",
   "scoring_weights_modified": false,
   "source_record_ids": [
-    "BASELINE-FICTIONAL-2026-Q1",
+    "BASE-HOKUTO-001",
     "EVAL-FICTIONAL-2026-Q1",
     "REACTION-FICTIONAL-2026-Q1"
   ],

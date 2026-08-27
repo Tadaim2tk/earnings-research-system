@@ -19,23 +19,50 @@ Horizon = Literal["D1", "D5", "D20"]
 Phase = Literal["pre_event", "post_event"]
 ExpectedDirection = Literal["higher_than_comparator", "lower_than_comparator", "no_material_difference"]
 
-VERSIONED_OBSERVATION_SCHEMA_RULE = {
-    "allOf": [
-        {
+def _versioned_stage_schema_rules(return_field):
+    version_rule = {
+        "if": {
+            "properties": {"observation_version": {"const": 1}},
+            "required": ["observation_version"],
+        },
+        "then": {
+            "properties": {"supersedes_observation_id": {"type": "null"}},
+        },
+        "else": {
+            "properties": {"supersedes_observation_id": {"type": "string", "minLength": 1}},
+            "required": ["supersedes_observation_id"],
+        },
+    }
+    stage_rules = []
+    horizon_order = ("D1", "D5", "D20")
+    for index, stage in enumerate(horizon_order):
+        allowed = list(horizon_order[: index + 1])
+        stage_rules.append({
             "if": {
-                "properties": {"observation_version": {"const": 1}},
-                "required": ["observation_version"],
+                "properties": {"observation_stage": {"const": stage}},
+                "required": ["observation_stage"],
             },
             "then": {
-                "properties": {"supersedes_observation_id": {"type": "null"}},
+                "properties": {
+                    return_field: {
+                        "contains": {
+                            "properties": {"horizon": {"const": stage}},
+                            "required": ["horizon"],
+                        },
+                        "minContains": 1,
+                        "items": {
+                            "properties": {"horizon": {"enum": allowed}},
+                            "required": ["horizon"],
+                        },
+                    }
+                }
             },
-            "else": {
-                "properties": {"supersedes_observation_id": {"type": "string", "minLength": 1}},
-                "required": ["supersedes_observation_id"],
-            },
-        }
-    ]
-}
+        })
+    return {"allOf": [version_rule, *stage_rules]}
+
+
+VERSIONED_OBSERVATION_SCHEMA_RULE = _versioned_stage_schema_rules("returns")
+VERSIONED_BUNDLE_SCHEMA_RULE = _versioned_stage_schema_rules("return_snapshots")
 
 
 class HistoricalSample(BaseModel):
@@ -333,7 +360,7 @@ class HypothesisTrialBundleV1(BaseModel):
 
 
 class HypothesisTrialBundle(BaseModel):
-    model_config = ConfigDict(json_schema_extra=VERSIONED_OBSERVATION_SCHEMA_RULE)
+    model_config = ConfigDict(json_schema_extra=VERSIONED_BUNDLE_SCHEMA_RULE)
 
     schema_version: Literal["prospective_hypothesis_trial_bundle_v2"] = "prospective_hypothesis_trial_bundle_v2"
     registry_id: str

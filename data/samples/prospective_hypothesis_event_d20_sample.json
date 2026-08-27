@@ -1,6 +1,6 @@
 {
   "company_name": "架空研究株式会社",
-  "earnings_event_id": "EE-FICTIONAL-STAGED-2026-Q1",
+  "earnings_event_id": "EVT-ASTER-2026Q1",
   "event_occurred_at": "2026-08-31T15:30:00+09:00",
   "event_quarter": "2026-Q1",
   "observation_id": "HPO-FICTIONAL-STAGED-D20",
@@ -12,17 +12,17 @@
     "reaction": "GU継続"
   },
   "pre_event_features": {
-    "baseline_id": "BASELINE-FICTIONAL-STAGED",
-    "baseline_record_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "baseline_version": 1,
-    "captured_at": "2026-08-31T14:00:00+09:00",
-    "dollar_environment": "strong",
+    "baseline_id": "BASE-ASTER-003",
+    "baseline_record_hash": "4b5690a5a45519aa2a4c92b545dd1cd7508bda1ec4c10e84654654d6535b7cfe",
+    "baseline_version": 3,
+    "captured_at": "2026-08-07T21:00:00+09:00",
+    "dollar_environment": null,
     "judge": null,
-    "locked_at": "2026-08-31T14:30:00+09:00",
-    "narrative": "整合",
-    "rank": "B+",
-    "risk_balance": "risk_on",
-    "volatility_environment": "high"
+    "locked_at": "2026-08-07T21:20:00+09:00",
+    "narrative": null,
+    "rank": "C",
+    "risk_balance": null,
+    "volatility_environment": null
   },
   "production_rules_modified": false,
   "prospective_record": true,
@@ -52,7 +52,7 @@
   "schema_version": "prospective_hypothesis_event_observation_v2",
   "scoring_weights_modified": false,
   "source_record_ids": [
-    "BASELINE-FICTIONAL-STAGED",
+    "BASE-ASTER-003",
     "EVAL-FICTIONAL-STAGED",
     "REACTION-FICTIONAL-STAGED"
   ],
