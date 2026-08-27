@@ -11,9 +11,12 @@
           "title": "Horizon",
           "type": "string"
         },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
+        "status": {
+          "enum": [
+            "comparable",
+            "not_comparable"
+          ],
+          "title": "Status",
           "type": "string"
         },
         "return_value": {
@@ -28,16 +31,13 @@
           "default": null,
           "title": "Return Value"
         },
-        "source_record_id": {
-          "title": "Source Record Id",
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
           "type": "string"
         },
-        "status": {
-          "enum": [
-            "comparable",
-            "not_comparable"
-          ],
-          "title": "Status",
+        "source_record_id": {
+          "title": "Source Record Id",
           "type": "string"
         }
       },
@@ -83,19 +83,26 @@
           "title": "Captured At",
           "type": "string"
         },
-        "dollar_environment": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Dollar Environment"
+        "baseline_id": {
+          "title": "Baseline Id",
+          "type": "string"
         },
-        "judge": {
+        "baseline_version": {
+          "minimum": 1,
+          "title": "Baseline Version",
+          "type": "integer"
+        },
+        "baseline_record_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Baseline Record Hash",
+          "type": "string"
+        },
+        "locked_at": {
+          "format": "date-time",
+          "title": "Locked At",
+          "type": "string"
+        },
+        "rank": {
           "anyOf": [
             {
               "type": "string"
@@ -105,7 +112,7 @@
             }
           ],
           "default": null,
-          "title": "Judge"
+          "title": "Rank"
         },
         "narrative": {
           "anyOf": [
@@ -119,7 +126,7 @@
           "default": null,
           "title": "Narrative"
         },
-        "rank": {
+        "judge": {
           "anyOf": [
             {
               "type": "string"
@@ -129,7 +136,7 @@
             }
           ],
           "default": null,
-          "title": "Rank"
+          "title": "Judge"
         },
         "risk_balance": {
           "anyOf": [
@@ -154,32 +161,78 @@
           ],
           "default": null,
           "title": "Volatility Environment"
+        },
+        "dollar_environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dollar Environment"
         }
       },
       "required": [
-        "captured_at"
+        "captured_at",
+        "baseline_id",
+        "baseline_version",
+        "baseline_record_hash",
+        "locked_at"
       ],
       "title": "PreEventFeatures",
       "type": "object"
     }
   },
   "properties": {
-    "company_name": {
-      "title": "Company Name",
+    "schema_version": {
+      "const": "prospective_hypothesis_event_observation_v2",
+      "default": "prospective_hypothesis_event_observation_v2",
+      "title": "Schema Version",
       "type": "string"
     },
-    "completed_at": {
-      "format": "date-time",
-      "title": "Completed At",
+    "observation_id": {
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "observation_version": {
+      "minimum": 1,
+      "title": "Observation Version",
+      "type": "integer"
+    },
+    "supersedes_observation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Observation Id"
+    },
+    "observation_stage": {
+      "enum": [
+        "D1",
+        "D5",
+        "D20"
+      ],
+      "title": "Observation Stage",
       "type": "string"
     },
     "earnings_event_id": {
       "title": "Earnings Event Id",
       "type": "string"
     },
-    "event_occurred_at": {
-      "format": "date-time",
-      "title": "Event Occurred At",
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "ticker": {
+      "title": "Ticker",
       "type": "string"
     },
     "event_quarter": {
@@ -187,27 +240,21 @@
       "title": "Event Quarter",
       "type": "string"
     },
-    "observation_id": {
-      "title": "Observation Id",
+    "event_occurred_at": {
+      "format": "date-time",
+      "title": "Event Occurred At",
       "type": "string"
     },
-    "post_event_features": {
-      "$ref": "#/$defs/PostEventFeatures"
+    "observed_through": {
+      "format": "date-time",
+      "title": "Observed Through",
+      "type": "string"
     },
     "pre_event_features": {
       "$ref": "#/$defs/PreEventFeatures"
     },
-    "production_rules_modified": {
-      "const": false,
-      "default": false,
-      "title": "Production Rules Modified",
-      "type": "boolean"
-    },
-    "prospective_record": {
-      "const": true,
-      "default": true,
-      "title": "Prospective Record",
-      "type": "boolean"
+    "post_event_features": {
+      "$ref": "#/$defs/PostEventFeatures"
     },
     "returns": {
       "items": {
@@ -215,18 +262,6 @@
       },
       "title": "Returns",
       "type": "array"
-    },
-    "schema_version": {
-      "const": "prospective_hypothesis_event_observation_v1",
-      "default": "prospective_hypothesis_event_observation_v1",
-      "title": "Schema Version",
-      "type": "string"
-    },
-    "scoring_weights_modified": {
-      "const": false,
-      "default": false,
-      "title": "Scoring Weights Modified",
-      "type": "boolean"
     },
     "source_record_ids": {
       "items": {
@@ -236,9 +271,23 @@
       "title": "Source Record Ids",
       "type": "array"
     },
-    "ticker": {
-      "title": "Ticker",
-      "type": "string"
+    "prospective_record": {
+      "const": true,
+      "default": true,
+      "title": "Prospective Record",
+      "type": "boolean"
+    },
+    "production_rules_modified": {
+      "const": false,
+      "default": false,
+      "title": "Production Rules Modified",
+      "type": "boolean"
+    },
+    "scoring_weights_modified": {
+      "const": false,
+      "default": false,
+      "title": "Scoring Weights Modified",
+      "type": "boolean"
     },
     "trade_decision_included": {
       "const": false,
@@ -249,12 +298,14 @@
   },
   "required": [
     "observation_id",
+    "observation_version",
+    "observation_stage",
     "earnings_event_id",
     "company_name",
     "ticker",
     "event_quarter",
     "event_occurred_at",
-    "completed_at",
+    "observed_through",
     "pre_event_features",
     "post_event_features",
     "returns",

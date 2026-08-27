@@ -2,6 +2,7 @@
 
 from .pipeline import (
     build_registry_file,
+    evaluate_observation_and_status_file,
     evaluate_observation_file,
     summarize_trials_file,
     verify_registry_file,
@@ -9,6 +10,7 @@ from .pipeline import (
 
 __all__ = [
     "build_registry_file",
+    "evaluate_observation_and_status_file",
     "evaluate_observation_file",
     "summarize_trials_file",
     "verify_registry_file",

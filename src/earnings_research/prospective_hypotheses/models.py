@@ -1,7 +1,7 @@
 """Contracts for frozen hypotheses, event observations, trials, and derived status."""
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -125,12 +125,24 @@ class HypothesisRegistry(BaseModel):
 
 class PreEventFeatures(BaseModel):
     captured_at: datetime
+    baseline_id: str
+    baseline_version: int = Field(ge=1)
+    baseline_record_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    locked_at: datetime
     rank: Optional[str] = None
     narrative: Optional[str] = None
     judge: Optional[str] = None
     risk_balance: Optional[str] = None
     volatility_environment: Optional[str] = None
     dollar_environment: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_pre_event_features(self):
+        if self.captured_at.tzinfo is None or self.locked_at.tzinfo is None:
+            raise ValueError("pre-event feature timestamps must include timezone")
+        if self.captured_at > self.locked_at:
+            raise ValueError("pre-event features must be captured by baseline lock")
+        return self
 
 
 class PostEventFeatures(BaseModel):
@@ -155,14 +167,17 @@ class HorizonReturn(BaseModel):
 
 
 class CompletedEventObservation(BaseModel):
-    schema_version: Literal["prospective_hypothesis_event_observation_v1"] = "prospective_hypothesis_event_observation_v1"
+    schema_version: Literal["prospective_hypothesis_event_observation_v2"] = "prospective_hypothesis_event_observation_v2"
     observation_id: str
+    observation_version: int = Field(ge=1)
+    supersedes_observation_id: Optional[str] = None
+    observation_stage: Horizon
     earnings_event_id: str
     company_name: str
     ticker: str
     event_quarter: str = Field(pattern=r"^\d{4}-Q[1-4]$")
     event_occurred_at: datetime
-    completed_at: datetime
+    observed_through: datetime
     pre_event_features: PreEventFeatures
     post_event_features: PostEventFeatures
     returns: List[HorizonReturn]
@@ -176,7 +191,7 @@ class CompletedEventObservation(BaseModel):
     def validate_observation(self):
         timestamps = [
             self.event_occurred_at,
-            self.completed_at,
+            self.observed_through,
             self.pre_event_features.captured_at,
             self.post_event_features.captured_at,
         ]
@@ -184,19 +199,55 @@ class CompletedEventObservation(BaseModel):
             raise ValueError("event observation timestamps must include timezone")
         if self.pre_event_features.captured_at > self.event_occurred_at:
             raise ValueError("pre-event features must be frozen before the event occurs")
+        if self.pre_event_features.locked_at > self.event_occurred_at:
+            raise ValueError("pre-event baseline must be locked before the event occurs")
         if self.post_event_features.captured_at < self.event_occurred_at:
             raise ValueError("post-event features cannot be captured before the event")
-        if self.completed_at < self.post_event_features.captured_at:
-            raise ValueError("completed_at cannot precede post-event features")
+        if (self.observation_version == 1) != (self.supersedes_observation_id is None):
+            raise ValueError("only observation version 1 may omit supersedes_observation_id")
+        if self.observed_through < self.post_event_features.captured_at:
+            raise ValueError("observed_through cannot precede post-event features")
         horizons = [item.horizon for item in self.returns]
         if len(horizons) != len(set(horizons)):
             raise ValueError("return horizons must be unique")
         if any(item.observed_at < self.event_occurred_at for item in self.returns):
             raise ValueError("returns cannot be observed before the event")
-        if any(item.observed_at > self.completed_at for item in self.returns):
-            raise ValueError("completed_at cannot precede a return observation")
+        if any(item.observed_at > self.observed_through for item in self.returns):
+            raise ValueError("observed_through cannot precede a return observation")
+        horizon_order = {"D1": 1, "D5": 2, "D20": 3}
+        if self.observation_stage not in horizons:
+            raise ValueError("observation stage requires its matured horizon return")
+        if any(horizon_order[item.horizon] > horizon_order[self.observation_stage] for item in self.returns):
+            raise ValueError("observation cannot contain a return beyond its stage")
         if len(self.source_record_ids) != len(set(self.source_record_ids)):
             raise ValueError("source_record_ids must be unique")
+        return self
+
+
+EligibilityReason = Literal[
+    "eligible",
+    "required_pre_event_field_missing",
+    "required_post_event_field_missing",
+    "horizon_not_matured",
+    "horizon_not_comparable",
+    "trial_already_recorded",
+]
+
+
+class HypothesisEligibility(BaseModel):
+    hypothesis_id: str
+    hypothesis_version: int = Field(ge=1)
+    evaluation_horizon: Horizon
+    eligible_for_hypothesis: bool
+    reason: EligibilityReason
+    appended_trial_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_eligibility(self):
+        if self.eligible_for_hypothesis != (self.reason == "eligible"):
+            raise ValueError("eligibility flag must match reason")
+        if self.eligible_for_hypothesis != (self.appended_trial_id is not None):
+            raise ValueError("eligible hypothesis requires one appended trial ID")
         return self
 
 
@@ -232,15 +283,27 @@ class HypothesisTrial(BaseModel):
 
 
 class HypothesisTrialBundle(BaseModel):
-    schema_version: Literal["prospective_hypothesis_trial_bundle_v1"] = "prospective_hypothesis_trial_bundle_v1"
+    schema_version: Literal["prospective_hypothesis_trial_bundle_v2"] = "prospective_hypothesis_trial_bundle_v2"
     registry_id: str
     registry_version: int
     registry_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     observation_id: str
+    observation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    observation_version: int = Field(ge=1)
+    supersedes_observation_id: Optional[str] = None
+    observation_stage: Horizon
     earnings_event_id: str
+    company_name: str
+    ticker: str
+    event_quarter: str = Field(pattern=r"^\d{4}-Q[1-4]$")
+    event_occurred_at: datetime
+    observed_through: datetime
+    pre_event_features_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reaction: Optional[str] = None
+    return_snapshots: List[HorizonReturn]
     recorded_at: datetime
     trials: List[HypothesisTrial]
-    ineligible_hypotheses: Dict[str, str]
+    hypothesis_eligibility: List[HypothesisEligibility]
     weight_changes_generated: Literal[0] = 0
     rank_rule_changes_generated: Literal[0] = 0
     trading_rules_generated: Literal[0] = 0
@@ -249,6 +312,12 @@ class HypothesisTrialBundle(BaseModel):
     def validate_bundle(self):
         if self.recorded_at.tzinfo is None:
             raise ValueError("bundle recorded_at must include timezone")
+        if self.event_occurred_at.tzinfo is None or self.observed_through.tzinfo is None:
+            raise ValueError("bundle event timestamps must include timezone")
+        if self.recorded_at < self.observed_through:
+            raise ValueError("bundle cannot be recorded before observed_through")
+        if (self.observation_version == 1) != (self.supersedes_observation_id is None):
+            raise ValueError("only bundle observation version 1 may omit supersedes_observation_id")
         trial_ids = [item.trial_id for item in self.trials]
         if len(trial_ids) != len(set(trial_ids)):
             raise ValueError("trial IDs must be unique")
@@ -256,8 +325,31 @@ class HypothesisTrialBundle(BaseModel):
             raise ValueError("all trials must belong to the bundle event")
         if any(item.observation_id != self.observation_id for item in self.trials):
             raise ValueError("all trials must reference the bundle observation")
+        if any(item.observation_sha256 != self.observation_sha256 for item in self.trials):
+            raise ValueError("all trials must match the bundle observation hash")
         if any(item.recorded_at != self.recorded_at for item in self.trials):
             raise ValueError("all trials must share the bundle recorded_at")
+        horizons = [item.horizon for item in self.return_snapshots]
+        if len(horizons) != len(set(horizons)):
+            raise ValueError("bundle return snapshots must have unique horizons")
+        horizon_order = {"D1": 1, "D5": 2, "D20": 3}
+        if self.observation_stage not in horizons:
+            raise ValueError("bundle observation stage requires its matured horizon return")
+        if any(horizon_order[item.horizon] > horizon_order[self.observation_stage] for item in self.return_snapshots):
+            raise ValueError("bundle cannot contain a return beyond its observation stage")
+        eligibility_keys = [
+            (item.hypothesis_id, item.hypothesis_version)
+            for item in self.hypothesis_eligibility
+        ]
+        if len(eligibility_keys) != len(set(eligibility_keys)):
+            raise ValueError("bundle must contain one eligibility result per hypothesis")
+        eligible_trial_ids = {
+            item.appended_trial_id
+            for item in self.hypothesis_eligibility
+            if item.eligible_for_hypothesis
+        }
+        if eligible_trial_ids != set(trial_ids):
+            raise ValueError("eligible hypothesis results must resolve exactly to appended trials")
         return self
 
 

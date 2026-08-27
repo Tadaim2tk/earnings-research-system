@@ -609,3 +609,19 @@ Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.m
 正式ルールのreview候補条件はtarget 50件、全適格群50件、2 event quarter以上、supported判定2回連続とする。ただし条件到達は自動昇格ではない。台帳、trial、statusはweight、rank、売買ルールを変更せず、TSOへ書き戻さない。
 
 Consequences: 新しい決算eventが完了するたび、記録済み特徴と成熟済みreturnに該当する仮説だけを追記評価できる。発表前特徴が無い仮説、未成熟期間、corporate action等で比較不能なreturnは母数にも失敗にも入らない。statusはtrial正本から再計算でき、後からカウンタだけを書き換えられない。PR #50の監査履歴は`独立監査未完了＋追加機械検証後にmerge`と記録し、Passへ昇格させない。
+
+## ERS-ADR-0038
+
+Date: 2026-08-26
+
+Status: Accepted
+
+Approval: Humanは、新しいprospective決算についてD1、D5、D20の成熟時点ごとに該当仮説のtrialをappend-onlyで追加し、各回に全trialからstatusを再計算する運用を承認した。旧rankやjudgeが無い場合は推測せず母数外にする。
+
+Context: ERS-ADR-0037の初期実装は同一eventに1つのtrial bundleだけを許可したため、D5やD20が後から成熟する通常の価格追跡を追加できなかった。全期間が揃うまで待つとD5仮説の評価が遅れ、累積snapshotをそのまま再評価すると同一event・同一hypothesis・同一horizonの二重登録が起こり得る。また入力不足の理由は自由文で、母数外の理由を機械集計しにくかった。
+
+Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md)に従い、event observationをv2、trial bundleをv2とする。observationはversion、supersedes ID、D1／D5／D20 stage、observed-through時刻を持つ。発表前特徴はsource baseline ID、version、record hash、lock時刻を必須とし、event前のlockを検証する。後続versionはevent identity、発表前特徴hash、確定済みreaction、成熟済みreturnを変更・削除できない。stageと時刻は前進のみ許可する。
+
+trial identityへhorizonを含め、既存trialは再作成しない。累積snapshot内の既登録期間は`trial_already_recorded`、必要な発表前項目が無い場合は`required_pre_event_field_missing`として明示する。期間未成熟、比較不能、発表後項目不足も別reasonで記録し、いずれも失敗や母数へ入れない。event評価CLIは新trialの追記と全trialからのstatus再計算を一度に行う。
+
+Consequences: D1からD5、D20へ同じeventを安全に育てられる。最初の観測がD5またはD20でもversion 1として開始できる。一度記録したtrial、return、発表前情報は変更できず、旧分類項目が無い仮説は永続的に母数外でもその理由が残る。supported後のproduction rule昇格、weight、rank、売買ルールの自動変更は引き続き行わない。

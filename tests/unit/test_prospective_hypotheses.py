@@ -14,7 +14,6 @@ from earnings_research.prospective_hypotheses.evaluator import (
 from earnings_research.prospective_hypotheses.models import (
     CompletedEventObservation,
     HypothesisRegistry,
-    HypothesisTrialBundle,
 )
 from earnings_research.prospective_hypotheses.pipeline import (
     build_registry_file,
@@ -27,6 +26,9 @@ ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "outputs/historical_research/research_knowledge.json"
 REGISTRY = ROOT / "data/prospective_hypotheses/legacy_research_v1.json"
 OBSERVATION = ROOT / "data/samples/prospective_hypothesis_event_sample.json"
+STAGED_D1 = ROOT / "data/samples/prospective_hypothesis_event_d1_sample.json"
+STAGED_D5 = ROOT / "data/samples/prospective_hypothesis_event_d5_sample.json"
+STAGED_D20 = ROOT / "data/samples/prospective_hypothesis_event_d20_sample.json"
 JST = timezone(timedelta(hours=9))
 
 
@@ -72,7 +74,12 @@ def test_phase_boundary_and_observation_timestamps_prevent_future_leakage():
     )
     payload = json.loads(OBSERVATION.read_text(encoding="utf-8"))
     payload["pre_event_features"]["captured_at"] = "2026-08-31T16:00:00+09:00"
+    payload["pre_event_features"]["locked_at"] = "2026-08-31T16:30:00+09:00"
     with pytest.raises(ValidationError, match="before the event"):
+        CompletedEventObservation.model_validate(payload)
+    payload = json.loads(OBSERVATION.read_text(encoding="utf-8"))
+    payload["pre_event_features"]["locked_at"] = "2026-08-31T16:00:00+09:00"
+    with pytest.raises(ValidationError, match="baseline must be locked before"):
         CompletedEventObservation.model_validate(payload)
 
 
@@ -81,7 +88,7 @@ def test_completed_event_creates_target_and_overall_comparison_trials():
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
     )
     assert len(bundle.trials) == 19
-    assert bundle.ineligible_hypotheses == {}
+    assert all(item.eligible_for_hypothesis for item in bundle.hypothesis_eligibility)
     assert {item.phase for item in bundle.trials} == {"pre_event", "post_event"}
     assert all(item.evaluation_horizon in {"D5", "D20"} for item in bundle.trials)
     b_plus_d5 = next(
@@ -92,27 +99,125 @@ def test_completed_event_creates_target_and_overall_comparison_trials():
 
 
 def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
+    payload = json.loads(STAGED_D5.read_text(encoding="utf-8"))
+    bundle = evaluate_observation(
+        registry(),
+        CompletedEventObservation.model_validate(payload),
+        datetime(2026, 9, 7, 18, tzinfo=JST),
+    )
+    assert all(item.evaluation_horizon == "D5" for item in bundle.trials)
+    assert any(item.reason == "horizon_not_matured" for item in bundle.hypothesis_eligibility)
+    judge_results = [
+        item for item in bundle.hypothesis_eligibility
+        if next(h for h in registry().hypotheses if h.hypothesis_id == item.hypothesis_id).dimension == "judge"
+    ]
+    assert judge_results
+    assert all(item.eligible_for_hypothesis is False for item in judge_results)
+    assert all(item.reason == "required_pre_event_field_missing" for item in judge_results)
+
+
+def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_path):
+    trials = tmp_path / "trials"
+    output = trials / "event-d20.json"
+    evaluate_observation_file(
+        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    with pytest.raises(ValueError, match="increment by one"):
+        evaluate_observation_file(
+            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+        )
+    other = json.loads(OBSERVATION.read_text(encoding="utf-8"))
+    other["earnings_event_id"] = "EE-FICTIONAL-OTHER"
+    other["observation_id"] = "HPO-FICTIONAL-OTHER"
+    other_path = tmp_path / "other.json"
+    other_path.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(FileExistsError, match="already"):
+        evaluate_observation_file(
+            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+        )
+    replay = json.loads(OBSERVATION.read_text(encoding="utf-8"))
+    replay["observation_id"] = "HPO-FICTIONAL-REPLAY"
+    replay["observation_version"] = 2
+    replay["supersedes_observation_id"] = "HPO-FICTIONAL-2026-Q1"
+    replay_path = tmp_path / "replay.json"
+    replay_path.write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="horizon must advance"):
+        evaluate_observation_file(
+            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST)
+        )
+
+
+def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path):
+    trials = tmp_path / "trials"
+    d1 = evaluate_observation_file(
+        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST)
+    )
+    assert d1.trials == []
+    d5 = evaluate_observation_file(
+        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST)
+    )
+    assert d5.trials
+    assert {item.evaluation_horizon for item in d5.trials} == {"D5"}
+    d20 = evaluate_observation_file(
+        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    assert d20.trials
+    assert {item.evaluation_horizon for item in d20.trials} == {"D20"}
+    assert any(item.reason == "trial_already_recorded" for item in d20.hypothesis_eligibility)
+    snapshot = summarize_trials(
+        registry(), [d1, d5, d20], datetime(2026, 10, 1, 9, tzinfo=JST)
+    )
+    assert snapshot.source_trial_bundle_count == 3
+    assert sum(item.comparator_observations for item in snapshot.hypotheses) == len(d5.trials) + len(d20.trials)
+    duplicated = d20.model_copy(deep=True)
+    duplicated.trials.append(d5.trials[0])
+    with pytest.raises(ValueError, match="duplicate append-only"):
+        summarize_trials(
+            registry(), [d1, d5, duplicated], datetime(2026, 10, 1, 10, tzinfo=JST)
+        )
+
+
+def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path):
+    for field, expected in (("pre_event", "frozen pre-event"), ("return", "matured return")):
+        trials = tmp_path / field
+        evaluate_observation_file(
+            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST)
+        )
+        changed = json.loads(STAGED_D5.read_text(encoding="utf-8"))
+        if field == "pre_event":
+            changed["pre_event_features"]["rank"] = "A"
+        else:
+            changed["returns"][0]["return_value"] = -0.25
+        changed_path = tmp_path / f"changed-{field}.json"
+        changed_path.write_text(json.dumps(changed, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(ValueError, match=expected):
+            evaluate_observation_file(
+                REGISTRY,
+                changed_path,
+                trials,
+                trials / "02-d5.json",
+                datetime(2026, 9, 7, 18, tzinfo=JST),
+            )
+
+
+def test_not_comparable_horizon_is_structured_and_not_a_failure():
     payload = json.loads(OBSERVATION.read_text(encoding="utf-8"))
-    payload["returns"] = [item for item in payload["returns"] if item["horizon"] != "D20"]
+    d20 = next(item for item in payload["returns"] if item["horizon"] == "D20")
+    d20["status"] = "not_comparable"
+    d20["return_value"] = None
     bundle = evaluate_observation(
         registry(),
         CompletedEventObservation.model_validate(payload),
         datetime(2026, 9, 30, 18, tzinfo=JST),
     )
     assert all(item.evaluation_horizon == "D5" for item in bundle.trials)
-    assert any(reason == "evaluation horizon has not matured" for reason in bundle.ineligible_hypotheses.values())
-
-
-def test_append_only_writer_rejects_duplicate_event_and_existing_output(tmp_path):
-    trials = tmp_path / "trials"
-    output = trials / "event.json"
-    evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
-    )
-    with pytest.raises((ValueError, FileExistsError), match="already"):
-        evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
-        )
+    d20_results = [
+        item for item in bundle.hypothesis_eligibility
+        if item.evaluation_horizon == "D20"
+    ]
+    assert d20_results
+    assert all(item.eligible_for_hypothesis is False for item in d20_results)
+    assert all(item.reason == "horizon_not_comparable" for item in d20_results)
 
 
 def _bundle_for(definition, index, target, value):
@@ -157,11 +262,16 @@ def test_fixed_minimum_and_effect_rules_derive_status_without_mutating_registry(
 
 
 def test_duplicate_trial_identity_is_rejected():
-    bundle = evaluate_observation(
+    first = evaluate_observation(
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
     )
-    with pytest.raises(ValueError, match="duplicate"):
-        summarize_trials(registry(), [bundle, bundle], datetime(2026, 10, 1, 12, tzinfo=JST))
+    second = first.model_copy(deep=True)
+    second.observation_id = "HPO-FICTIONAL-DUPLICATE"
+    second.observation_version = 2
+    second.supersedes_observation_id = first.observation_id
+    second.observation_stage = "D20"
+    with pytest.raises(ValueError, match="horizon did not advance"):
+        summarize_trials(registry(), [first, second], datetime(2026, 10, 1, 12, tzinfo=JST))
 
 
 def test_trial_tampering_cannot_change_registry_or_phase_contract():
@@ -176,12 +286,32 @@ def test_trial_tampering_cannot_change_registry_or_phase_contract():
     changed_phase.trials[0].phase = "pre_event" if changed_phase.trials[0].phase == "post_event" else "post_event"
     with pytest.raises(ValueError, match="frozen hypothesis"):
         summarize_trials(registry(), [changed_phase], datetime(2026, 10, 1, 12, tzinfo=JST))
+    changed_eligibility = bundle.model_copy(deep=True)
+    eligible = next(item for item in changed_eligibility.hypothesis_eligibility if item.eligible_for_hypothesis)
+    other = next(
+        item for item in changed_eligibility.hypothesis_eligibility
+        if item.eligible_for_hypothesis and item.hypothesis_id != eligible.hypothesis_id
+    )
+    eligible.appended_trial_id, other.appended_trial_id = other.appended_trial_id, eligible.appended_trial_id
+    with pytest.raises(ValueError, match="different hypothesis trial"):
+        summarize_trials(registry(), [changed_eligibility], datetime(2026, 10, 1, 12, tzinfo=JST))
+
+
+def test_status_recomputation_cannot_predate_appended_trials():
+    bundle = evaluate_observation(
+        registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    with pytest.raises(ValueError, match="before its source trial"):
+        summarize_trials(registry(), [bundle], datetime(2026, 9, 30, 17, 59, tzinfo=JST))
 
 
 def test_contract_schemas_accept_committed_registry_and_sample():
     pairs = [
         ("prospective_hypothesis_registry.schema.json", json.loads(REGISTRY.read_text(encoding="utf-8"))),
         ("prospective_hypothesis_event_observation.schema.json", json.loads(OBSERVATION.read_text(encoding="utf-8"))),
+        ("prospective_hypothesis_event_observation.schema.json", json.loads(STAGED_D1.read_text(encoding="utf-8"))),
+        ("prospective_hypothesis_event_observation.schema.json", json.loads(STAGED_D5.read_text(encoding="utf-8"))),
+        ("prospective_hypothesis_event_observation.schema.json", json.loads(STAGED_D20.read_text(encoding="utf-8"))),
     ]
     for schema_name, instance in pairs:
         schema = json.loads((ROOT / "schemas/analysis" / schema_name).read_text(encoding="utf-8"))
@@ -194,21 +324,16 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     ]) == 0
     trials = tmp_path / "trials"
     output = trials / "event.json"
+    summary = tmp_path / "status.json"
     assert main([
         "evaluate-hypothesis-event",
         "--registry", str(REGISTRY),
         "--observation", str(OBSERVATION),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
-        "--output", str(output),
-    ]) == 0
-    summary = tmp_path / "status.json"
-    assert main([
-        "summarize-hypothesis-registry",
-        "--registry", str(REGISTRY),
-        "--trials-dir", str(trials),
         "--evaluated-at", "2026-10-01T09:00:00+09:00",
-        "--output", str(summary),
+        "--output", str(output),
+        "--status-output", str(summary),
     ]) == 0
     result = json.loads(summary.read_text(encoding="utf-8"))
     assert len(result["hypotheses"]) == 19
