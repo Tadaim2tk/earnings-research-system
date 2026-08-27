@@ -16,6 +16,7 @@ from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
     HypothesisTrialBundle,
+    HypothesisTrialBundleV1,
 )
 from .registry import build_registry, load_knowledge
 
@@ -71,10 +72,16 @@ def load_trial_bundles(trials_dir: Path):
     path = Path(trials_dir)
     if not path.exists():
         return []
-    bundles = [
-        HypothesisTrialBundle.model_validate_json(item.read_text(encoding="utf-8"))
-        for item in sorted(path.glob("*.json"))
-    ]
+    bundles = []
+    for item in sorted(path.glob("*.json")):
+        payload = json.loads(item.read_text(encoding="utf-8"))
+        version = payload.get("schema_version")
+        if version == "prospective_hypothesis_trial_bundle_v1":
+            bundles.append(HypothesisTrialBundleV1.model_validate(payload))
+        elif version == "prospective_hypothesis_trial_bundle_v2":
+            bundles.append(HypothesisTrialBundle.model_validate(payload))
+        else:
+            raise ValueError(f"unsupported hypothesis trial bundle schema: {version!r}")
     validate_bundle_history(bundles)
     return bundles
 
@@ -93,8 +100,18 @@ def _trial_keys(bundles):
 
 
 def _validate_observation_chain(existing, observation):
+    if any(
+        isinstance(item, HypothesisTrialBundleV1)
+        and item.earnings_event_id == observation.earnings_event_id
+        for item in existing
+    ):
+        raise ValueError("a v1 event bundle cannot be extended as a staged v2 observation")
     event_bundles = sorted(
-        (item for item in existing if item.earnings_event_id == observation.earnings_event_id),
+        (
+            item for item in existing
+            if isinstance(item, HypothesisTrialBundle)
+            and item.earnings_event_id == observation.earnings_event_id
+        ),
         key=lambda item: item.observation_version,
     )
     if not event_bundles:

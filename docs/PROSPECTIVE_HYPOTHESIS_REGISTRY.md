@@ -91,6 +91,8 @@ D1 observation v1
 
 各仮説のtrial identityは `hypothesis_id + hypothesis_version + earnings_event_id + horizon` で一意にする。D20 snapshotへD5 returnが再掲されてもD5 trialは再作成せず、`trial_already_recorded`として残す。不正に同一trialを二重保存したbundleはstatus再計算時に拒否する。
 
+既存の`prospective_hypothesis_trial_bundle_v1`はappend-only研究履歴として読み取りとstatus再計算を継続する。新規出力はv2だけとし、v1と同じeventを後からv2の段階観測へ変換しない。v1の機械契約は`schemas/analysis/prospective_hypothesis_trial_bundle_v1.schema.json`へ固定する。
+
 ## 比較と判定
 
 各仮説は、対象カテゴリの平均と同期間の全適格イベント平均を比較する。これはlegacy研究の `mean_return_delta_vs_overall` と同じ比較であり、対象カテゴリ自身も全体平均へ含む。

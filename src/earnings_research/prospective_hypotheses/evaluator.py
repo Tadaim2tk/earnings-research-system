@@ -13,6 +13,7 @@ from .models import (
     HypothesisStatusSnapshot,
     HypothesisTrial,
     HypothesisTrialBundle,
+    HypothesisTrialBundleV1,
 )
 
 
@@ -191,7 +192,8 @@ def validate_bundle_history(bundles):
         raise ValueError("staged observation IDs must be globally unique")
     by_event = {}
     for bundle in bundles:
-        by_event.setdefault(bundle.earnings_event_id, []).append(bundle)
+        if isinstance(bundle, HypothesisTrialBundle):
+            by_event.setdefault(bundle.earnings_event_id, []).append(bundle)
     stage_order = {"D1": 1, "D5": 2, "D20": 3}
     for event_bundles in by_event.values():
         ordered = sorted(event_bundles, key=lambda item: item.observation_version)
@@ -238,56 +240,58 @@ def summarize_trials(registry, bundles, evaluated_at):
     by_hypothesis = {item.hypothesis_id: [] for item in registry.hypotheses}
     ordered_bundles = sorted(
         bundles,
-        key=lambda item: (item.earnings_event_id, item.observation_version),
+        key=lambda item: (item.earnings_event_id, getattr(item, "observation_version", 0)),
     )
     for bundle in ordered_bundles:
         if (bundle.registry_id, bundle.registry_version) != (registry.registry_id, registry.registry_version):
             raise ValueError("trial bundle belongs to a different registry")
         if bundle.registry_sha256 != registry_hash:
             raise ValueError("trial bundle registry hash does not match the frozen definitions")
-        eligibility_keys = {
-            (item.hypothesis_id, item.hypothesis_version)
-            for item in bundle.hypothesis_eligibility
-        }
-        if eligibility_keys != set(definitions):
-            raise ValueError("trial bundle eligibility does not cover the frozen registry exactly")
-        returns_by_horizon = {item.horizon: item for item in bundle.return_snapshots}
-        trials_by_id = {item.trial_id: item for item in bundle.trials}
-        for result in bundle.hypothesis_eligibility:
-            definition = definitions[(result.hypothesis_id, result.hypothesis_version)]
-            if result.evaluation_horizon != definition.evaluation_horizon:
-                raise ValueError("eligibility horizon does not match the frozen hypothesis")
-            if result.eligible_for_hypothesis:
-                trial = trials_by_id[result.appended_trial_id]
-                if (
-                    trial.hypothesis_id,
-                    trial.hypothesis_version,
-                    trial.evaluation_horizon,
-                ) != (
-                    result.hypothesis_id,
-                    result.hypothesis_version,
-                    result.evaluation_horizon,
-                ):
-                    raise ValueError("eligibility result references a different hypothesis trial")
-            elif result.reason == "required_pre_event_field_missing" and definition.phase != "pre_event":
-                raise ValueError("pre-event missing reason cannot describe a post-event hypothesis")
-            elif result.reason == "required_post_event_field_missing" and definition.phase != "post_event":
-                raise ValueError("post-event missing reason cannot describe a pre-event hypothesis")
-            elif result.reason == "horizon_not_matured" and result.evaluation_horizon in returns_by_horizon:
-                raise ValueError("matured horizon cannot be marked as not matured")
-            elif result.reason == "horizon_not_comparable":
-                source_return = returns_by_horizon.get(result.evaluation_horizon)
-                if source_return is None or source_return.status != "not_comparable":
-                    raise ValueError("not-comparable reason must match the staged return")
-            elif result.reason == "trial_already_recorded":
-                prior_key = (
-                    result.hypothesis_id,
-                    result.hypothesis_version,
-                    bundle.earnings_event_id,
-                    result.evaluation_horizon,
-                )
-                if prior_key not in trial_keys:
-                    raise ValueError("already-recorded reason requires an earlier append-only trial")
+        returns_by_horizon = {}
+        if isinstance(bundle, HypothesisTrialBundle):
+            eligibility_keys = {
+                (item.hypothesis_id, item.hypothesis_version)
+                for item in bundle.hypothesis_eligibility
+            }
+            if eligibility_keys != set(definitions):
+                raise ValueError("trial bundle eligibility does not cover the frozen registry exactly")
+            returns_by_horizon = {item.horizon: item for item in bundle.return_snapshots}
+            trials_by_id = {item.trial_id: item for item in bundle.trials}
+            for result in bundle.hypothesis_eligibility:
+                definition = definitions[(result.hypothesis_id, result.hypothesis_version)]
+                if result.evaluation_horizon != definition.evaluation_horizon:
+                    raise ValueError("eligibility horizon does not match the frozen hypothesis")
+                if result.eligible_for_hypothesis:
+                    trial = trials_by_id[result.appended_trial_id]
+                    if (
+                        trial.hypothesis_id,
+                        trial.hypothesis_version,
+                        trial.evaluation_horizon,
+                    ) != (
+                        result.hypothesis_id,
+                        result.hypothesis_version,
+                        result.evaluation_horizon,
+                    ):
+                        raise ValueError("eligibility result references a different hypothesis trial")
+                elif result.reason == "required_pre_event_field_missing" and definition.phase != "pre_event":
+                    raise ValueError("pre-event missing reason cannot describe a post-event hypothesis")
+                elif result.reason == "required_post_event_field_missing" and definition.phase != "post_event":
+                    raise ValueError("post-event missing reason cannot describe a pre-event hypothesis")
+                elif result.reason == "horizon_not_matured" and result.evaluation_horizon in returns_by_horizon:
+                    raise ValueError("matured horizon cannot be marked as not matured")
+                elif result.reason == "horizon_not_comparable":
+                    source_return = returns_by_horizon.get(result.evaluation_horizon)
+                    if source_return is None or source_return.status != "not_comparable":
+                        raise ValueError("not-comparable reason must match the staged return")
+                elif result.reason == "trial_already_recorded":
+                    prior_key = (
+                        result.hypothesis_id,
+                        result.hypothesis_version,
+                        bundle.earnings_event_id,
+                        result.evaluation_horizon,
+                    )
+                    if prior_key not in trial_keys:
+                        raise ValueError("already-recorded reason requires an earlier append-only trial")
         for trial in bundle.trials:
             key = (
                 trial.hypothesis_id,
@@ -312,15 +316,16 @@ def summarize_trials(registry, bundles, evaluated_at):
                 raise ValueError("trial cohort does not match the frozen target value")
             if trial.individual_outcome != _individual_outcome(definition, trial.cohort, trial.return_value):
                 raise ValueError("trial individual outcome does not match the frozen direction")
-            source_return = returns_by_horizon.get(trial.evaluation_horizon)
-            if (
-                source_return is None
-                or source_return.status != "comparable"
-                or source_return.return_value != trial.return_value
-                or source_return.observed_at != trial.outcome_observed_at
-                or source_return.source_record_id not in trial.source_record_ids
-            ):
-                raise ValueError("trial outcome does not match its staged return snapshot")
+            if not isinstance(bundle, HypothesisTrialBundleV1):
+                source_return = returns_by_horizon.get(trial.evaluation_horizon)
+                if (
+                    source_return is None
+                    or source_return.status != "comparable"
+                    or source_return.return_value != trial.return_value
+                    or source_return.observed_at != trial.outcome_observed_at
+                    or source_return.source_record_id not in trial.source_record_ids
+                ):
+                    raise ValueError("trial outcome does not match its staged return snapshot")
             by_hypothesis.setdefault(trial.hypothesis_id, []).append(trial)
     statuses = []
     for definition in registry.hypotheses:

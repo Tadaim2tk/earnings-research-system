@@ -245,6 +245,38 @@
       "type": "object"
     }
   },
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "supersedes_observation_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "supersedes_observation_id"
+        ]
+      },
+      "if": {
+        "properties": {
+          "observation_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "observation_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "supersedes_observation_id": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "const": "prospective_hypothesis_trial_bundle_v2",

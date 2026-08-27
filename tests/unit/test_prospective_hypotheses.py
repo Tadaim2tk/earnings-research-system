@@ -14,10 +14,12 @@ from earnings_research.prospective_hypotheses.evaluator import (
 from earnings_research.prospective_hypotheses.models import (
     CompletedEventObservation,
     HypothesisRegistry,
+    HypothesisTrialBundleV1,
 )
 from earnings_research.prospective_hypotheses.pipeline import (
     build_registry_file,
     evaluate_observation_file,
+    load_trial_bundles,
     verify_registry_file,
 )
 
@@ -316,6 +318,61 @@ def test_contract_schemas_accept_committed_registry_and_sample():
     for schema_name, instance in pairs:
         schema = json.loads((ROOT / "schemas/analysis" / schema_name).read_text(encoding="utf-8"))
         jsonschema.validate(instance, schema)
+
+
+def test_json_schema_rejects_v2_observation_without_predecessor():
+    schema = json.loads(
+        (ROOT / "schemas/analysis/prospective_hypothesis_event_observation.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    payload = json.loads(STAGED_D5.read_text(encoding="utf-8"))
+    payload["supersedes_observation_id"] = None
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
+    payload.pop("supersedes_observation_id")
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
+
+
+def test_v1_trial_bundle_remains_readable_and_counted(tmp_path):
+    generated = evaluate_observation(
+        registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    legacy = HypothesisTrialBundleV1(
+        registry_id=generated.registry_id,
+        registry_version=generated.registry_version,
+        registry_sha256=generated.registry_sha256,
+        observation_id=generated.observation_id,
+        earnings_event_id=generated.earnings_event_id,
+        recorded_at=generated.recorded_at,
+        trials=generated.trials,
+        ineligible_hypotheses={},
+    )
+    trials = tmp_path / "trials"
+    trials.mkdir()
+    (trials / "legacy-v1.json").write_text(
+        json.dumps(legacy.model_dump(mode="json"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    loaded = load_trial_bundles(trials)
+    snapshot = summarize_trials(
+        registry(), loaded, datetime(2026, 10, 1, 9, tzinfo=JST)
+    )
+    assert snapshot.source_trial_bundle_count == 1
+    assert sum(item.comparator_observations for item in snapshot.hypotheses) == 19
+    evaluate_observation_file(
+        REGISTRY,
+        STAGED_D1,
+        trials,
+        trials / "staged-d1.json",
+        datetime(2026, 10, 1, 18, tzinfo=JST),
+    )
+    assert len(load_trial_bundles(trials)) == 2
+    v1_schema = json.loads(
+        (ROOT / "schemas/analysis/prospective_hypothesis_trial_bundle_v1.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    jsonschema.validate(legacy.model_dump(mode="json"), v1_schema)
 
 
 def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):

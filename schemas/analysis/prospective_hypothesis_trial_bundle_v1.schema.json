@@ -1,0 +1,217 @@
+{
+  "$defs": {
+    "HypothesisTrial": {
+      "properties": {
+        "trial_id": {
+          "title": "Trial Id",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_version": {
+          "minimum": 1,
+          "title": "Hypothesis Version",
+          "type": "integer"
+        },
+        "earnings_event_id": {
+          "title": "Earnings Event Id",
+          "type": "string"
+        },
+        "event_quarter": {
+          "pattern": "^\\d{4}-Q[1-4]$",
+          "title": "Event Quarter",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "pre_event",
+            "post_event"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "evaluation_horizon": {
+          "enum": [
+            "D1",
+            "D5",
+            "D20"
+          ],
+          "title": "Evaluation Horizon",
+          "type": "string"
+        },
+        "cohort": {
+          "enum": [
+            "target",
+            "non_target"
+          ],
+          "title": "Cohort",
+          "type": "string"
+        },
+        "observed_dimension": {
+          "enum": [
+            "rank",
+            "narrative",
+            "judge",
+            "reaction",
+            "risk_balance",
+            "volatility_environment",
+            "dollar_environment"
+          ],
+          "title": "Observed Dimension",
+          "type": "string"
+        },
+        "observed_value": {
+          "title": "Observed Value",
+          "type": "string"
+        },
+        "return_value": {
+          "title": "Return Value",
+          "type": "number"
+        },
+        "individual_outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "neutral",
+            "not_applicable"
+          ],
+          "title": "Individual Outcome",
+          "type": "string"
+        },
+        "outcome_observed_at": {
+          "format": "date-time",
+          "title": "Outcome Observed At",
+          "type": "string"
+        },
+        "observation_id": {
+          "title": "Observation Id",
+          "type": "string"
+        },
+        "observation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Observation Sha256",
+          "type": "string"
+        },
+        "source_record_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Record Ids",
+          "type": "array"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "append_only": {
+          "const": true,
+          "default": true,
+          "title": "Append Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "trial_id",
+        "hypothesis_id",
+        "hypothesis_version",
+        "earnings_event_id",
+        "event_quarter",
+        "phase",
+        "evaluation_horizon",
+        "cohort",
+        "observed_dimension",
+        "observed_value",
+        "return_value",
+        "individual_outcome",
+        "outcome_observed_at",
+        "observation_id",
+        "observation_sha256",
+        "source_record_ids",
+        "recorded_at"
+      ],
+      "title": "HypothesisTrial",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "prospective_hypothesis_trial_bundle_v1",
+      "default": "prospective_hypothesis_trial_bundle_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "registry_id": {
+      "title": "Registry Id",
+      "type": "string"
+    },
+    "registry_version": {
+      "title": "Registry Version",
+      "type": "integer"
+    },
+    "registry_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Registry Sha256",
+      "type": "string"
+    },
+    "observation_id": {
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "recorded_at": {
+      "format": "date-time",
+      "title": "Recorded At",
+      "type": "string"
+    },
+    "trials": {
+      "items": {
+        "$ref": "#/$defs/HypothesisTrial"
+      },
+      "title": "Trials",
+      "type": "array"
+    },
+    "ineligible_hypotheses": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Ineligible Hypotheses",
+      "type": "object"
+    },
+    "weight_changes_generated": {
+      "const": 0,
+      "default": 0,
+      "title": "Weight Changes Generated",
+      "type": "integer"
+    },
+    "rank_rule_changes_generated": {
+      "const": 0,
+      "default": 0,
+      "title": "Rank Rule Changes Generated",
+      "type": "integer"
+    },
+    "trading_rules_generated": {
+      "const": 0,
+      "default": 0,
+      "title": "Trading Rules Generated",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "registry_id",
+    "registry_version",
+    "registry_sha256",
+    "observation_id",
+    "earnings_event_id",
+    "recorded_at",
+    "trials",
+    "ineligible_hypotheses"
+  ],
+  "title": "HypothesisTrialBundleV1",
+  "type": "object"
+}

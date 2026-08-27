@@ -1,9 +1,9 @@
 """Contracts for frozen hypotheses, event observations, trials, and derived status."""
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Dimension = Literal[
@@ -18,6 +18,24 @@ Dimension = Literal[
 Horizon = Literal["D1", "D5", "D20"]
 Phase = Literal["pre_event", "post_event"]
 ExpectedDirection = Literal["higher_than_comparator", "lower_than_comparator", "no_material_difference"]
+
+VERSIONED_OBSERVATION_SCHEMA_RULE = {
+    "allOf": [
+        {
+            "if": {
+                "properties": {"observation_version": {"const": 1}},
+                "required": ["observation_version"],
+            },
+            "then": {
+                "properties": {"supersedes_observation_id": {"type": "null"}},
+            },
+            "else": {
+                "properties": {"supersedes_observation_id": {"type": "string", "minLength": 1}},
+                "required": ["supersedes_observation_id"],
+            },
+        }
+    ]
+}
 
 
 class HistoricalSample(BaseModel):
@@ -167,6 +185,8 @@ class HorizonReturn(BaseModel):
 
 
 class CompletedEventObservation(BaseModel):
+    model_config = ConfigDict(json_schema_extra=VERSIONED_OBSERVATION_SCHEMA_RULE)
+
     schema_version: Literal["prospective_hypothesis_event_observation_v2"] = "prospective_hypothesis_event_observation_v2"
     observation_id: str
     observation_version: int = Field(ge=1)
@@ -282,7 +302,39 @@ class HypothesisTrial(BaseModel):
         return self
 
 
+class HypothesisTrialBundleV1(BaseModel):
+    schema_version: Literal["prospective_hypothesis_trial_bundle_v1"] = "prospective_hypothesis_trial_bundle_v1"
+    registry_id: str
+    registry_version: int
+    registry_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    observation_id: str
+    earnings_event_id: str
+    recorded_at: datetime
+    trials: List[HypothesisTrial]
+    ineligible_hypotheses: Dict[str, str]
+    weight_changes_generated: Literal[0] = 0
+    rank_rule_changes_generated: Literal[0] = 0
+    trading_rules_generated: Literal[0] = 0
+
+    @model_validator(mode="after")
+    def validate_bundle(self):
+        if self.recorded_at.tzinfo is None:
+            raise ValueError("bundle recorded_at must include timezone")
+        trial_ids = [item.trial_id for item in self.trials]
+        if len(trial_ids) != len(set(trial_ids)):
+            raise ValueError("trial IDs must be unique")
+        if any(item.earnings_event_id != self.earnings_event_id for item in self.trials):
+            raise ValueError("all trials must belong to the bundle event")
+        if any(item.observation_id != self.observation_id for item in self.trials):
+            raise ValueError("all trials must reference the bundle observation")
+        if any(item.recorded_at != self.recorded_at for item in self.trials):
+            raise ValueError("all trials must share the bundle recorded_at")
+        return self
+
+
 class HypothesisTrialBundle(BaseModel):
+    model_config = ConfigDict(json_schema_extra=VERSIONED_OBSERVATION_SCHEMA_RULE)
+
     schema_version: Literal["prospective_hypothesis_trial_bundle_v2"] = "prospective_hypothesis_trial_bundle_v2"
     registry_id: str
     registry_version: int
