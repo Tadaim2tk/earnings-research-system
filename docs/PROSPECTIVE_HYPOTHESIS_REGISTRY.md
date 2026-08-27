@@ -40,7 +40,7 @@
 - `volatility_environment`
 - `dollar_environment`
 
-これらは `event_occurred_at` 以前にlockされたbaselineの値だけを使う。baseline ID、version、record hash、`locked_at`を必須とし、`captured_at <= locked_at <= event_occurred_at`を検証する。trial追記時は正本の完全なERS datasetを必須入力とし、dataset全体のvalidatorを通したうえで、同一eventの唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical record hashを観測値と突合する。単独baseline CSVやsuperseded済みversionではtrialを作らない。`rank`は正本の`pre_event_grade`と一致する場合だけ使う。旧`judge`やTSO市場環境など正式mappingのない特徴は未記録として母数外にし、自己申告のID・時刻・hash・特徴値だけではtrialを作らない。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
+これらは `event_occurred_at` 以前にlockされたbaselineの値だけを使う。baseline ID、version、record hash、`locked_at`を必須とし、`captured_at <= locked_at <= event_occurred_at`を検証する。trial追記時は正本の完全なERS datasetと市場反応記録を必須入力とし、dataset全体のvalidatorを通したうえで、同一eventの唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical record hashを観測値と突合する。D1・D5は市場反応記録の値・観測時刻・ID、D20は事後reviewの値・記録時刻・IDと一致させ、reactionも寄付き反応と翌営業日終値から固定規則で導出する。単独baseline CSV、superseded済みversion、自己申告だけの発表後結果ではtrialを作らない。`rank`は正本の`pre_event_grade`と一致する場合だけ使う。旧`judge`やTSO市場環境など正式mappingのない特徴は未記録として母数外にする。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
 
 ### post_event
 
@@ -159,6 +159,7 @@ python3 -m earnings_research.cli evaluate-hypothesis-event \
   --registry data/prospective_hypotheses/legacy_research_v1.json \
   --observation completed_event.json \
   --dataset data/current_dataset \
+  --market-reaction outputs/market_reaction.json \
   --trials-dir data/prospective_hypothesis_trials \
   --recorded-at 2026-09-30T18:00:00+09:00 \
   --evaluated-at 2026-09-30T18:00:00+09:00 \

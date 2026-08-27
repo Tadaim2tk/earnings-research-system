@@ -660,7 +660,7 @@ Approval: Humanは、新しいprospective決算についてD1、D5、D20の成�
 
 Context: ERS-ADR-0037の初期実装は同一eventに1つのtrial bundleだけを許可したため、D5やD20が後から成熟する通常の価格追跡を追加できなかった。全期間が揃うまで待つとD5仮説の評価が遅れ、累積snapshotをそのまま再評価すると同一event・同一hypothesis・同一horizonの二重登録が起こり得る。また入力不足の理由は自由文で、母数外の理由を機械集計しにくかった。
 
-Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md)に従い、event observationをv2、trial bundleをv2とする。observationはversion、supersedes ID、D1／D5／D20 stage、observed-through時刻を持つ。発表前特徴はsource baseline ID、version、record hash、lock時刻を必須とし、trial追記時に正本の完全なERS datasetをvalidationし、唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical hashと突合する。後続versionはevent identity、発表前特徴hash、確定済みreaction、成熟済みreturnを変更・削除できない。stageと時刻は前進のみ許可する。Pydanticと外部JSON Schemaの双方でversion predecessorとstage horizonを同じ条件で拒否する。
+Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md)に従い、event observationをv2、trial bundleをv2とする。observationはversion、supersedes ID、D1／D5／D20 stage、observed-through時刻を持つ。発表前特徴はsource baseline ID、version、record hash、lock時刻を必須とし、trial追記時に正本の完全なERS datasetをvalidationし、唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical hashと突合する。D1・D5は正本の市場反応記録、D20は正本の事後reviewへ値・時刻・source IDを突合し、reactionは市場反応値から固定規則で導出する。後続versionはevent identity、発表前特徴hash、確定済みreaction、成熟済みreturnを変更・削除できない。stageと時刻は前進のみ許可する。Pydanticと外部JSON Schemaの双方でversion predecessor、stage horizon、horizon重複を同じ条件で拒否する。
 
 trial identityへhorizonを含め、既存trialは再作成しない。累積snapshot内の既登録期間は`trial_already_recorded`、必要な発表前項目が無い場合は`required_pre_event_field_missing`として明示する。期間未成熟、比較不能、発表後項目不足も別reasonで記録し、いずれも失敗や母数へ入れない。event評価CLIは新trialの追記と全trialからのstatus再計算を一度に行う。
 

@@ -58,7 +58,22 @@ def _versioned_stage_schema_rules(return_field):
                 }
             },
         })
-    return {"allOf": [version_rule, *stage_rules]}
+    uniqueness_rules = [
+        {
+            "properties": {
+                return_field: {
+                    "contains": {
+                        "properties": {"horizon": {"const": horizon}},
+                        "required": ["horizon"],
+                    },
+                    "minContains": 0,
+                    "maxContains": 1,
+                }
+            }
+        }
+        for horizon in horizon_order
+    ]
+    return {"allOf": [version_rule, *stage_rules, *uniqueness_rules]}
 
 
 VERSIONED_OBSERVATION_SCHEMA_RULE = _versioned_stage_schema_rules("returns")
@@ -193,6 +208,7 @@ class PreEventFeatures(BaseModel):
 class PostEventFeatures(BaseModel):
     captured_at: datetime
     reaction: Optional[str] = None
+    reaction_source_record_id: str
 
 
 class HorizonReturn(BaseModel):

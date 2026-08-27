@@ -19,6 +19,7 @@ from .models import (
     HypothesisTrialBundle,
     HypothesisTrialBundleV1,
 )
+from earnings_research.market_reaction.models import MarketReactionTracking
 from earnings_research.validation.validator import (
     _calculate_baseline_record_hash,
     load_spec,
@@ -233,6 +234,90 @@ def _verify_authoritative_baseline(dataset_dir, observation):
     return row
 
 
+def _reaction_label(tracking):
+    immediate = tracking.event_window_reaction.return_pct
+    next_day = next(
+        item for item in tracking.milestones
+        if item.role == "next_business_day_close"
+    ).return_from_pre_event_close_pct
+    if immediate is None or next_day is None or immediate == 0:
+        return None
+    if immediate > 0:
+        return "GU継続" if next_day >= immediate else "GU失速"
+    return "GD反発" if next_day > immediate else "GD継続"
+
+
+def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation):
+    tracking = MarketReactionTracking.model_validate_json(
+        Path(market_reaction_path).read_text(encoding="utf-8")
+    )
+    if (
+        tracking.earnings_event_id != observation.earnings_event_id
+        or tracking.company_name != observation.company_name
+        or tracking.ticker != observation.ticker
+    ):
+        raise ValueError("market reaction identity does not match the event observation")
+    if tracking.tracking_id not in observation.source_record_ids:
+        raise ValueError("event observation source_record_ids must include market reaction tracking_id")
+    if observation.post_event_features.reaction_source_record_id != tracking.tracking_id:
+        raise ValueError("reaction source must reference the authoritative market reaction tracking")
+    if observation.post_event_features.reaction != _reaction_label(tracking):
+        raise ValueError("event observation reaction does not match authoritative market reaction values")
+
+    next_day_milestone = next(
+        item for item in tracking.milestones
+        if item.role == "next_business_day_close"
+    )
+    if observation.post_event_features.captured_at != next_day_milestone.price_datetime:
+        raise ValueError("reaction captured_at does not match the authoritative next-day milestone")
+
+    milestone_by_horizon = {
+        "D1": next_day_milestone,
+        "D5": next(
+            item for item in tracking.milestones
+            if item.role == "fifth_business_day_close"
+        ),
+    }
+    review_rows = {
+        row.get("review_id", "").strip(): row
+        for row in _read_dataset_table(dataset_dir, "post_earnings_review")
+    }
+    for item in observation.returns:
+        if item.horizon in milestone_by_horizon:
+            milestone = milestone_by_horizon[item.horizon]
+            expected_status = "comparable" if milestone.status == "observed" else "not_comparable"
+            expected_value = (
+                milestone.return_from_pre_event_close_pct / 100
+                if milestone.return_from_pre_event_close_pct is not None else None
+            )
+            if item.source_record_id != tracking.tracking_id:
+                raise ValueError(f"{item.horizon} return must reference market reaction tracking_id")
+            if milestone.price_datetime != item.observed_at:
+                raise ValueError(f"{item.horizon} observed_at does not match market reaction milestone")
+        else:
+            review = review_rows.get(item.source_record_id)
+            if review is None:
+                raise ValueError("D20 source_record_id must resolve to an authoritative post-event review")
+            if (
+                review.get("earnings_event_id", "").strip() != observation.earnings_event_id
+                or review.get("baseline_id", "").strip() != observation.pre_event_features.baseline_id
+            ):
+                raise ValueError("D20 post-event review does not match the observation event and baseline")
+            raw_value = review.get("day20_return_pct", "").strip()
+            expected_status = "comparable" if raw_value else "not_comparable"
+            expected_value = float(raw_value) / 100 if raw_value else None
+            try:
+                review_recorded_at = datetime.fromisoformat(review.get("recorded_at", "").strip())
+            except ValueError as exc:
+                raise ValueError("D20 post-event review recorded_at is invalid") from exc
+            if review_recorded_at != item.observed_at:
+                raise ValueError("D20 observed_at must match authoritative post-event review recorded_at")
+        if item.status != expected_status or item.return_value != expected_value:
+            raise ValueError(f"{item.horizon} return does not match its authoritative source")
+        if item.source_record_id not in observation.source_record_ids:
+            raise ValueError(f"source_record_ids must include the {item.horizon} return source")
+
+
 def _validate_observation_chain(existing, observation):
     if any(
         isinstance(item, HypothesisTrialBundleV1)
@@ -297,12 +382,14 @@ def evaluate_observation_file(
     output_path: Path,
     recorded_at: datetime,
     dataset_dir: Path,
+    market_reaction_path: Path,
 ):
     registry = HypothesisRegistry.model_validate_json(Path(registry_path).read_text(encoding="utf-8"))
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
     _verify_authoritative_baseline(dataset_dir, observation)
+    _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(
@@ -324,6 +411,7 @@ def evaluate_observation_and_status_file(
     recorded_at: datetime,
     evaluated_at: datetime,
     dataset_dir: Path,
+    market_reaction_path: Path,
 ):
     trials_dir = Path(trials_dir)
     if Path(trial_output_path).parent.resolve() != trials_dir.resolve():
@@ -337,6 +425,7 @@ def evaluate_observation_and_status_file(
         Path(observation_path).read_text(encoding="utf-8")
     )
     _verify_authoritative_baseline(dataset_dir, observation)
+    _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation)
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(

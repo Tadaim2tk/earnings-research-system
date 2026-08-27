@@ -9,7 +9,8 @@
   "observed_through": "2026-09-30T17:00:00+09:00",
   "post_event_features": {
     "captured_at": "2026-09-01T15:30:00+09:00",
-    "reaction": "GU継続"
+    "reaction": "GU継続",
+    "reaction_source_record_id": "MRT-MINATO-HYP"
   },
   "pre_event_features": {
     "baseline_id": "BASE-MINATO-001",
@@ -31,21 +32,21 @@
       "horizon": "D1",
       "observed_at": "2026-09-01T15:30:00+09:00",
       "return_value": 0.03,
-      "source_record_id": "MR-FICTIONAL-D1",
+      "source_record_id": "MRT-MINATO-HYP",
       "status": "comparable"
     },
     {
       "horizon": "D5",
       "observed_at": "2026-09-07T15:30:00+09:00",
       "return_value": 0.06,
-      "source_record_id": "MR-FICTIONAL-D5",
+      "source_record_id": "MRT-MINATO-HYP",
       "status": "comparable"
     },
     {
       "horizon": "D20",
       "observed_at": "2026-09-29T15:30:00+09:00",
       "return_value": 0.11,
-      "source_record_id": "MR-FICTIONAL-D20",
+      "source_record_id": "REV-MINATO-001",
       "status": "comparable"
     }
   ],
@@ -53,8 +54,8 @@
   "scoring_weights_modified": false,
   "source_record_ids": [
     "BASE-MINATO-001",
-    "EVAL-FICTIONAL-2026-Q1",
-    "REACTION-FICTIONAL-2026-Q1"
+    "MRT-MINATO-HYP",
+    "REV-MINATO-001"
   ],
   "supersedes_observation_id": null,
   "ticker": "MNTO",

@@ -9,7 +9,8 @@
   "observed_through": "2026-09-07T17:00:00+09:00",
   "post_event_features": {
     "captured_at": "2026-09-01T15:30:00+09:00",
-    "reaction": "GU継続"
+    "reaction": "GU継続",
+    "reaction_source_record_id": "MRT-ASTER-HYP"
   },
   "pre_event_features": {
     "baseline_id": "BASE-ASTER-003",
@@ -31,14 +32,14 @@
       "horizon": "D1",
       "observed_at": "2026-09-01T15:30:00+09:00",
       "return_value": 0.03,
-      "source_record_id": "MR-FICTIONAL-STAGED-D1",
+      "source_record_id": "MRT-ASTER-HYP",
       "status": "comparable"
     },
     {
       "horizon": "D5",
       "observed_at": "2026-09-07T15:30:00+09:00",
       "return_value": 0.06,
-      "source_record_id": "MR-FICTIONAL-STAGED-D5",
+      "source_record_id": "MRT-ASTER-HYP",
       "status": "comparable"
     }
   ],
@@ -46,8 +47,7 @@
   "scoring_weights_modified": false,
   "source_record_ids": [
     "BASE-ASTER-003",
-    "EVAL-FICTIONAL-STAGED",
-    "REACTION-FICTIONAL-STAGED"
+    "MRT-ASTER-HYP"
   ],
   "supersedes_observation_id": "HPO-FICTIONAL-STAGED-D1",
   "ticker": "ASTR",

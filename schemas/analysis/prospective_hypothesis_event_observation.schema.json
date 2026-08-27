@@ -11,12 +11,9 @@
           "title": "Horizon",
           "type": "string"
         },
-        "status": {
-          "enum": [
-            "comparable",
-            "not_comparable"
-          ],
-          "title": "Status",
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
           "type": "string"
         },
         "return_value": {
@@ -31,13 +28,16 @@
           "default": null,
           "title": "Return Value"
         },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
-          "type": "string"
-        },
         "source_record_id": {
           "title": "Source Record Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "comparable",
+            "not_comparable"
+          ],
+          "title": "Status",
           "type": "string"
         }
       },
@@ -68,23 +68,28 @@
           ],
           "default": null,
           "title": "Reaction"
+        },
+        "reaction_source_record_id": {
+          "title": "Reaction Source Record Id",
+          "type": "string"
         }
       },
       "required": [
-        "captured_at"
+        "captured_at",
+        "reaction_source_record_id"
       ],
       "title": "PostEventFeatures",
       "type": "object"
     },
     "PreEventFeatures": {
       "properties": {
-        "captured_at": {
-          "format": "date-time",
-          "title": "Captured At",
-          "type": "string"
-        },
         "baseline_id": {
           "title": "Baseline Id",
+          "type": "string"
+        },
+        "baseline_record_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Baseline Record Hash",
           "type": "string"
         },
         "baseline_version": {
@@ -92,17 +97,12 @@
           "title": "Baseline Version",
           "type": "integer"
         },
-        "baseline_record_hash": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Baseline Record Hash",
-          "type": "string"
-        },
-        "locked_at": {
+        "captured_at": {
           "format": "date-time",
-          "title": "Locked At",
+          "title": "Captured At",
           "type": "string"
         },
-        "rank": {
+        "dollar_environment": {
           "anyOf": [
             {
               "type": "string"
@@ -112,7 +112,24 @@
             }
           ],
           "default": null,
-          "title": "Rank"
+          "title": "Dollar Environment"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judge"
+        },
+        "locked_at": {
+          "format": "date-time",
+          "title": "Locked At",
+          "type": "string"
         },
         "narrative": {
           "anyOf": [
@@ -126,7 +143,7 @@
           "default": null,
           "title": "Narrative"
         },
-        "judge": {
+        "rank": {
           "anyOf": [
             {
               "type": "string"
@@ -136,7 +153,7 @@
             }
           ],
           "default": null,
-          "title": "Judge"
+          "title": "Rank"
         },
         "risk_balance": {
           "anyOf": [
@@ -161,18 +178,6 @@
           ],
           "default": null,
           "title": "Volatility Environment"
-        },
-        "dollar_environment": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Dollar Environment"
         }
       },
       "required": [
@@ -342,23 +347,148 @@
           }
         }
       }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D1"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D5"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D20"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
     }
   ],
   "properties": {
-    "schema_version": {
-      "const": "prospective_hypothesis_event_observation_v2",
-      "default": "prospective_hypothesis_event_observation_v2",
-      "title": "Schema Version",
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
+    "earnings_event_id": {
+      "title": "Earnings Event Id",
+      "type": "string"
+    },
+    "event_occurred_at": {
+      "format": "date-time",
+      "title": "Event Occurred At",
+      "type": "string"
+    },
+    "event_quarter": {
+      "pattern": "^\\d{4}-Q[1-4]$",
+      "title": "Event Quarter",
       "type": "string"
     },
     "observation_id": {
       "title": "Observation Id",
       "type": "string"
     },
+    "observation_stage": {
+      "enum": [
+        "D1",
+        "D5",
+        "D20"
+      ],
+      "title": "Observation Stage",
+      "type": "string"
+    },
     "observation_version": {
       "minimum": 1,
       "title": "Observation Version",
       "type": "integer"
+    },
+    "observed_through": {
+      "format": "date-time",
+      "title": "Observed Through",
+      "type": "string"
+    },
+    "post_event_features": {
+      "$ref": "#/$defs/PostEventFeatures"
+    },
+    "pre_event_features": {
+      "$ref": "#/$defs/PreEventFeatures"
+    },
+    "production_rules_modified": {
+      "const": false,
+      "default": false,
+      "title": "Production Rules Modified",
+      "type": "boolean"
+    },
+    "prospective_record": {
+      "const": true,
+      "default": true,
+      "title": "Prospective Record",
+      "type": "boolean"
+    },
+    "returns": {
+      "items": {
+        "$ref": "#/$defs/HorizonReturn"
+      },
+      "title": "Returns",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "prospective_hypothesis_event_observation_v2",
+      "default": "prospective_hypothesis_event_observation_v2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scoring_weights_modified": {
+      "const": false,
+      "default": false,
+      "title": "Scoring Weights Modified",
+      "type": "boolean"
+    },
+    "source_record_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Source Record Ids",
+      "type": "array"
     },
     "supersedes_observation_id": {
       "anyOf": [
@@ -372,80 +502,9 @@
       "default": null,
       "title": "Supersedes Observation Id"
     },
-    "observation_stage": {
-      "enum": [
-        "D1",
-        "D5",
-        "D20"
-      ],
-      "title": "Observation Stage",
-      "type": "string"
-    },
-    "earnings_event_id": {
-      "title": "Earnings Event Id",
-      "type": "string"
-    },
-    "company_name": {
-      "title": "Company Name",
-      "type": "string"
-    },
     "ticker": {
       "title": "Ticker",
       "type": "string"
-    },
-    "event_quarter": {
-      "pattern": "^\\d{4}-Q[1-4]$",
-      "title": "Event Quarter",
-      "type": "string"
-    },
-    "event_occurred_at": {
-      "format": "date-time",
-      "title": "Event Occurred At",
-      "type": "string"
-    },
-    "observed_through": {
-      "format": "date-time",
-      "title": "Observed Through",
-      "type": "string"
-    },
-    "pre_event_features": {
-      "$ref": "#/$defs/PreEventFeatures"
-    },
-    "post_event_features": {
-      "$ref": "#/$defs/PostEventFeatures"
-    },
-    "returns": {
-      "items": {
-        "$ref": "#/$defs/HorizonReturn"
-      },
-      "title": "Returns",
-      "type": "array"
-    },
-    "source_record_ids": {
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1,
-      "title": "Source Record Ids",
-      "type": "array"
-    },
-    "prospective_record": {
-      "const": true,
-      "default": true,
-      "title": "Prospective Record",
-      "type": "boolean"
-    },
-    "production_rules_modified": {
-      "const": false,
-      "default": false,
-      "title": "Production Rules Modified",
-      "type": "boolean"
-    },
-    "scoring_weights_modified": {
-      "const": false,
-      "default": false,
-      "title": "Scoring Weights Modified",
-      "type": "boolean"
     },
     "trade_decision_included": {
       "const": false,

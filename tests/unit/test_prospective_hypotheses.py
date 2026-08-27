@@ -101,7 +101,82 @@ def authoritative_dataset(tmp_path):
         normalized_evidence.append(row)
     normalized_evidence.extend(fixture_evidence)
     _write_csv(evidence_path, evidence_fields, normalized_evidence)
+
+    review_path = dataset / "post_earnings_review_sample.csv"
+    review_fields, review_rows = _read_csv(review_path)
+    for row in review_rows:
+        if row["earnings_event_id"] not in {"EVT-ASTER-2026Q1", "EVT-MINATO-2026Q2"}:
+            continue
+        if row["earnings_event_id"] == "EVT-ASTER-2026Q1":
+            row["baseline_id"] = "BASE-ASTER-003"
+        row.update({
+            "open_gap_pct": "1.0",
+            "day1_return_pct": "3.0",
+            "day5_return_pct": "6.0",
+            "day20_return_pct": "11.0",
+            "recorded_at": "2026-09-29T15:30:00+09:00",
+        })
+    _write_csv(review_path, review_fields, review_rows)
     return dataset
+
+
+@pytest.fixture
+def market_reactions(tmp_path):
+    def write_tracking(name, tracking_id, event_id, company_name, ticker, announcement):
+        path = tmp_path / f"{name}-market-reaction.json"
+        payload = {
+            "schema_version": "market_reaction_tracking_v1",
+            "tracking_id": tracking_id,
+            "earnings_event_id": event_id,
+            "evaluation_id": f"EVAL-{name.upper()}-HYP",
+            "company_name": company_name,
+            "ticker": ticker,
+            "currency": "JPY",
+            "status": "complete",
+            "announcement_datetime": announcement,
+            "announcement_session": "after_close",
+            "calendar_name": "verified-test-calendar",
+            "corporate_action_status": "none_detected",
+            "milestones": [
+                {"role": "pre_event_close", "status": "observed", "expected_trading_date": "2026-08-07", "note": "verified"},
+                {"role": "immediate_post_announcement", "status": "observed", "expected_trading_date": "2026-08-08", "return_from_pre_event_close_pct": 1.0, "note": "verified"},
+                {"role": "next_business_day_close", "status": "observed", "expected_trading_date": "2026-09-01", "price_datetime": "2026-09-01T15:30:00+09:00", "return_from_pre_event_close_pct": 3.0, "note": "verified"},
+                {"role": "fifth_business_day_close", "status": "observed", "expected_trading_date": "2026-09-07", "price_datetime": "2026-09-07T15:30:00+09:00", "return_from_pre_event_close_pct": 6.0, "note": "verified"},
+            ],
+            "event_window_reaction": {
+                "status": "calculated",
+                "reference_role": "pre_event_close",
+                "return_pct": 1.0,
+                "calculation_origin": "ers_calculated",
+                "formula": "verified",
+                "note": "verified",
+            },
+            "summary": {
+                "immediate_direction": "positive",
+                "next_business_day_direction": "positive",
+                "fifth_business_day_direction": "positive",
+                "reaction_path": "extended",
+                "explanation": "verified",
+            },
+            "warnings": [],
+            "completed_at": "2026-09-07T15:30:00+09:00",
+            "raw_price_data_retained": False,
+            "trade_decision_included": False,
+            "next_stage": "ready_for_post_event_validation",
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    return {
+        "aster": write_tracking(
+            "aster", "MRT-ASTER-HYP", "EVT-ASTER-2026Q1", "Aster Cloud Works", "ASTR",
+            "2026-08-08T15:30:00+09:00",
+        ),
+        "minato": write_tracking(
+            "minato", "MRT-MINATO-HYP", "EVT-MINATO-2026Q2", "Minato Legacy Retail", "MNTO",
+            "2026-08-12T15:00:00+09:00",
+        ),
+    }
 
 
 def registry():
@@ -189,22 +264,22 @@ def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
     assert all(item.reason == "required_pre_event_field_missing" for item in judge_results)
 
 
-def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_path, authoritative_dataset):
+def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_path, authoritative_dataset, market_reactions):
     trials = tmp_path / "trials"
     output = trials / "event-d20.json"
     evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset
+        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset, market_reactions["minato"]
     )
     with pytest.raises(ValueError, match="increment by one"):
         evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset
+            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset, market_reactions["minato"]
         )
     other = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     other_path = tmp_path / "other.json"
     other_path.write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(FileExistsError, match="already"):
         evaluate_observation_file(
-            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset
+            REGISTRY, other_path, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST), authoritative_dataset, market_reactions["aster"]
         )
     replay = json.loads(OBSERVATION.read_text(encoding="utf-8"))
     replay["observation_id"] = "HPO-FICTIONAL-REPLAY"
@@ -214,23 +289,23 @@ def test_append_only_writer_rejects_existing_output_and_same_stage_replay(tmp_pa
     replay_path.write_text(json.dumps(replay, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="horizon must advance"):
         evaluate_observation_file(
-            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST), authoritative_dataset
+            REGISTRY, replay_path, trials, trials / "replay.json", datetime(2026, 10, 1, 18, tzinfo=JST), authoritative_dataset, market_reactions["minato"]
         )
 
 
-def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path, authoritative_dataset):
+def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path, authoritative_dataset, market_reactions):
     trials = tmp_path / "trials"
     d1 = evaluate_observation_file(
-        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset
+        REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"]
     )
     assert d1.trials == []
     d5 = evaluate_observation_file(
-        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST), authoritative_dataset
+        REGISTRY, STAGED_D5, trials, trials / "02-d5.json", datetime(2026, 9, 7, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"]
     )
     assert d5.trials
     assert {item.evaluation_horizon for item in d5.trials} == {"D5"}
     d20 = evaluate_observation_file(
-        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset
+        REGISTRY, STAGED_D20, trials, trials / "03-d20.json", datetime(2026, 9, 30, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"]
     )
     assert d20.trials
     assert {item.evaluation_horizon for item in d20.trials} == {"D20"}
@@ -248,11 +323,11 @@ def test_d1_d5_d20_stages_append_only_new_horizons(tmp_path, authoritative_datas
         )
 
 
-def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path, authoritative_dataset):
-    for field, expected in (("pre_event", "frozen pre-event"), ("return", "matured return")):
+def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path, authoritative_dataset, market_reactions):
+    for field, expected in (("pre_event", "frozen pre-event"), ("return", "authoritative source")):
         trials = tmp_path / field
         evaluate_observation_file(
-            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset
+            REGISTRY, STAGED_D1, trials, trials / "01-d1.json", datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"]
         )
         changed = json.loads(STAGED_D5.read_text(encoding="utf-8"))
         if field == "pre_event":
@@ -269,6 +344,7 @@ def test_staged_observation_cannot_rewrite_pre_event_or_matured_return(tmp_path,
                 trials / "02-d5.json",
                 datetime(2026, 9, 7, 18, tzinfo=JST),
                 authoritative_dataset,
+                market_reactions["aster"],
             )
 
 
@@ -417,6 +493,12 @@ def test_json_schema_rejects_missing_stage_return_and_future_horizon():
     payload["returns"] = [item for item in payload["returns"] if item["horizon"] == "D1"]
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(payload, schema)
+    payload = json.loads(STAGED_D5.read_text(encoding="utf-8"))
+    duplicate = dict(payload["returns"][0])
+    duplicate["source_record_id"] = "MRT-DUPLICATE-D1"
+    payload["returns"].append(duplicate)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, schema)
     payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     payload["returns"].append(
         next(item for item in json.loads(STAGED_D5.read_text(encoding="utf-8"))["returns"] if item["horizon"] == "D5")
@@ -425,7 +507,7 @@ def test_json_schema_rejects_missing_stage_return_and_future_horizon():
         jsonschema.validate(payload, schema)
 
 
-def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path, authoritative_dataset):
+def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path, authoritative_dataset, market_reactions):
     trials = tmp_path / "trials"
     payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
     payload["pre_event_features"]["baseline_id"] = "BASE-NOT-FOUND"
@@ -440,6 +522,7 @@ def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path, 
             trials / "missing.json",
             datetime(2026, 9, 1, 18, tzinfo=JST),
             authoritative_dataset,
+            market_reactions["aster"],
         )
     changed_dataset = tmp_path / "tampered-dataset"
     shutil.copytree(authoritative_dataset, changed_dataset)
@@ -458,10 +541,11 @@ def test_append_rejects_unresolved_or_tampered_authoritative_baseline(tmp_path, 
             trials / "tampered.json",
             datetime(2026, 9, 1, 18, tzinfo=JST),
             changed_dataset,
+            market_reactions["aster"],
         )
 
 
-def test_append_requires_complete_dataset_and_current_baseline_tail(tmp_path, authoritative_dataset):
+def test_append_requires_complete_dataset_and_current_baseline_tail(tmp_path, authoritative_dataset, market_reactions):
     incomplete = tmp_path / "incomplete-dataset"
     incomplete.mkdir()
     shutil.copy2(
@@ -474,8 +558,9 @@ def test_append_requires_complete_dataset_and_current_baseline_tail(tmp_path, au
             STAGED_D1,
             tmp_path / "incomplete-trials",
             tmp_path / "incomplete.json",
-            datetime(2026, 9, 1, 18, tzinfo=JST),
-            incomplete,
+                datetime(2026, 9, 1, 18, tzinfo=JST),
+                incomplete,
+                market_reactions["aster"],
         )
 
     payload = json.loads(STAGED_D1.read_text(encoding="utf-8"))
@@ -499,10 +584,48 @@ def test_append_requires_complete_dataset_and_current_baseline_tail(tmp_path, au
             tmp_path / "superseded.json",
             datetime(2026, 9, 1, 18, tzinfo=JST),
             authoritative_dataset,
+            market_reactions["aster"],
         )
 
 
-def test_v1_trial_bundle_remains_readable_and_counted(tmp_path, authoritative_dataset):
+@pytest.mark.parametrize(
+    "field", ["reaction", "return_value", "observed_at", "source_record_id", "d20_return_value"]
+)
+def test_append_rejects_tampered_post_event_outcomes(
+    tmp_path, authoritative_dataset, market_reactions, field
+):
+    source = STAGED_D20 if field == "d20_return_value" else STAGED_D5
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    if field == "reaction":
+        payload["post_event_features"]["reaction"] = "GU失速"
+        expected = "reaction does not match"
+    elif field == "return_value":
+        payload["returns"][0][field] = 0.99
+        expected = "return does not match"
+    elif field == "observed_at":
+        payload["returns"][0][field] = "2026-09-02T15:30:00+09:00"
+        expected = "observed_at does not match"
+    elif field == "d20_return_value":
+        next(item for item in payload["returns"] if item["horizon"] == "D20")["return_value"] = 0.99
+        expected = "D20 return does not match"
+    else:
+        payload["returns"][0][field] = "MRT-FABRICATED"
+        expected = "must reference market reaction tracking_id"
+    path = tmp_path / f"tampered-{field}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match=expected):
+        evaluate_observation_file(
+            REGISTRY,
+            path,
+            tmp_path / f"trials-{field}",
+            tmp_path / f"trial-{field}.json",
+            datetime(2026, 9, 7, 18, tzinfo=JST),
+            authoritative_dataset,
+            market_reactions["aster"],
+        )
+
+
+def test_v1_trial_bundle_remains_readable_and_counted(tmp_path, authoritative_dataset, market_reactions):
     generated = evaluate_observation(
         registry(), observation(), datetime(2026, 9, 30, 18, tzinfo=JST)
     )
@@ -535,6 +658,7 @@ def test_v1_trial_bundle_remains_readable_and_counted(tmp_path, authoritative_da
         trials / "staged-d1.json",
         datetime(2026, 10, 1, 18, tzinfo=JST),
         authoritative_dataset,
+        market_reactions["aster"],
     )
     assert len(load_trial_bundles(trials)) == 2
     v1_schema = json.loads(
@@ -544,7 +668,7 @@ def test_v1_trial_bundle_remains_readable_and_counted(tmp_path, authoritative_da
     jsonschema.validate(legacy.model_dump(mode="json"), v1_schema)
 
 
-def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path, authoritative_dataset):
+def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path, authoritative_dataset, market_reactions):
     assert main([
         "verify-hypothesis-registry", "--knowledge", str(KNOWLEDGE), "--registry", str(REGISTRY)
     ]) == 0
@@ -556,6 +680,7 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path, authorit
         "--registry", str(REGISTRY),
         "--observation", str(OBSERVATION),
         "--dataset", str(authoritative_dataset),
+        "--market-reaction", str(market_reactions["minato"]),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
         "--evaluated-at", "2026-10-01T09:00:00+09:00",
