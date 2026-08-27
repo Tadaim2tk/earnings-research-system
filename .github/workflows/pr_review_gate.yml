@@ -3,9 +3,17 @@ name: Codex review gate
 # レビュー到着前マージ事故(ERS #48, 2026-08-25: マージ4分後にCodexレビュー着=P1指摘2件が
 # 「PRの修正」でなく「mainの負債」になり、後日PR #53で回収した)の構造対策。TSO #119と同型。
 #
-# 設計判断: ブランチ保護のrequired checkにはしない(このrepoもクラウド正本へボットが
-# コミットする運用のため)。このcheckをPRに常設し、マージ手順側の恒久ルール
-# 「全checks完了を待ってからマージ」で効かせる。チェックが黄色の間はマージしない、が運用上の合意。
+# 設計判断(2026-08-27改定, ERS-ADR-0040): ruleset "main-merge-gate" がこのcheckをmainの
+# 必須チェックにしており、チェック完了前のマージはGitHub側で物理的に弾かれる。
+# ADR-0039時点の「ボットがmainへ直接コミットするためrequired check化できない」という前提は
+# 本リポジトリでは実態と異なった(mainへ直接pushするワークフローは無く、全コミットがPR経由)。
+#
+# 成功条件は「レビュー到着」ではなく「未解決のCodex指摘スレッドがゼロ」(TSO #121 Codex P1対応:
+# 到着だけで緑にすると、--auto予約が指摘を読む前にマージしてしまう):
+# - レビュー未着のままtimeout → 成功(fail-open: Codex停止で全マージを詰まらせない)
+# - レビュー到着済みで未解決スレッドが残ったままtimeout → 失敗(赤)。修正をpushするか
+#   スレッドをresolveすれば、synchronize/再実行で緑になる。
+# checkの緑はレビュー精読の代わりにはならない — 届いたレビューを読む義務は手順側に残る。
 
 on:
   pull_request:
@@ -19,28 +27,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Wait for Codex review (arrival = green early, max 20 min)
+      - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # chatgpt-codex-connector[bot] のレビューが届いたら即成功。
-          # 20分待っても届かなければ「レビューなしPR」として成功にする
-          # (Codex側の停止で全マージが詰まるのを防ぐ。締め切りは緩く、既定は待つ)。
-          # レビューは現在のhead SHAに対するものだけを数える(Codex P1指摘への対応:
-          # synchronize時に旧コミットへの古いレビューで即グリーンになるのを防ぐ。
-          # Codexが更新コミットを再レビューしない場合はタイムアウト通過となる)。
+          owner="${REPO%%/*}"
+          name="${REPO##*/}"
+          arrived=0
           for i in $(seq 1 40); do
+            # レビューは現在のhead SHAに対するものだけを数える(古いレビューでの即グリーン防止)。
             n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
               2>/dev/null | awk '{s+=$1} END {print s+0}')
             if [ "$n" -gt 0 ]; then
-              echo "Codex review arrived: $n review(s). Read it before merging."
-              exit 0
+              arrived=1
+              # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
+              # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
+              unresolved=$(gh api graphql \
+                -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
+                -f owner="$owner" -f name="$name" -F number="$PR" \
+                --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
+                2>/dev/null || echo "unknown")
+              if [ "$unresolved" = "0" ]; then
+                echo "Codex review arrived ($n review(s)) and no unresolved finding threads remain."
+                exit 0
+              fi
+              echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
+            else
+              echo "waiting for Codex review... ($i/40)"
             fi
-            echo "waiting for Codex review... ($i/40)"
             sleep 30
           done
+          if [ "$arrived" -gt 0 ]; then
+            echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
+            exit 1
+          fi
           echo "No Codex review within 20 min — gate passes as a no-review PR."

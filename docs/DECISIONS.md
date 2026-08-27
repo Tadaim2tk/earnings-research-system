@@ -635,3 +635,17 @@ Context: このリポジトリにはPRトリガーのCIが無く、マージを�
 Decision: `.github/workflows/pr_review_gate.yml` を常設する。PRの現在のhead SHAに対する chatgpt-codex-connector[bot] のレビュー到着で即成功、未到着でも20分で成功して通す（fail-open。Codex側の停止で全マージが詰まることを防ぐ意図的な緩い締め切り）。レビュー一覧の取得はページネーションを跨いで数える。強制力はブランチ保護ではなく、マージ手順の恒久ルール「全checksの完了を待ち、届いたレビューを読み、指摘はPR内で処理してからマージする」との組で持たせる。
 
 Consequences: マージは最大20分遅延しうるが、レビューが届き次第すぐ緑になる。Codexがレビューを出さないPRはタイムアウト通過し、レビュー無しであることが明示される。fail-openである以上、checkの緑はレビュー済みを意味しない — 手順側の「読む」義務が本体であり、checkは時間を確保する装置である。
+
+## ERS-ADR-0040
+
+Date: 2026-08-27
+
+Status: Accepted
+
+Approval: Humanは2026-08-27のモーニングブリーフを受けて、マージ手順の機構化（ERS-ADR-0039が「組」とした手順ルール側の恒久化）の実施を指示した。
+
+Context: ADR-0039は強制力を「マージ手順の恒久ルール」という人側の規律に置き、required check化を「ボットがmainへ直接コミットする運用を弾く」として見送った。しかし本リポジトリの実態を確認したところ、mainへ直接pushするワークフローは存在せず（level2_monitorはcontents: read）、全コミットはPR経由で到達していた。見送りの前提は本リポジトリには当てはまらない。またリポジトリはpublicのため、無料プランでもrulesetを利用できる。同日、tactical-swing-os側も同じ機構化を実施している（あちらは日次CIボットのmain直接pushがあるため、専用Deploy keyのみを例外経路とする構成）。
+
+Decision: リポジトリruleset `main-merge-gate` を有効化する。(1) mainへのpushに `wait-for-codex-review` check（GitHub Actions発）を必須化、(2) force pushとブランチ削除を禁止。例外経路（bypass）は設定しない。マージは `gh pr merge --auto` で予約する運用へ一本化する。あわせてcheckの成功条件を「レビュー到着」から「未解決のCodex指摘スレッドがゼロ」へ強化する（TSO #121へのCodex P1指摘: 到着だけで緑にすると、--auto予約が指摘を読む前にマージしてしまう）。指摘スレッドが残ったまま20分経過するとcheckは失敗（赤）になり、fail-open（timeoutで成功）はレビューが一切届かない場合に限る。
+
+Consequences: チェック完了前のマージ、および未解決指摘を積んだままのマージはGitHub側で拒否され、人側の規律が単一障害点でなくなる。checkの緑がレビュー精読を意味しない点は不変 — 届いたレビューを読み、指摘をPR内で処理（修正pushまたはthread resolve）する義務は手順側に残る。Codexが指摘を出したPRは、処理が済むまで自動マージされない。将来ボットがmainへ直接pushする運用を導入する場合は、専用Deploy keyを例外経路として追加する必要がある。
