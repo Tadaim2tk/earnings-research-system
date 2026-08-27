@@ -646,6 +646,6 @@ Approval: Humanは2026-08-27のモーニングブリーフを受けて、マー�
 
 Context: ADR-0039は強制力を「マージ手順の恒久ルール」という人側の規律に置き、required check化を「ボットがmainへ直接コミットする運用を弾く」として見送った。しかし本リポジトリの実態を確認したところ、mainへ直接pushするワークフローは存在せず（level2_monitorはcontents: read）、全コミットはPR経由で到達していた。見送りの前提は本リポジトリには当てはまらない。またリポジトリはpublicのため、無料プランでもrulesetを利用できる。同日、tactical-swing-os側も同じ機構化を実施している（あちらは日次CIボットのmain直接pushがあるため、専用Deploy keyのみを例外経路とする構成）。
 
-Decision: リポジトリruleset `main-merge-gate` を有効化する。(1) mainへのpushに `wait-for-codex-review` check（GitHub Actions発）を必須化、(2) force pushとブランチ削除を禁止。例外経路（bypass）は設定しない。マージは `gh pr merge --auto` で予約し、ゲート完了時に自動マージされる運用へ一本化する。fail-open設計（20分timeoutで成功）はADR-0039から変更しない。
+Decision: リポジトリruleset `main-merge-gate` を有効化する。(1) mainへのpushに `wait-for-codex-review` check（GitHub Actions発）を必須化、(2) force pushとブランチ削除を禁止。例外経路（bypass）は設定しない。マージは `gh pr merge --auto` で予約する運用へ一本化する。あわせてcheckの成功条件を「レビュー到着」から「未解決のCodex指摘スレッドがゼロ」へ強化する（TSO #121へのCodex P1指摘: 到着だけで緑にすると、--auto予約が指摘を読む前にマージしてしまう）。指摘スレッドが残ったまま20分経過するとcheckは失敗（赤）になり、fail-open（timeoutで成功）はレビューが一切届かない場合に限る。
 
-Consequences: チェック完了前のマージはGitHub側で拒否され、人側の規律が単一障害点でなくなる。checkの緑がレビュー済みを意味しない点は不変 — 届いたレビューを読み、指摘をPR内で処理する義務は手順側に残る。将来ボットがmainへ直接pushする運用を導入する場合は、専用Deploy keyを例外経路として追加する必要がある。
+Consequences: チェック完了前のマージ、および未解決指摘を積んだままのマージはGitHub側で拒否され、人側の規律が単一障害点でなくなる。checkの緑がレビュー精読を意味しない点は不変 — 届いたレビューを読み、指摘をPR内で処理（修正pushまたはthread resolve）する義務は手順側に残る。Codexが指摘を出したPRは、処理が済むまで自動マージされない。将来ボットがmainへ直接pushする運用を導入する場合は、専用Deploy keyを例外経路として追加する必要がある。
