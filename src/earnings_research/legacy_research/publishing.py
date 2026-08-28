@@ -40,6 +40,70 @@ def statistics_scope(listed, counted) -> str:
     )
 
 
+def findings_line(aggregation) -> str:
+    """State what survived the correction, in the place people read.
+
+    This is the sentence the whole change exists to produce, and it appeared
+    nowhere a reader would find it: the words for correction, p-value,
+    interval and verdict occurred zero times across all three published files.
+    Every table below carries a heading phrased as a question, and with no line
+    saying the questions came back unanswered, the figures under them read as
+    the answers.
+    """
+    comparisons = sum(
+        family.get("comparisons", 0)
+        for family in aggregation.get("multiplicity", {}).get("families", {}).values()
+    )
+    directional = 0
+    distinguishable = 0
+
+    def walk(node):
+        nonlocal directional, distinguishable
+        if isinstance(node, dict):
+            if node.get("verdict") == "directional":
+                directional += 1
+            if node.get("distinguishable") is True:
+                distinguishable += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(aggregation)
+    surviving = directional + distinguishable
+    if surviving == 0:
+        return (
+            f"**{comparisons}件の比較をBenjamini-Hochbergで補正した結果、統計的に主張できる項目は0件。**"
+            "以下の表は記述であって、検証を通過した所見ではない。"
+        )
+    return (
+        f"{comparisons}件の比較をBenjamini-Hochbergで補正し、{surviving}件が残った"
+        f"(方向性 {directional} / 裾の捕捉 {distinguishable})。それ以外の数字は記述であって所見ではない。"
+    )
+
+
+def _cell(summary, size_note=""):
+    """One published figure, with the width of what it does not settle.
+
+    The win rate was printed alone. Forty-nine cells carried an exact interval,
+    a median interval, a sign test and a verdict, and none of the four reached
+    the page — twenty-seven of those cells had a mean and a middle pointing
+    opposite ways and said nothing about it.
+    """
+    interval = summary.win_rate_interval
+    span = (
+        f" [{interval.low * 100:.0f}〜{interval.high * 100:.0f}%]"
+        if interval.low is not None and interval.high is not None
+        else ""
+    )
+    mark = "†" if summary.verdict == "tail_driven" else ""
+    return (
+        f"{summary.win_rate * 100:.0f}%{span} / {summary.median * 100:+.1f}% / "
+        f"{summary.mean * 100:+.1f}% (n={summary.n}{size_note}){mark}"
+    )
+
+
 def _avg(rows, predicate, key="ret_d20"):
     """Win rate, median and mean, because the mean alone hides its own shape.
 
@@ -60,13 +124,12 @@ def _avg(rows, predicate, key="ret_d20"):
     summary = summarise(
         [value for value, _code in picked], clusters=[code for _value, code in picked]
     )
-    if not summary.reportable or summary.win_rate is None:
-        return f"n={summary.n}(少)"
+    if not summary.reportable:
+        return f"n={summary.n}(件数不足)"
+    if summary.win_rate is None:
+        return f"n={summary.n}(全て横ばい)"
     names = "" if summary.n_independent == summary.n else f", {summary.n_independent}社"
-    return (
-        f"{summary.win_rate * 100:.0f}% / {summary.median * 100:+.1f}% / "
-        f"{summary.mean * 100:+.1f}% (n={summary.n}{names})"
-    )
+    return _cell(summary, names)
 
 
 def _anchored(rows, predicate, entry, exit_):
@@ -89,7 +152,7 @@ def _anchored(rows, predicate, entry, exit_):
     return _avg(values, lambda _row: True, "v")
 
 
-def render_dashboard(rows, updated_at: str, *, statistics_rows=None):
+def render_dashboard(rows, updated_at: str, *, statistics_rows=None, aggregation=None):
     """Render the dashboard, listing every record but counting only some.
 
     Listing a reserved record and computing a statistic from it are different
@@ -116,11 +179,16 @@ def render_dashboard(rows, updated_at: str, *, statistics_rows=None):
             d1=pctf(row.get("ret_d1")), d5=pctf(row.get("ret_d5")), d20=pctf(row.get("ret_d20")),
             rx=row.get("reaction", "") or "記録中"))
     lines += ["", "## 仮説検証", "",
+              findings_line(aggregation if aggregation is not None else build_aggregation(rows, [], "")),
+              "",
               statistics_scope(rows, counted),
               "",
-              "各セルは **勝率 / 中央値 / 平均 (n)**。平均だけでは、1銘柄の大幅高が群を",
-              "持ち上げている場合と、群全体が揃って動いた場合を区別できない。",
-              f"`n={MIN_REPORTABLE}(少)` はその件数しかなく数字を出さないという意味、",
+              "各セルは **勝率 [95%区間] / 中央値 / 平均 (n)**。平均だけでは、1銘柄の",
+              "大幅高が群を持ち上げている場合と、群全体が揃って動いた場合を区別できない。",
+              "区間の幅がそのまま、この件数で言えることの狭さ。",
+              "**†** は平均と中央値が食い違う群、つまり平均を担っているのが群全体ではなく",
+              "両端の少数という印。`n=N(件数不足)` は5件未満で数字を出さない、",
+              "`n=N(全て横ばい)` は全件が値動きゼロで勝率が定義できない、",
               "`-` は該当する観測が1件も無いという意味。同一銘柄が複数回現れる群では",
               "件数のうしろに社数を添える。",
               "",
@@ -226,9 +294,16 @@ def render_note(rows, as_of: date, *, statistics_rows=None):
     week = sorted((row for row in rows if str(since) <= row.get("date", "") <= str(as_of)), key=lambda item: (item.get("rank", "z"), item.get("date", "")))
     insights = []
     for narrative in NARRATIVES:
-        figures = _avg(counted, lambda row, narrative=narrative: row.get("narrative") == narrative, "ret_d1")
+        # The narrative is read off the disclosure, after the close ret_d1 is
+        # measured from, so the JSON summary withholds this pairing. The note
+        # was publishing it anyway — inside the block the reader is told to
+        # copy — because the anchor was corrected in the dashboard and here.
+        figures = _anchored(
+            counted, lambda row, narrative=narrative: row.get("narrative") == narrative,
+            "next_open", "next_close",
+        )
         if figures != "-":
-            insights.append(f"ナラティブ「{narrative}」の翌日リターン 勝率/中央値/平均: {figures}")
+            insights.append(f"ナラティブ「{narrative}」の寄り付きから翌日終値 勝率/中央値/平均: {figures}")
     for reaction in ("GD反発", "GD継続", "GU継続", "GU失速"):
         # These cohorts are split on the first day's own move, so a return that
         # starts before that close contains the split. Reading from the close
@@ -309,7 +384,9 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
     # qualifies. Injected here it landed above the line the note tells the
     # reader to copy from, so the published article carried the numbers and
     # left their scope behind.
-    dashboard = render_dashboard(final_rows, f"{as_of} 00:00", statistics_rows=explored)
+    dashboard = render_dashboard(
+        final_rows, f"{as_of} 00:00", statistics_rows=explored, aggregation=aggregation
+    )
     dashboard = dashboard.replace("\n\n", f"\n\n{provenance}\n\n{context_line}\n\n", 1)
     weekly = render_weekly(final_rows, as_of).replace("\n\n", f"\n\n{provenance}\n\n", 1)
     note = render_note(final_rows, as_of, statistics_rows=explored).replace(

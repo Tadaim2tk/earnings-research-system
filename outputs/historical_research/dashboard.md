@@ -1,5 +1,19 @@
 # 決算研究OS ダッシュボード
 
+> **⚠ この成果物は v1 で、現在のコードの結論とは異なります。**
+>
+> 生成時点では (a) 留保期間を分けておらず254件全部を集計し、(b) リターンを前日終値
+> 起点で測り、(c) 多重比較補正をかけていませんでした。とくに下の「初動分類別」は、
+> 分類に使ったギャップ自体を成果として数え直したものです。同じ254件を、約定できる
+> 最初の価格である寄り付き起点で測ると **GU +5.8% → -0.4%、GD -5.3% → +0.5%** と
+> 符号が反転します。
+>
+> 現在のコードは探索165件・827比較をBenjamini-Hochbergで補正し、**統計的に主張
+> できる項目は0件**と結論します。以下の数字は当時の記録であって、所見ではありません。
+>
+> 再生成は `migrate-legacy-os` が PR #53 の decision_cutoff 検証に阻まれるため
+> 現在できません（ERS-ADR-0045 の未対応事項）。
+
 dataset_origin: earnings-research-os / record_mode: legacy_observational / source_commit: a738d2ded66e790fba5d155b5f50a50df7a81dc6 / TSO context: 254/254
 
 TSO point-in-time context: 254/254件 / 平均risk-on 50.35 / 平均risk-off 49.70

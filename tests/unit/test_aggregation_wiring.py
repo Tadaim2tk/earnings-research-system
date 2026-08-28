@@ -468,7 +468,10 @@ def _dashboard(rows=None):
 
 def test_every_published_cell_carries_the_win_rate_and_the_middle():
     """Printing the mean alone is the defect this whole change exists to fix,
-    and reverting the renderer to it passed the entire suite."""
+    and reverting the renderer to it passed the entire suite. The interval is
+    part of the cell now: forty-nine published figures each had an exact one
+    computed and thrown away, so a cohort of eleven read as precisely as a
+    cohort of eighty."""
     import re
 
     body = _statistics_section(_dashboard())
@@ -481,14 +484,16 @@ def test_every_published_cell_carries_the_win_rate_and_the_middle():
     figures = [cell for cell in cells if "%" in cell]
     assert figures, "the fixture produced no numbers at all"
     for cell in figures:
-        assert re.fullmatch(r"\d+% / [+-]\d+\.\d% / [+-]\d+\.\d% \(n=\d+(, \d+社)?\)", cell), cell
+        assert re.fullmatch(
+            r"\d+% \[\d+〜\d+%\] / [+-]\d+\.\d% / [+-]\d+\.\d% \(n=\d+(, \d+社)?\)†?", cell
+        ), cell
 
 
 def test_a_handful_of_records_prints_its_size_instead_of_a_number():
     rows = [row for row in _varied_rows() if row["rank"] != "C"][:20]
     rows += [dict(row, rank="C") for row in _varied_rows()[:2]]
     body = _statistics_section(_dashboard(rows))
-    assert "(少)" in body
+    assert "(件数不足)" in body
 
 
 def test_the_published_tables_are_anchored_at_prices_a_trade_could_have_used():
@@ -533,3 +538,54 @@ def test_the_base_rate_never_reads_the_reserved_period():
         row["open_d5"] = 5.0
     after = _Population(split.exploration).rate_excluding([], "open_d5", 0.10)
     assert before == after
+
+
+def test_the_dashboard_says_what_survived_the_correction():
+    """The sentence this whole change exists to produce, in the place people
+    read. The words for correction, p-value, interval and verdict occurred zero
+    times across all three published files, so every table heading phrased as a
+    question read as though the figures beneath it were the answer."""
+    body = _statistics_section(_dashboard(_varied_rows(80)))
+    first = body.splitlines()[2]
+    assert "Benjamini-Hochberg" in first
+    assert "件の比較" in first
+    assert "0件" in first or "残った" in first
+
+
+def test_a_tail_driven_cohort_is_marked_where_it_is_published():
+    """Twenty-seven of the forty-nine published cells had a mean and a middle
+    pointing opposite ways and said nothing about it."""
+    from earnings_research.legacy_research.publishing import _avg
+
+    rows = [{"code": "%04d" % index, "v": 0.0001} for index in range(20)]
+    rows[0]["v"] = 5.0
+    assert _avg(rows, lambda _row: True, "v").endswith("†")
+    assert not _avg([dict(row, v=0.01) for row in rows], lambda _row: True, "v").endswith("†")
+
+
+def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
+    """The narrative insight was measured from the previous close — the anchor
+    the JSON withholds for that cohort — inside the block the reader is told to
+    copy and publish."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import _anchored, _avg, render_note
+    from earnings_research.statistics.holdout import split_by_date
+    from earnings_research.statistics.lookahead import contamination
+
+    assert contamination("narrative", "ret_d1") is not None
+    rows = [_open_anchored(row) for row in _varied_rows(60)]
+    text = render_note(rows, date(2026, 9, 1), statistics_rows=split_by_date(rows).exploration)
+    published = text[text.index("本文ここから"):]
+    insights = [line for line in published.splitlines() if line.startswith("・ナラティブ")]
+    assert insights
+    # The figure itself, not the label beside it: relabelling without changing
+    # the anchor would leave the withheld number published under an honest
+    # heading.
+    explored = split_by_date(rows).exploration
+    for line in insights:
+        label = line.split("「")[1].split("」")[0]
+        match = lambda row, label=label: row.get("narrative") == label
+        sound = _anchored(explored, match, "next_open", "next_close")
+        stale = _avg(explored, match, "ret_d1")
+        assert sound != stale, label
+        assert line.endswith(sound), (line, sound)

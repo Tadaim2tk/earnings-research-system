@@ -1,4 +1,5 @@
 {
+  "superseded_note": "v1: 留保期間の分割なし・前日終値起点・多重比較補正なし。現在のコードは legacy_aggregation_summary_v2 を出力し、探索165件で主張は0件になる。ERS-ADR-0045参照。",
   "by_narrative": {
     "—": {
       "gap": {

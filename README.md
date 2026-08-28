@@ -85,7 +85,7 @@ Approved, normalized price observations can be processed through `track-market-r
 
 The retired `earnings-research-os` dataset is stored under `data/historical_research/earnings_research_os/v1`. Its exact source CSV, source reports, TSO historical context inputs, normalized records, per-field Git history, and joined context view remain explicitly `legacy_observational`; they never become prospective baselines or formal evidence.
 
-Reproducible research views are under `outputs/historical_research`: dashboard, weekly report, note draft, publishing parity, and aggregation summary. The old daily AI selection and yfinance enrichment are not part of ERS.
+`outputs/historical_research` holds the migration's committed views: dashboard, weekly report, note draft, publishing parity, and aggregation summary. **They are v1 and predate the statistical guards** — no reserved period, returns measured from the previous close, no multiplicity correction — so their figures record what the retired system published rather than findings, and the gap cohorts in them reverse sign once measured from a tradeable price. Each file says so at the top. The current pipeline reaches no claim that survives correction; see ERS-ADR-0045. The old daily AI selection and yfinance enrichment are not part of ERS.
 
 The migration can be reproduced from fixed commits with:
 
