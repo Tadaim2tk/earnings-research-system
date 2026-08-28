@@ -1126,52 +1126,59 @@ def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set():
     assert population.rate_excluding(biggest, "open_d5", 0.10) != whole
 
 
-def _statistics_headings(body):
-    """Every heading in the section that introduces a table of published figures.
+def _figure_tables(text):
+    """Every block of published figures in the report, with the heading over it.
 
-    Matching on `###` was the same defect one level up: the docstring said it
-    compared the declaration against what the renderer emits, and a table added
-    under `##` — a level the dashboard already uses — went unseen. A heading is
-    found by the shape of what follows it, not by how deep it is, and a table
-    counts when it carries the published figure format, which keeps the
-    manual-review count table out of it.
+    Three keys have been locked in turn, each on something a new table need not
+    satisfy: first the heading depth, then the presence of a heading at all,
+    then sitting below `## 仮説検証`. A table is found here by carrying the
+    published figure format, wherever in the document it appears; a block with
+    no heading of its own comes back under None, which the caller refuses.
     """
     import re
 
     figure = re.compile(r"\d+% \[\d+〜\d+%\]")
     heading = None
-    found = set()
-    for line in body.splitlines():
+    in_table = False
+    found = []
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
-            heading = stripped.lstrip("#").strip()
-        elif stripped.startswith("|") and heading and figure.search(stripped):
-            found.add(heading)
-    return found
+            heading, in_table = stripped.lstrip("#").strip(), False
+        elif stripped.startswith("|"):
+            in_table = True
+            if figure.search(stripped) and (heading, True) not in found:
+                found.append((heading, True))
+        elif in_table:
+            # The block ended. A second table under the same heading is a
+            # different table, and gets no heading of its own.
+            in_table, heading = False, None
+    return [name for name, _ in found]
 
 
 def test_every_table_the_dashboard_prints_is_covered_by_the_anchor_check():
     """The declaration above is still a list a person maintains.
 
     Adding a table to the renderer and not to it would leave the new table
-    unchecked in exactly the way hand-listing eight of twelve columns did. This
-    compares the declaration against every heading the dashboard puts a table
-    of figures under, at any heading level.
+    unchecked in exactly the way hand-listing eight of twelve columns did. The
+    whole document is scanned, at any heading level, and a block of figures
+    with no heading of its own is refused outright.
     """
-    printed = _statistics_headings(_statistics_section(_dashboard(_varied_rows(60))))
+    printed = _figure_tables(_dashboard(_varied_rows(60)))
+    assert None not in printed, "a table of figures with no heading of its own"
     declared = set()
     for heading, _column, _prices in PUBLISHED_TABLES:
         bare = heading.lstrip("#").strip()
-        matches = [name for name in printed if name.startswith(bare)]
-        assert len(matches) == 1, (heading, sorted(printed))
+        matches = [name for name in printed if name and name.startswith(bare)]
+        assert len(matches) == 1, (heading, sorted(name for name in printed if name))
         declared.add(matches[0])
-    assert printed == declared, sorted(printed - declared)
+    assert set(printed) == declared, sorted(set(printed) - declared)
 
 
 def test_every_declared_column_count_matches_the_table_it_describes():
     """A column added to a table without a price pair beside it would be
     skipped by the walk above, which only zips as far as the shorter list."""
-    body = _statistics_section(_dashboard(_varied_rows(60)))
+    body = _dashboard(_varied_rows(60))
     for heading, _column, prices in PUBLISHED_TABLES:
         header = next(
             line for line in body[body.index(heading):].splitlines() if line.startswith("| ")
