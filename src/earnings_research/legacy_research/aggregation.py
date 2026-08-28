@@ -9,7 +9,9 @@ from earnings_research.statistics.cohort import (
     summarise,
     tail_capture,
 )
+from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import contamination
+from earnings_research.statistics.stability import assess as assess_stability
 
 # Returns from the previous close, and the same horizons from the opening
 # price. The opening price is the first one anyone can transact at, so it is
@@ -28,6 +30,9 @@ TAIL_THRESHOLDS = (0.10, 0.20)
 # A per-ticker breakdown answers "what did this company do", not "does this
 # predict". It carries no test.
 DESCRIPTIVE_VIEW = "by_ticker"
+
+# Carries a row's market context through the split so the two cannot drift apart.
+_CONTEXT = "__context__"
 
 
 def _number(value):
@@ -64,6 +69,11 @@ def _metrics(rows, cohort_key=None, base_rates=None):
                 ).as_dict()
                 for threshold in TAIL_THRESHOLDS
             ],
+            "stability": assess_stability(
+                rows,
+                lambda row, field=field: _number(row.get(field)),
+                cluster_of=lambda row: row.get("code"),
+            ).as_dict(),
         }
     return result
 
@@ -197,13 +207,25 @@ def _reason_groups(rows, base_rates=None):
 
 
 def build_aggregation(rows, context_views, source_commit):
-    rows = [_open_anchored(row) for row in rows]
+    # The most recent third is reserved. Nothing below sees it, so a cohort
+    # cannot be shaped against the period it will later be judged on.
+    #
+    # Each row travels with its context view through the split. They are matched
+    # by position, so filtering one without the other silently pairs a record
+    # with someone else's market context.
+    paired = [
+        {**_open_anchored(row), _CONTEXT: view}
+        for row, view in zip(rows, list(context_views) + [None] * len(rows))
+    ]
+    split = split_by_date(paired)
+    rows = [{key: value for key, value in row.items() if key != _CONTEXT} for row in split.exploration]
+    explored_context = [row[_CONTEXT] for row in split.exploration if row.get(_CONTEXT)]
     rates = _base_rates(rows)
-    context_by_id = {item["legacy_record_id"]: item for item in context_views}
+    context_by_id = {item["legacy_record_id"]: item for item in explored_context}
     context_groups = defaultdict(list)
     risk_on_scores = []
     risk_off_scores = []
-    for record, row in zip(context_views, rows):
+    for record, row in zip(explored_context, rows):
         context = record["market_context"]
         risk_on = _number(context.get("risk_on_score"))
         risk_off = _number(context.get("risk_off_score"))
@@ -226,6 +248,8 @@ def build_aggregation(rows, context_views, source_commit):
         "record_mode": "legacy_observational",
         "source_commit": source_commit,
         "record_count": len(rows),
+        "record_count_including_reserved": len(rows) + len(split.reserved),
+        "context_linked_count": len(explored_context),
         "overall": _metrics(rows, base_rates=rates),
         "by_ticker": _group(rows, "code", rates),
         "by_shodo": _group(rows, "shodo", rates),
@@ -243,6 +267,7 @@ def build_aggregation(rows, context_views, source_commit):
             },
             "classification_note": "Relative dominance compares the two stored TSO scores only; it is not a TSO regime or trading signal.",
         },
+        "holdout": split.as_dict(),
         "prospective_records_included": 0,
         "trade_decisions_generated": 0,
         "reading_note": (

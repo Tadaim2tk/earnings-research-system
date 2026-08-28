@@ -213,3 +213,75 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     result = json.loads(summary.read_text(encoding="utf-8"))
     assert len(result["hypotheses"]) == 19
     assert result["automatic_weight_change"] is False
+
+
+# --- 打ち切り基準 -------------------------------------------------------------
+
+def test_a_stop_rule_may_be_tightened_but_never_relaxed():
+    """Otherwise a hypothesis is never wrong, only awaiting one more condition."""
+    from earnings_research.prospective_hypotheses.models import StopRule
+
+    frozen = StopRule()
+    assert StopRule(maximum_revisions=1).at_least_as_strict_as(frozen)
+    assert StopRule(stop_below_reserved_effect_ratio=0.8).at_least_as_strict_as(frozen)
+    assert not StopRule(maximum_revisions=99).at_least_as_strict_as(frozen)
+    assert not StopRule(stop_below_reserved_effect_ratio=0.1).at_least_as_strict_as(frozen)
+    assert not StopRule(stop_when_halves_reverse=False).at_least_as_strict_as(frozen)
+
+
+def stopping_definition(**changes):
+    from earnings_research.prospective_hypotheses.models import StopRule
+
+    class _Rule:
+        stop_rule = StopRule(**changes)
+
+    class _Definition:
+        assessment_rule = _Rule()
+
+    return _Definition()
+
+
+def test_a_reversal_between_halves_ends_the_hypothesis():
+    from earnings_research.prospective_hypotheses.evaluator import should_stop
+
+    assert should_stop(stopping_definition(), halves_reversed=True) is not None
+    assert should_stop(stopping_definition(), halves_reversed=False) is None
+
+
+def test_a_hypothesis_may_declare_that_reversal_is_expected():
+    """A model that adapts across regimes is allowed to say so in advance."""
+    from earnings_research.prospective_hypotheses.evaluator import should_stop
+
+    definition = stopping_definition(stop_when_halves_reverse=False)
+    assert should_stop(definition, halves_reversed=True) is None
+
+
+def test_falling_short_on_the_reserved_period_ends_it():
+    from earnings_research.prospective_hypotheses.evaluator import should_stop
+
+    assert should_stop(stopping_definition(), reserved_effect_ratio=0.2) is not None
+    assert should_stop(stopping_definition(), reserved_effect_ratio=0.9) is None
+
+
+def test_patching_a_hypothesis_indefinitely_ends_it():
+    from earnings_research.prospective_hypotheses.evaluator import should_stop
+
+    assert should_stop(stopping_definition(), revisions=3) is not None
+    assert should_stop(stopping_definition(), revisions=2) is None
+
+
+def test_a_registry_frozen_before_stop_rules_keeps_its_hash():
+    """A frozen definition is not rewritten to carry a field it never had."""
+    from earnings_research.prospective_hypotheses.evaluator import canonical_hash
+    from earnings_research.prospective_hypotheses.models import AssessmentRule, StopRule
+
+    plain = AssessmentRule(
+        comparison_basis="target_vs_all_eligible_events",
+        minimum_target_trials=1,
+        minimum_comparator_trials=1,
+        retained_effect_ratio=0.5,
+        no_material_mean_delta=0.01,
+        no_material_positive_rate_delta=0.01,
+    )
+    with_rule = plain.model_copy(update={"stop_rule": StopRule()})
+    assert canonical_hash(plain) == canonical_hash(with_rule)

@@ -32,6 +32,34 @@ class HistoricalEffect(BaseModel):
     positive_rate_delta_vs_overall: float
 
 
+class StopRule(BaseModel):
+    """When to abandon the hypothesis, decided before any result is seen.
+
+    Without this, a hypothesis is never wrong — it is only ever awaiting more
+    data or one more condition. The conditions are frozen with the definition
+    precisely because they are easy to relax once the numbers are in, and a
+    later version may only tighten them.
+    """
+
+    # A relationship present in one half of the record and reversed in the
+    # other is what decay and luck both look like.
+    stop_when_halves_reverse: bool = True
+    # Below this share of the frozen historical effect, on data reserved before
+    # the definition existed, the hypothesis is finished rather than weakened.
+    stop_below_reserved_effect_ratio: float = Field(gt=0, le=1, default=0.5)
+    # Revisions are how a dead hypothesis stays alive. After this many the
+    # question has to be asked again from scratch, not patched.
+    maximum_revisions: int = Field(ge=0, default=2)
+
+    def at_least_as_strict_as(self, earlier: "StopRule") -> bool:
+        """A later version may tighten these, never loosen them."""
+        return (
+            (self.stop_when_halves_reverse or not earlier.stop_when_halves_reverse)
+            and self.stop_below_reserved_effect_ratio >= earlier.stop_below_reserved_effect_ratio
+            and self.maximum_revisions <= earlier.maximum_revisions
+        )
+
+
 class AssessmentRule(BaseModel):
     comparison_basis: Literal["target_vs_all_eligible_events"]
     minimum_target_trials: int = Field(ge=1)
@@ -39,6 +67,10 @@ class AssessmentRule(BaseModel):
     retained_effect_ratio: float = Field(gt=0, le=1)
     no_material_mean_delta: float = Field(ge=0)
     no_material_positive_rate_delta: float = Field(ge=0)
+    # Optional so that registries frozen before stop rules existed keep their
+    # hash. A frozen definition is not rewritten to carry a field it never had;
+    # the conditions attach to the next version instead.
+    stop_rule: Optional[StopRule] = Field(default=None, exclude=True)
 
 
 class HypothesisDefinition(BaseModel):

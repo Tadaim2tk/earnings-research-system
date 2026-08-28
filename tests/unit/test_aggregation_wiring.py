@@ -123,8 +123,24 @@ def test_nothing_in_the_reason_codes_survives_correction(summary):
 
 def test_the_tail_capture_of_a_reason_code_matches_the_records(summary):
     capture = summary["by_reason_code"]["margin_pressure"]["open_d5"]["tail_capture"][0]
-    assert (capture["hits"], capture["n"]) == (5, 34)
-    assert capture["lift"] > 2.9
-    assert capture["p_value"] < 0.05
+    # Measured on the exploration set only; the reserved third is not in view.
+    assert (capture["hits"], capture["n"]) == (4, 26)
+    assert capture["lift"] > 2.5
     assert capture["p_value_adjusted"] == 1.0
     assert capture["distinguishable"] is False
+
+
+def test_the_reserved_period_is_declared_but_not_summarised(summary):
+    holdout = summary["holdout"]
+    assert holdout["reserved_count"] > 0
+    assert holdout["reserved_statistics"] == "not_computed"
+    assert summary["record_count"] + holdout["reserved_count"] == summary[
+        "record_count_including_reserved"
+    ]
+
+
+def test_a_cohort_that_reverses_between_halves_is_named(summary):
+    """margin_pressure looked promising until the halves were separated."""
+    stability = summary["by_reason_code"]["margin_pressure"]["open_d5"]["stability"]
+    assert stability["verdict"] == "reversed"
+    assert stability["first_half"]["median"] > 0 > stability["second_half"]["median"]

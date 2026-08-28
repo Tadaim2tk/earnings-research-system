@@ -202,9 +202,13 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
     provenance = f"dataset_origin: earnings-research-os / record_mode: legacy_observational / source_commit: {source_commit} / TSO context: {coverage}/{len(context_views)}"
     aggregation = build_aggregation(final_rows, context_views, source_commit)
     context = aggregation["market_context"]
+    def _score(name):
+        value = context.get(name)
+        return "-" if value is None else f"{value:.2f}"
+
     context_line = (
         f"TSO point-in-time context: {context['linked_count']}/{len(final_rows)}件 / "
-        f"平均risk-on {context['mean_risk_on_score']:.2f} / 平均risk-off {context['mean_risk_off_score']:.2f}"
+        f"平均risk-on {_score('mean_risk_on_score')} / 平均risk-off {_score('mean_risk_off_score')}"
     )
     dashboard = render_dashboard(final_rows, f"{as_of} 00:00")
     dashboard = dashboard.replace("\n\n", f"\n\n{provenance}\n\n{context_line}\n\n", 1)

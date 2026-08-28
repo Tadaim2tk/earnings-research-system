@@ -97,6 +97,31 @@ def _rounded(value):
     return None if value is None else round(value, 8)
 
 
+def should_stop(definition, *, halves_reversed=None, reserved_effect_ratio=None, revisions=None):
+    """Return why this hypothesis is finished, or None to keep it open.
+
+    Every condition was fixed when the definition was frozen. Reaching one is
+    not a setback to be worked around; it is the answer.
+    """
+    rule = definition.assessment_rule.stop_rule
+    if rule.stop_when_halves_reverse and halves_reversed:
+        return "the effect reversed between the two halves of the record"
+    if (
+        reserved_effect_ratio is not None
+        and reserved_effect_ratio < rule.stop_below_reserved_effect_ratio
+    ):
+        return (
+            "the reserved period retained %.2f of the frozen effect, below the %.2f required"
+            % (reserved_effect_ratio, rule.stop_below_reserved_effect_ratio)
+        )
+    if revisions is not None and revisions > rule.maximum_revisions:
+        return (
+            "revised %d times against a limit of %d; the question needs asking again, not patching"
+            % (revisions, rule.maximum_revisions)
+        )
+    return None
+
+
 def _status(definition, target, comparator):
     if not target and not comparator:
         return "active", "prospective observation is not recorded yet"
