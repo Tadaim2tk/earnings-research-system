@@ -1126,19 +1126,43 @@ def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set():
     assert population.rate_excluding(biggest, "open_d5", 0.10) != whole
 
 
+def _statistics_headings(body):
+    """Every heading in the section that introduces a table of published figures.
+
+    Matching on `###` was the same defect one level up: the docstring said it
+    compared the declaration against what the renderer emits, and a table added
+    under `##` — a level the dashboard already uses — went unseen. A heading is
+    found by the shape of what follows it, not by how deep it is, and a table
+    counts when it carries the published figure format, which keeps the
+    manual-review count table out of it.
+    """
+    import re
+
+    figure = re.compile(r"\d+% \[\d+〜\d+%\]")
+    heading = None
+    found = set()
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+        elif stripped.startswith("|") and heading and figure.search(stripped):
+            found.add(heading)
+    return found
+
+
 def test_every_table_the_dashboard_prints_is_covered_by_the_anchor_check():
     """The declaration above is still a list a person maintains.
 
     Adding a table to the renderer and not to it would leave the new table
     unchecked in exactly the way hand-listing eight of twelve columns did. This
-    compares the declaration against what the renderer actually emits, so the
-    omission fails rather than passing quietly.
+    compares the declaration against every heading the dashboard puts a table
+    of figures under, at any heading level.
     """
-    body = _statistics_section(_dashboard(_varied_rows(60)))
-    printed = {line.split("(")[0].strip() for line in body.splitlines() if line.startswith("###")}
+    printed = _statistics_headings(_statistics_section(_dashboard(_varied_rows(60))))
     declared = set()
     for heading, _column, _prices in PUBLISHED_TABLES:
-        matches = [name for name in printed if name.startswith(heading)]
+        bare = heading.lstrip("#").strip()
+        matches = [name for name in printed if name.startswith(bare)]
         assert len(matches) == 1, (heading, sorted(printed))
         declared.add(matches[0])
     assert printed == declared, sorted(printed - declared)
