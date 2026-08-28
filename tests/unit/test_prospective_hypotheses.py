@@ -49,7 +49,12 @@ def usable_registry(tmp_path):
     What these tests need is the recording path, and what the recording path
     asks for is a ledger that clears the hypothesis.
     """
-    from earnings_research.prospective_hypotheses.source_validity import VALID, Verdict, append_ledger
+    from earnings_research.prospective_hypotheses.source_validity import (
+        VALID,
+        Verdict,
+        append_ledger,
+        source_fields_digest,
+    )
     from earnings_research.statistics.lookahead import rules_digest
 
     base = registry()
@@ -70,6 +75,7 @@ def usable_registry(tmp_path):
             dimension=item.dimension, evaluation_horizon=item.evaluation_horizon,
             source_field="open_d5", verdict=VALID, reason=None,
             contamination_rules_sha256=rules_digest(),
+            source_fields_sha256=source_fields_digest(),
             evaluated_at="2026-09-01T00:00:00+09:00",
         )
         for item in keep

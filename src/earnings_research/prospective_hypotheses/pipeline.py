@@ -119,13 +119,13 @@ def evaluate_source_validity_file(registry_path: Path, ledger_path: Path, evalua
 
 
 def verify_source_validity_file(registry_path: Path, ledger_path: Path):
-    """Refuse a registry that has not been judged under the current rules.
+    """Refuse a registry that has not been judged under the current standard.
 
-    Two failures, and they are different. A hypothesis with no verdict under
-    the current digest means the rules moved and nobody looked again — the
-    exact situation where knowledge frozen earlier silently stops being
-    supportable. A hypothesis judged invalid and still gathering evidence means
-    somebody looked and carried on anyway.
+    One check, not two. No verdict under the current digests means the rules
+    moved and nobody looked again — the situation where knowledge frozen
+    earlier silently stops being supportable. Whether an invalid hypothesis is
+    still gathering evidence is a question about trials, which this call has no
+    argument for and cannot see; the trial commands refuse that themselves.
     """
     registry = HypothesisRegistry.model_validate_json(
         Path(registry_path).read_text(encoding="utf-8")

@@ -23,8 +23,10 @@ through whose labels were afterwards measured to depend on data from seventy
 days after the event they describe.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -53,6 +55,7 @@ class Verdict:
     verdict: str
     reason: Optional[str]
     contamination_rules_sha256: str
+    source_fields_sha256: str
     evaluated_at: str
 
     def as_dict(self) -> Dict[str, object]:
@@ -68,8 +71,29 @@ class Verdict:
             "verdict": self.verdict,
             "reason": self.reason,
             "contamination_rules_sha256": self.contamination_rules_sha256,
+            "source_fields_sha256": self.source_fields_sha256,
             "evaluated_at": self.evaluated_at,
         }
+
+
+def source_fields_digest() -> str:
+    """SHA-256 of the horizon-to-return mapping the judgement reads.
+
+    It decides which pairing is judged, so it belongs to the standard as much
+    as the contamination rules do. Left outside, changing d5 from ret_d5 to
+    open_d5 moved four of nineteen verdicts while the rules digest sat still,
+    and the re-scan the capability exists to trigger never fired.
+    """
+    return hashlib.sha256(
+        json.dumps(dict(sorted(HORIZONS.items())), sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _standard() -> tuple:
+    """The pair of digests a verdict is recorded against."""
+    return rules_digest(), source_fields_digest()
 
 
 def source_field_for(evaluation_horizon: str) -> str:
@@ -87,7 +111,7 @@ def source_field_for(evaluation_horizon: str) -> str:
 
 def judge(registry, evaluated_at: str) -> List[Verdict]:
     """Judge every hypothesis in a registry under the rules as they stand."""
-    digest = rules_digest()
+    digest, fields_digest = _standard()
     verdicts = []
     for item in registry.hypotheses:
         field = source_field_for(item.evaluation_horizon)
@@ -114,6 +138,7 @@ def judge(registry, evaluated_at: str) -> List[Verdict]:
                 verdict=outcome,
                 reason=reason,
                 contamination_rules_sha256=digest,
+                source_fields_sha256=fields_digest,
                 evaluated_at=evaluated_at,
             )
         )
@@ -152,20 +177,32 @@ def append_ledger(path: Path, verdicts: Sequence[Verdict]) -> int:
 def effective_status(ledger: Sequence[dict], digest: Optional[str] = None) -> Dict[tuple, dict]:
     """What each hypothesis stands at now, derived rather than written down.
 
-    The latest judgement under the current rules, keyed by hypothesis and
-    version. Deriving it means an invalidation cannot be recorded and then
+    The latest judgement under the standard as it stands, keyed by hypothesis
+    and version. Deriving it means an invalidation cannot be recorded and then
     forgotten to be acted on: there is no second place to update.
+
+    Times are parsed before they are compared. Compared as strings, a verdict
+    stamped +00:00 loses to an earlier one stamped +09:00, and the ledger would
+    report the superseded answer. Where two judgements carry the same instant,
+    the later line wins, because that is the order they were appended in.
     """
-    digest = digest or rules_digest()
+    rules, fields = _standard()
+    rules = digest or rules
     latest: Dict[tuple, dict] = {}
     for row in ledger:
-        if row.get("contamination_rules_sha256") != digest:
+        if row.get("contamination_rules_sha256") != rules:
+            continue
+        if row.get("source_fields_sha256") != fields:
             continue
         key = (row["hypothesis_id"], row["hypothesis_version"])
         current = latest.get(key)
-        if current is None or row["evaluated_at"] >= current["evaluated_at"]:
+        if current is None or _moment(row) >= _moment(current):
             latest[key] = row
     return latest
+
+
+def _moment(row: dict) -> datetime:
+    return datetime.fromisoformat(row["evaluated_at"])
 
 
 def unevaluated(registry, ledger: Sequence[dict], digest: Optional[str] = None) -> List[tuple]:
@@ -207,16 +244,35 @@ def rates(registry, ledger: Sequence[dict], digest: Optional[str] = None) -> Dic
     judged = [status[key] for key in frozen if key in status]
     invalid = sum(1 for row in judged if row["verdict"] == INVALID)
     undeclared = sum(1 for row in judged if row["verdict"] == UNDECLARED)
+    # Built from the ledger rather than from the status map above, which is
+    # keyed on the hypothesis alone: two freezes carrying the same definition
+    # collapse there, and one of the buckets disappears — the case the
+    # per-freeze rate exists to show.
+    rules, fields = _standard()
+    rules = digest or rules
+    per_freeze: Dict[tuple, dict] = {}
+    for row in ledger:
+        if row.get("contamination_rules_sha256") != rules:
+            continue
+        if row.get("source_fields_sha256") != fields:
+            continue
+        key = (
+            row["registry_id"], row["registry_version"],
+            row["hypothesis_id"], row["hypothesis_version"],
+        )
+        current = per_freeze.get(key)
+        if current is None or _moment(row) >= _moment(current):
+            per_freeze[key] = row
     by_registry: Dict[str, Dict[str, int]] = {}
-    for row in status.values():
+    for (registry_id, registry_version, _id, _version), row in per_freeze.items():
         bucket = by_registry.setdefault(
-            "%s@v%d" % (row["registry_id"], row["registry_version"]),
-            {"frozen": 0, "invalid": 0},
+            "%s@v%d" % (registry_id, registry_version), {"frozen": 0, "invalid": 0}
         )
         bucket["frozen"] += 1
         bucket["invalid"] += row["verdict"] == INVALID
     return {
         "contamination_rules_sha256": digest or rules_digest(),
+        "source_fields_sha256": source_fields_digest(),
         "frozen_count": len(frozen),
         "judged_count": len(judged),
         "invalid_count": invalid,

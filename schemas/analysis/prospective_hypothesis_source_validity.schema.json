@@ -23,16 +23,31 @@
       "const": "prospective_hypothesis_source_validity_v1",
       "type": "string"
     },
-    "hypothesis_id": {"type": "string", "minLength": 1},
-    "hypothesis_version": {"type": "integer", "minimum": 1},
-    "registry_id": {"type": "string", "minLength": 1},
-    "registry_version": {"type": "integer", "minimum": 1},
+    "hypothesis_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hypothesis_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "registry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "registry_version": {
+      "type": "integer",
+      "minimum": 1
+    },
     "dimension": {
       "description": "The cohort the hypothesis splits on.",
       "type": "string",
       "minLength": 1
     },
-    "evaluation_horizon": {"type": "string", "minLength": 1},
+    "evaluation_horizon": {
+      "type": "string",
+      "minLength": 1
+    },
     "source_field": {
       "description": "The return the historical analysis measured this horizon with. The judgement is about that pairing, not about how the hypothesis would be evaluated prospectively.",
       "type": "string",
@@ -40,18 +55,33 @@
     },
     "verdict": {
       "description": "invalid: the rules name this pairing as unsound. valid: the rules cover the cohort and the pairing holds. undeclared: the rules have nothing to say about this cohort, so it was passed by default rather than checked — a gap in the rules, not a finding about the hypothesis.",
-      "enum": ["valid", "invalid", "undeclared"],
+      "enum": [
+        "valid",
+        "invalid",
+        "undeclared"
+      ],
       "type": "string"
     },
     "reason": {
       "description": "Why, in the rules' own words. Null only where there is nothing to say.",
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "contamination_rules_sha256": {
       "description": "The version of the rules that produced this verdict. Without it, `invalid` cannot be told apart from `invalid under a rule that did not exist yet`.",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "evaluated_at": {"type": "string", "minLength": 1}
+    "evaluated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_fields_sha256": {
+      "description": "The version of the horizon-to-return mapping the judgement read. It decides which pairing is judged, so it belongs to the standard as much as the rules do. Optional because rows written before this field existed do not carry it; such a row is stale under any current standard, which is correct — it was recorded when the mapping was not part of the record.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
   }
 }

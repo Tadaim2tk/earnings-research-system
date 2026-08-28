@@ -29,6 +29,7 @@ from earnings_research.prospective_hypotheses.source_validity import (
     rates,
     read_ledger,
     source_field_for,
+    source_fields_digest,
     unevaluated,
 )
 from earnings_research.statistics import lookahead
@@ -181,6 +182,7 @@ def test_only_knowledge_the_rules_affirmatively_clear_may_gather_evidence(verdic
         "hypothesis_id": "LRH-X", "hypothesis_version": 1, "verdict": verdict,
         "evaluated_at": "2026-09-01T00:00:00+09:00",
         "contamination_rules_sha256": lookahead.rules_digest(),
+        "source_fields_sha256": source_fields_digest(),
     }
     assert is_usable("LRH-X", 1, [row]) is usable
 
@@ -235,3 +237,157 @@ def test_the_committed_ledger_is_judged_under_the_rules_as_they_stand():
     """The check CI runs, stated here so a rule added without re-running the
     command fails the suite as well."""
     assert verify_source_validity_file(REGISTRY, LEDGER)["status"] == "judged"
+
+
+# --- 実装監査が「生存した」と報告した変異を殺す ---------------------------------
+
+def test_the_standard_covers_the_mapping_that_decides_which_pairing_is_judged(monkeypatch):
+    """`source_field_for` reads knowledge.py's horizon mapping, so that mapping
+    decides which pairing gets judged. Left outside the digests, changing d5
+    from ret_d5 to open_d5 moved four verdicts while the rules digest sat
+    still, and the re-scan never fired."""
+    from earnings_research.legacy_research import knowledge
+
+    ledger = read_ledger(LEDGER)
+    assert unevaluated(registry(), ledger) == []
+    monkeypatch.setitem(knowledge.HORIZONS, "d5", "open_d5")
+    assert len(unevaluated(registry(), ledger)) == len(registry().hypotheses)
+
+
+def test_the_digest_does_not_depend_on_how_the_process_hashed_its_sets():
+    """Dropping the sort inside the spans made the digest vary with
+    PYTHONHASHSEED — three values across four seeds — so two machines would
+    disagree about whether the standard had moved."""
+    import subprocess
+    import sys
+
+    digests = set()
+    for seed in ("0", "1", "2", "3", "7"):
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "from earnings_research.statistics.lookahead import rules_digest;print(rules_digest())"],
+            capture_output=True, text=True, check=True,
+            env={"PYTHONHASHSEED": seed, "PYTHONPATH": str(ROOT / "src"), "PATH": "/usr/bin:/bin"},
+        )
+        digests.add(result.stdout.strip())
+    assert len(digests) == 1, digests
+
+
+def test_the_digest_ignores_the_order_the_span_members_were_written():
+    """The only genuinely non-deterministic ordering in the rules."""
+    before = lookahead.rules_digest()
+    original = dict(lookahead.COHORT_SPAN)
+    try:
+        lookahead.COHORT_SPAN["reaction"] = frozenset(reversed(sorted(original["reaction"])))
+        assert lookahead.rules_digest() == before
+        lookahead.COHORT_SPAN["reaction"] = frozenset({"prev_close"})
+        assert lookahead.rules_digest() != before
+    finally:
+        lookahead.COHORT_SPAN.clear()
+        lookahead.COHORT_SPAN.update(original)
+
+
+def test_a_verdict_stamped_in_another_timezone_does_not_win_by_its_digits():
+    """Compared as strings, +00:00 loses to an earlier +09:00 and the ledger
+    reports the superseded answer."""
+    later = {
+        "hypothesis_id": "LRH-X", "hypothesis_version": 1, "verdict": INVALID,
+        "evaluated_at": "2026-09-01T00:00:00+00:00",
+        "contamination_rules_sha256": lookahead.rules_digest(),
+        "source_fields_sha256": source_fields_digest(),
+    }
+    earlier = {**later, "verdict": VALID, "evaluated_at": "2026-09-01T08:00:00+09:00"}
+    assert earlier["evaluated_at"] > later["evaluated_at"]  # as text
+    assert effective_status([earlier, later])[("LRH-X", 1)]["verdict"] == INVALID
+
+
+def test_two_freezes_sharing_a_hypothesis_id_each_keep_their_own_rate():
+    """Bucketing on the hypothesis alone dropped one of them, which is the case
+    the per-freeze rate exists to show."""
+    rows = []
+    for index, (registry_version, verdict) in enumerate(((1, INVALID), (2, VALID))):
+        rows.append({
+            "hypothesis_id": "LRH-SAME", "hypothesis_version": 1, "verdict": verdict,
+            "registry_id": "ERS-X", "registry_version": registry_version,
+            "evaluated_at": "2026-09-0%dT00:00:00+09:00" % (index + 1),
+            "contamination_rules_sha256": lookahead.rules_digest(),
+            "source_fields_sha256": source_fields_digest(),
+        })
+    from earnings_research.prospective_hypotheses.source_validity import rates as compute
+
+    class _One:
+        hypotheses = []
+
+    buckets = compute(_One(), rows)["by_registry"]
+    assert set(buckets) == {"ERS-X@v1", "ERS-X@v2"}
+    assert buckets["ERS-X@v1"]["invalidation_rate"] == 1.0
+    assert buckets["ERS-X@v2"]["invalidation_rate"] == 0.0
+
+
+def test_the_headline_rate_counts_what_it_says_it_counts():
+    """Swapping the numerator to undeclared, or the denominator to the frozen
+    count, or faking any of the three counts, all passed: the earlier test
+    computed its expectation from the function's own output."""
+    ledger = read_ledger(LEDGER)
+    numbers = rates(registry(), ledger)
+    current = effective_status(ledger)
+    invalid = sum(1 for row in current.values() if row["verdict"] == INVALID)
+    undeclared = sum(1 for row in current.values() if row["verdict"] == UNDECLARED)
+    assert numbers["frozen_count"] == len(registry().hypotheses)
+    assert numbers["judged_count"] == len(current)
+    assert numbers["invalid_count"] == invalid
+    assert numbers["undeclared_count"] == undeclared
+    assert numbers["retroactive_invalidation_rate"] == pytest.approx(invalid / len(current))
+
+
+def test_re_judging_is_keyed_to_the_standard_and_not_to_the_hypothesis(tmp_path):
+    """Deduplicating on the hypothesis alone meant the re-scan fired once and
+    then never again, however far the rules moved."""
+    path = tmp_path / "source_validity.jsonl"
+    assert evaluate_source_validity_file(REGISTRY, path, datetime(2026, 9, 1, tzinfo=JST))[
+        "appended"
+    ] == len(registry().hypotheses)
+    original = dict(lookahead.COHORT_SPAN)
+    try:
+        lookahead.COHORT_SPAN["some_new_cohort"] = frozenset({"prev_close"})
+        again = evaluate_source_validity_file(REGISTRY, path, datetime(2026, 9, 2, tzinfo=JST))
+        assert again["appended"] == len(registry().hypotheses)
+    finally:
+        lookahead.COHORT_SPAN.clear()
+        lookahead.COHORT_SPAN.update(original)
+    assert len(read_ledger(path)) == 2 * len(registry().hypotheses)
+
+
+def test_a_status_snapshot_is_refused_over_knowledge_the_rules_condemn(tmp_path):
+    """The other half of the gate. Four ways of disabling it — removing it,
+    firing only when every hypothesis is condemned, summarising the usable ones
+    quietly, and reading a different ledger — all passed."""
+    from earnings_research.prospective_hypotheses.pipeline import summarize_trials_file
+
+    with pytest.raises(ValueError, match="source-validity"):
+        summarize_trials_file(
+            REGISTRY, tmp_path / "trials", tmp_path / "status.json",
+            datetime(2026, 10, 1, tzinfo=JST),
+        )
+
+
+def test_the_workflow_runs_the_gate():
+    """Deleting the step from checks.yml passed the whole suite."""
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/checks.yml").read_text(encoding="utf-8"))
+    commands = " ".join(step.get("run", "") for step in workflow["jobs"]["checks"]["steps"])
+    assert "verify-source-validity" in commands
+    assert "--ledger data/prospective_hypotheses/source_validity.jsonl" in commands
+
+
+def test_the_valid_verdict_is_reachable_and_distinct(monkeypatch):
+    """No frozen hypothesis is valid today, so without a synthetic case the
+    valid side of the boundary is never exercised at all — and `declares`
+    reading the wrong table would go unnoticed."""
+    monkeypatch.setitem(lookahead.COHORT_SPAN, "reaction", frozenset({"next_close"}))
+    verdicts = {item.hypothesis_id: item for item in judge(registry(), "2026-09-01T00:00:00+09:00")}
+    reaction = [item for item in verdicts.values() if item.dimension == "reaction"]
+    assert reaction
+    assert all(item.verdict == VALID for item in reaction), [item.verdict for item in reaction]
+    assert all(item.reason is None for item in reaction)
