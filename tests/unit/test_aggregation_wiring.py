@@ -1124,3 +1124,33 @@ def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set():
     )
     assert len(biggest) / len(rows) > 0.4
     assert population.rate_excluding(biggest, "open_d5", 0.10) != whole
+
+
+def test_every_table_the_dashboard_prints_is_covered_by_the_anchor_check():
+    """The declaration above is still a list a person maintains.
+
+    Adding a table to the renderer and not to it would leave the new table
+    unchecked in exactly the way hand-listing eight of twelve columns did. This
+    compares the declaration against what the renderer actually emits, so the
+    omission fails rather than passing quietly.
+    """
+    body = _statistics_section(_dashboard(_varied_rows(60)))
+    printed = {line.split("(")[0].strip() for line in body.splitlines() if line.startswith("###")}
+    declared = set()
+    for heading, _column, _prices in PUBLISHED_TABLES:
+        matches = [name for name in printed if name.startswith(heading)]
+        assert len(matches) == 1, (heading, sorted(printed))
+        declared.add(matches[0])
+    assert printed == declared, sorted(printed - declared)
+
+
+def test_every_declared_column_count_matches_the_table_it_describes():
+    """A column added to a table without a price pair beside it would be
+    skipped by the walk above, which only zips as far as the shorter list."""
+    body = _statistics_section(_dashboard(_varied_rows(60)))
+    for heading, _column, prices in PUBLISHED_TABLES:
+        header = next(
+            line for line in body[body.index(heading):].splitlines() if line.startswith("| ")
+        )
+        columns = [cell for cell in header.strip("|").split("|")][1:]
+        assert len(columns) == len(prices), (heading, columns)
