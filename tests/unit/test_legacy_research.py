@@ -10,7 +10,12 @@ import pytest
 from earnings_research.cli.__main__ import main
 from earnings_research.legacy_research.importer import EXPECTED_FIELDS, build_import
 from earnings_research.legacy_research.pipeline import migrate_legacy_os, verify_legacy_migration
-from earnings_research.legacy_research.publishing import render_dashboard, render_note, render_weekly
+from earnings_research.legacy_research.importer import parse_csv_bytes
+from earnings_research.legacy_research.legacy_parity import (
+    render_dashboard_as_retired,
+    render_note_as_retired,
+    render_weekly_as_retired,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,9 +72,15 @@ def make_source(tmp_path):
     second = row("2222", "別の架空会社")
     write_csv(repo / "data/records.csv", EXPECTED_FIELDS, [first, second])
     as_of = date(2026, 6, 10)
-    (repo / "dashboard.md").write_text(render_dashboard([first, second], "2026-06-10 20:00"), encoding="utf-8")
-    (repo / "weekly_report.md").write_text(render_weekly([first, second], as_of), encoding="utf-8")
-    (repo / "note_draft.md").write_text(render_note([first, second], as_of), encoding="utf-8")
+    # The stand-in for the retired repository publishes what the retired
+    # repository published. Writing these with the current renderer would make
+    # the parity check compare ERS against itself, which no renderer change can
+    # ever fail.
+    (repo / "dashboard.md").write_text(
+        render_dashboard_as_retired([first, second], "2026-06-10 20:00"), encoding="utf-8"
+    )
+    (repo / "weekly_report.md").write_text(render_weekly_as_retired([first, second], as_of), encoding="utf-8")
+    (repo / "note_draft.md").write_text(render_note_as_retired([first, second], as_of), encoding="utf-8")
     return repo, commit_all(repo, "enrich")
 
 
@@ -264,3 +275,37 @@ def test_verifier_rejects_tampered_publishing_parity(tmp_path):
     parity_path.write_text(json.dumps(tampered), encoding="utf-8")
     with pytest.raises(ValueError, match="legacy report output hash mismatch: publishing_parity.json"):
         verify_legacy_migration(output, reports)
+
+
+# --- 退役システムとの一致 -----------------------------------------------------
+
+SOURCE = ROOT / "data/historical_research/earnings_research_os/v1/source"
+
+
+def test_the_frozen_renderer_still_reproduces_the_retired_dashboard():
+    """Real committed bytes from the retired repository, not a stand-in.
+
+    The migration's whole claim is that nothing was lost in the reading of the
+    old data. Every other parity check in this file compares ERS output against
+    ERS output, so a renderer change passes them all while silently breaking
+    that claim; changing what the dashboard says did exactly that, and this is
+    the check that catches it.
+    """
+    import re
+
+    published = SOURCE.joinpath("dashboard.md").read_bytes()
+    _fields, rows = parse_csv_bytes(SOURCE.joinpath("records.csv").read_bytes())
+    stamp = re.search(r"最終更新: ([0-9-]+ [0-9:]+)", published.decode("utf-8")).group(1)
+    assert render_dashboard_as_retired(rows, stamp).encode("utf-8") == published
+
+
+def test_the_current_reports_are_allowed_to_differ_from_the_retired_ones():
+    """The two renderers answer different questions and must not be merged."""
+    import re
+
+    from earnings_research.legacy_research.publishing import render_dashboard
+
+    published = SOURCE.joinpath("dashboard.md").read_bytes()
+    _fields, rows = parse_csv_bytes(SOURCE.joinpath("records.csv").read_bytes())
+    stamp = re.search(r"最終更新: ([0-9-]+ [0-9:]+)", published.decode("utf-8")).group(1)
+    assert render_dashboard(rows, stamp).encode("utf-8") != published

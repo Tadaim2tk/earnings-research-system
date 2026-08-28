@@ -36,6 +36,12 @@ class Stability:
             "boundary": self.boundary.isoformat() if self.boundary else None,
             "first_half": self.first.as_dict() if self.first else None,
             "second_half": self.second.as_dict() if self.second else None,
+            # Surfaced beside the verdict because it is the whole reason a sign
+            # difference did or did not become a reversal.
+            "halves_exclude_zero": [
+                bool(self.first and self.first.median_interval.excludes_zero()),
+                bool(self.second and self.second.median_interval.excludes_zero()),
+            ],
             "verdict": self.verdict,
         }
 
@@ -71,16 +77,32 @@ def assess(
 
 
 def _verdict(first: CohortSummary, second: CohortSummary) -> str:
+    """Name what the two halves support, keeping ``reversed`` expensive to earn.
+
+    A bare sign difference is not evidence of a regime change. Split a record
+    with no effect at all in two and the halves disagree about half the time,
+    which is exactly what chance produces: over the 254 legacy records the
+    permuted rate of sign disagreement was 0.514 against a null of 0.50
+    (p = 0.508). Stopping on that would retire good hypotheses at a coin's
+    pace, so a reversal has to be a reversal of two directions each of which
+    the data can actually assert: both halves' 95% median intervals have to
+    exclude zero and point opposite ways. Anything short of that is
+    ``inconclusive`` — the halves failed to agree, and also failed to disagree.
+    """
     if not (first.reportable and second.reportable):
         return "too_short"
     if first.median is None or second.median is None:
         return "too_short"
     if first.median == 0 or second.median == 0:
+        # No direction to reverse. Reported separately from inconclusive because
+        # an exact zero median is a property of the data, not of the evidence.
         return "flat"
     if (first.median > 0) != (second.median > 0):
-        # Present in one half and reversed in the other. Whatever the full-period
-        # figure says, it is an average of two different regimes.
-        return "reversed"
+        if first.median_interval.excludes_zero() and second.median_interval.excludes_zero():
+            # Each half asserts a direction on its own, and they point apart.
+            # Whatever the full-period figure says, it averages two regimes.
+            return "reversed"
+        return "inconclusive"
     # Same direction in both halves. Not a confirmation — both halves were in
     # view while the hypothesis was formed — but it survives the cheapest check.
     return "consistent"

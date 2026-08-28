@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .evaluator import evaluate_observation, summarize_trials
+from .evaluator import evaluate_observation, stop_rule_relaxations, summarize_trials
 from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
@@ -41,6 +41,28 @@ def build_registry_file(knowledge_path: Path, output_path: Path, frozen_at: date
     registry = build_registry(knowledge, str(knowledge_path), source_hash, frozen_at)
     _write_new(output_path, _render(registry))
     return registry
+
+
+def verify_stop_rules_only_tightened(previous_path: Path, current_path: Path):
+    """Refuse a successor registry that widened any inherited stop rule.
+
+    Separate from registry verification because that call re-derives the file
+    from the frozen research and so only ever sees one version. This is the
+    check a version bump has to pass, and it is a command rather than an
+    argument so CI can require it on any change to the registry directory.
+    """
+    previous = HypothesisRegistry.model_validate_json(
+        Path(previous_path).read_text(encoding="utf-8")
+    )
+    current = HypothesisRegistry.model_validate_json(
+        Path(current_path).read_text(encoding="utf-8")
+    )
+    if previous.registry_version >= current.registry_version:
+        raise ValueError("the superseded registry must carry an earlier registry_version")
+    problems = stop_rule_relaxations(previous, current)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return current
 
 
 def verify_registry_file(knowledge_path: Path, registry_path: Path):

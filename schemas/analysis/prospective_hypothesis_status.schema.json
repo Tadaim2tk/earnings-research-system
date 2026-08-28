@@ -149,6 +149,19 @@
             }
           ],
           "title": "Target Positive Rate"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Reason",
+          "description": "Why this hypothesis is finished under its own frozen stop rule, or null while it stays open. Null also covers versions carrying no stop rule."
         }
       },
       "required": [

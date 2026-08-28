@@ -122,3 +122,92 @@ def test_repeated_names_are_carried_into_each_half():
         row["code"] = "SAME"
     result = assess(rows, value_of, cluster_of=lambda row: row["code"])
     assert result.first.n_independent == 1
+
+
+def test_a_sign_difference_neither_half_can_support_is_not_a_reversal():
+    """The condition that keeps a chance sign flip from retiring a hypothesis.
+
+    Split a record with no effect in two and the halves disagree about half the
+    time. Both halves here straddle zero, so neither is claiming a direction and
+    there is nothing to have reversed.
+    """
+    noisy = [-0.05, -0.04, -0.03, -0.02, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+    result = assess(dated(noisy + [-value for value in noisy]), value_of)
+    assert (result.first.median > 0) != (result.second.median > 0)
+    assert result.first.median_interval.excludes_zero() is False
+    assert result.verdict == "inconclusive"
+
+
+def test_a_reversal_needs_both_halves_to_exclude_zero():
+    result = assess(dated([0.05] * 10 + [-0.05] * 10), value_of)
+    assert result.verdict == "reversed"
+    assert result.as_dict()["halves_exclude_zero"] == [True, True]
+
+
+def test_one_half_speaking_alone_is_not_enough():
+    """Half asserting a direction against a half that cannot is inconclusive."""
+    quiet = [0.05, 0.04, 0.03, 0.02, -0.01, -0.02, -0.03, -0.04, -0.05, -0.06]
+    result = assess(dated([0.05] * 10 + quiet), value_of)
+    assert result.first.median_interval.excludes_zero() is True
+    assert result.second.median_interval.excludes_zero() is False
+    assert result.verdict == "inconclusive"
+
+
+def test_a_half_sitting_exactly_on_zero_is_flat_not_reversed():
+    result = assess(dated([0.05] * 10 + [-0.02, 0.02] * 5), value_of)
+    assert result.second.median == 0
+    assert result.verdict == "flat"
+
+
+def test_the_evidence_behind_the_verdict_is_reported():
+    result = assess(dated([0.05] * 10 + [-0.05] * 10), value_of)
+    payload = result.as_dict()
+    assert payload["first_half"]["median_interval"]["low"] is not None
+    assert payload["second_half"]["median_interval"]["high"] is not None
+    assert payload["halves_exclude_zero"] == [True, True]
+
+
+def test_a_season_landing_on_one_day_reserves_nothing_rather_than_everything():
+    """Ties reach past the cut index, so the cut index is not the cut.
+
+    Left alone this reserves every dated row and runs the statistics on the
+    undated remainder while still reporting a chronological split.
+    """
+    split = split_by_date([{"date": "2026-02-13", "v": 0.01} for _ in range(30)])
+    assert split.cutoff is None
+    assert len(split.exploration) == 30
+    assert split.reserved == []
+    assert "no earlier period" in split.reason
+
+
+def test_a_cutoff_that_would_reserve_too_little_is_refused():
+    """A reserve too small to report from is not a reserve, it is a gap."""
+    split = split_by_date(records(20), reserve=0.05)
+    assert split.cutoff is None
+    assert "below the" in split.reason
+    assert len(split.exploration) == 20
+
+
+def test_undated_rows_are_counted_where_the_split_is_reported():
+    split = split_by_date(records(24) + [{"date": "", "v": 0.01}] * 6)
+    assert split.as_dict()["undated_count"] == 6
+    assert split.as_dict()["exploration_count"] == 22
+
+
+def test_a_datetime_is_narrowed_to_its_day():
+    """date is a superclass of datetime, so an unnarrowed value compares badly."""
+    rows = [{"date": datetime(2026, 1, 1, 15, 0, tzinfo=JST) + timedelta(days=n), "v": 0.01} for n in range(30)]
+    split = split_by_date(rows)
+    assert split.cutoff == date(2026, 1, 21)
+    assert len(split.reserved) == 10
+
+
+def test_a_freeze_date_written_as_text_is_read():
+    split = split_by_date(records(30))
+    assert evaluate_reserved(split, "2025-12-01", len) == 10
+
+
+def test_an_unreadable_freeze_date_is_refused_rather_than_assumed():
+    split = split_by_date(records(30))
+    with pytest.raises(HoldoutViolation):
+        evaluate_reserved(split, "sometime last year", len)

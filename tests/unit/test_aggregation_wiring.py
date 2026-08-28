@@ -6,6 +6,7 @@ into one family all left the suite green.
 """
 
 import csv
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -139,11 +140,22 @@ def test_the_reserved_period_is_declared_but_not_summarised(summary):
     ]
 
 
-def test_a_cohort_that_reverses_between_halves_is_named(summary):
-    """margin_pressure looked promising until the halves were separated."""
+def test_a_sign_flip_the_record_cannot_support_is_not_reported_as_a_reversal(summary):
+    """margin_pressure, the case this rule exists for.
+
+    Its halves do sit either side of zero, which is what the earlier rule called
+    a reversal and what was reported as one. Only the first half can actually
+    assert a direction; the second half's median interval spans zero, so it is
+    not claiming the opposite, it is claiming nothing. Over these records the
+    permuted rate of sign disagreement is 0.514 against a null of 0.50
+    (p = 0.508) — the flip is what an absent effect looks like, not evidence
+    against the hypothesis. Calling it a reversal retires hypotheses at a
+    coin's pace.
+    """
     stability = summary["by_reason_code"]["margin_pressure"]["open_d5"]["stability"]
-    assert stability["verdict"] == "reversed"
     assert stability["first_half"]["median"] > 0 > stability["second_half"]["median"]
+    assert stability["halves_exclude_zero"] == [True, False]
+    assert stability["verdict"] == "inconclusive"
 
 
 def test_no_cohort_stays_directional_after_the_correction_dismisses_it(summary):
@@ -217,3 +229,133 @@ def test_a_tail_driven_cohort_keeps_its_label_whatever_the_p_value():
     summary = {"by_rank": {"A": {"open_d5": tail}}}
     _multiplicity(summary)
     assert summary["by_rank"]["A"]["open_d5"]["verdict"] == "tail_driven"
+
+
+def _dated_rows(count, start_day=1):
+    return [
+        {
+            "code": "%04d" % (index + 1000),
+            "date": "2026-0%d-%02d" % (1 + index // 28, 1 + index % 28),
+            "prev_close": "100", "next_open": "101", "next_close": "102",
+            "d5_close": "103", "d20_close": "104",
+            "gap": "0.01", "ret_d1": "0.02", "ret_d5": "0.03", "ret_d20": "0.04",
+            "shodo": "GU", "reaction": "GU継続", "rank": "B", "narrative": "増収増益",
+        }
+        for index in range(count)
+    ]
+
+
+def _context_for(rows, risk_on):
+    return [
+        {
+            "legacy_record_id": row["code"],
+            "join_status": "ok",
+            "market_context": {"risk_on_score": str(risk_on), "risk_off_score": "10"},
+        }
+        for row in rows
+    ]
+
+
+def test_a_row_keeps_its_own_market_context_across_the_reserve_split():
+    """The split reorders rows; a positional re-pairing hands them the wrong one."""
+    from earnings_research.legacy_research.aggregation import build_aggregation
+
+    rows = _dated_rows(30)
+    contexts = _context_for(rows, 90)
+    # Reversed on the way in, so any position-based pairing survives only if it
+    # tracks the row rather than the index.
+    summary = build_aggregation(list(reversed(rows)), list(reversed(contexts)), "deadbeef")
+    assert summary["market_context"]["linked_count"] == summary["record_count"]
+    assert set(summary["market_context"]["by_relative_dominance"]) == {"risk_on_dominant"}
+
+
+def test_a_missing_context_link_does_not_shift_every_later_row():
+    """One unlinked row hands its successors the wrong context under a re-zip."""
+    from earnings_research.legacy_research.aggregation import build_aggregation
+
+    rows = _dated_rows(30)
+    contexts = _context_for(rows, 90)
+    for item in contexts[15:]:
+        item["market_context"] = {"risk_on_score": "10", "risk_off_score": "90"}
+    # The unlinked row carries an unmistakable return. Correctly paired it
+    # belongs to no context group at all; re-zipped it takes the next row's
+    # context and shows up as that group's best name.
+    rows[0]["next_close"] = "199"
+    contexts[0] = None
+    summary = build_aggregation(rows, contexts, "deadbeef")
+    groups = summary["market_context"]["by_relative_dominance"]
+    assert summary["record_count"] == 20
+    assert summary["market_context"]["linked_count"] == 19
+    assert groups["risk_on_dominant"]["open_d1"]["best"] < 0.9
+    assert groups["risk_off_dominant"]["open_d1"]["best"] < 0.9
+
+
+def test_fewer_context_views_than_rows_does_not_borrow_a_neighbour_s_context():
+    from earnings_research.legacy_research.aggregation import build_aggregation
+
+    rows = _dated_rows(30)
+    summary = build_aggregation(rows, _context_for(rows[:10], 90), "deadbeef")
+    assert summary["market_context"]["linked_count"] <= 10
+
+
+# --- 公開物の統計が留保期間を見ていないこと -----------------------------------
+
+def _statistics_section(text):
+    """Everything the dashboard states as a finding, without the row listing."""
+    return text[text.index("## 仮説検証"):]
+
+
+def _note_insights(text):
+    """The note's automatically derived remarks, without the weekly listing."""
+    return text[text.index("## 今週時点の検証メモ"):]
+
+
+def test_the_published_statistics_cannot_see_the_reserved_period():
+    """The reserve is only a reserve if what gets published never reads it.
+
+    Reserved rows still appear in the listing — they are records, and hiding
+    them would be a different kind of dishonesty — so the guarantee has to be
+    that changing them cannot move a single published figure.
+    """
+    from earnings_research.legacy_research.publishing import render_dashboard, render_note
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = _dated_rows(30)
+    split = split_by_date(rows)
+    assert split.reserved, "the sample must actually reserve something"
+    before = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    note_before = _note_insights(render_note(rows, date(2026, 6, 10), statistics_rows=split.exploration))
+    for row in split.reserved:
+        # Returns nothing like the explored period's, in every anchored field.
+        row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
+        row["ret_d1"] = row["ret_d5"] = row["ret_d20"] = "0.8"
+    after = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    note_after = _note_insights(render_note(rows, date(2026, 6, 10), statistics_rows=split.exploration))
+    assert _statistics_section(after) == _statistics_section(before)
+    assert note_after == note_before
+    assert "+80.0%" not in _statistics_section(after)
+
+
+def test_changing_the_explored_period_does_move_the_published_statistics():
+    """The control: without this the test above passes on a dashboard of zeroes."""
+    from earnings_research.legacy_research.publishing import render_dashboard
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = _dated_rows(30)
+    split = split_by_date(rows)
+    before = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    for row in split.exploration:
+        row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
+    after = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    assert _statistics_section(after) != _statistics_section(before)
+
+
+def test_the_reserved_rows_are_still_listed():
+    from earnings_research.legacy_research.publishing import render_dashboard
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = _dated_rows(30)
+    split = split_by_date(rows)
+    published = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    listing = published[: published.index("## 仮説検証")]
+    assert split.reserved[-1]["code"] in listing

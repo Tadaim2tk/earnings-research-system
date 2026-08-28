@@ -32,6 +32,18 @@
           "maximum": 1.0,
           "title": "Retained Effect Ratio",
           "type": "number"
+        },
+        "stop_rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Rule"
         }
       },
       "required": [
@@ -286,6 +298,34 @@
         "note"
       ],
       "title": "PromotionReviewPolicy",
+      "type": "object"
+    },
+    "StopRule": {
+      "description": "Pre-registered conditions under which the hypothesis is finished. Frozen with the definition and hashed with it; a later version may tighten these but never relax them. Absent on versions frozen before stop rules existed, which are left without one rather than having one applied after the fact.",
+      "properties": {
+        "stop_when_halves_reverse": {
+          "title": "Stop When Halves Reverse",
+          "type": "boolean",
+          "description": "Stop when the two halves of the record assert opposite directions. A bare median sign difference does not qualify: both halves' 95% median intervals must exclude zero."
+        },
+        "stop_below_reserved_effect_ratio": {
+          "title": "Stop Below Reserved Effect Ratio",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "maximum_revisions": {
+          "title": "Maximum Revisions",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "stop_when_halves_reverse",
+        "stop_below_reserved_effect_ratio",
+        "maximum_revisions"
+      ],
+      "title": "StopRule",
       "type": "object"
     }
   },

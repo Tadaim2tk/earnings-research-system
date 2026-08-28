@@ -5,6 +5,8 @@ import json
 from datetime import datetime
 from statistics import fmean
 
+from earnings_research.statistics.stability import assess
+
 from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
@@ -104,6 +106,11 @@ def should_stop(definition, *, halves_reversed=None, reserved_effect_ratio=None,
     not a setback to be worked around; it is the answer.
     """
     rule = definition.assessment_rule.stop_rule
+    if rule is None:
+        # Versions frozen before stop rules existed carry none, and one is not
+        # applied to them after the fact. They simply have no stopping point
+        # until a new version is frozen with one.
+        return None
     if rule.stop_when_halves_reverse and halves_reversed:
         return "the effect reversed between the two halves of the record"
     if (
@@ -145,6 +152,57 @@ def _status(definition, target, comparator):
     if abs(mean_delta) >= abs(historical) * rule.retained_effect_ratio:
         return "supported", "prospective mean effect retains the direction and required historical-effect ratio"
     return "weakened", "prospective mean effect retains direction but is below the frozen retained-effect ratio"
+
+
+def _halves_reversed(trials):
+    """Whether the trials split in two assert opposite directions.
+
+    None where the question cannot be answered — too few trials, or halves that
+    merely disagree in sign without either being able to claim a direction. A
+    stop rule reading None does not fire, which is the intent: silence is not
+    evidence of a reversal.
+    """
+    records = [
+        {"date": trial.outcome_observed_at, "value": trial.return_value}
+        for trial in trials
+    ]
+    verdict = assess(records, lambda record: record["value"]).verdict
+    if verdict in {"too_short", "flat"}:
+        return None
+    if verdict == "inconclusive":
+        return None
+    return verdict == "reversed"
+
+
+def stop_rule_relaxations(previous, current):
+    """Report hypotheses whose stop rule was loosened by a later registry.
+
+    A registry holds one version per hypothesis, so a successor registry is
+    where a version bump actually lands, and it is the only place the widening
+    could happen. Conditions fixed before the results are seen mean nothing if
+    the next freeze can quietly widen them.
+    """
+    earlier = {item.hypothesis_id: item for item in previous.hypotheses}
+    problems = []
+    for item in current.hypotheses:
+        before = earlier.get(item.hypothesis_id)
+        if before is None:
+            continue
+        was = before.assessment_rule.stop_rule
+        now = item.assessment_rule.stop_rule
+        if was is None:
+            continue
+        if now is None:
+            problems.append(
+                "%s v%d drops the stop rule frozen in v%d"
+                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
+            )
+        elif not now.at_least_as_strict_as(was):
+            problems.append(
+                "%s v%d relaxes the stop rule frozen in v%d"
+                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
+            )
+    return problems
 
 
 def summarize_trials(registry, bundles, evaluated_at):
@@ -194,6 +252,16 @@ def summarize_trials(registry, bundles, evaluated_at):
         target_rate = _rate(target_values)
         comparator_rate = _rate(comparator_values)
         status, note = _status(definition, target, comparator)
+        # The stop rule is read here rather than by a reviewer, because a
+        # condition nobody evaluates is a condition nobody is bound by. Halves
+        # are compared on the trials themselves; the reserved period belongs to
+        # historical exploration and has no counterpart in prospective trials,
+        # so that condition is left unevaluated rather than guessed at.
+        stop_reason = should_stop(
+            definition,
+            halves_reversed=_halves_reversed(target),
+            revisions=definition.hypothesis_version - 1,
+        )
         statuses.append(HypothesisStatus(
             hypothesis_id=definition.hypothesis_id,
             hypothesis_version=definition.hypothesis_version,
@@ -213,6 +281,7 @@ def summarize_trials(registry, bundles, evaluated_at):
             distinct_event_quarters=len({item.event_quarter for item in items}),
             last_evaluated_at=max((item.recorded_at for item in items), default=None),
             production_review_eligible=False,
+            stop_reason=stop_reason,
             note=note,
         ))
     return HypothesisStatusSnapshot(

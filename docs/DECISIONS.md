@@ -686,3 +686,42 @@ Context: 独立監査が統計ガードの実装2箇所を指摘した。どち�
 Decision: sign testは**銘柄ごとに一度集約してから**符号検定する。各銘柄はその銘柄自身の中央値で方向を決め、検定は行ではなく銘柄を数える。`verdict` は `verdict_for(mean, median, mean_without_best, p_value)` として切り出し、p値を引数で受ける。`_multiplicity` は補正後の値でこれを呼び直す。p値を持たない記述用ビュー（`by_ticker`）では `directional` を残さない。
 
 Consequences: 実データで `directional` は0件になる。補正前は生p<0.05が28件あった。`tail_driven` の判定はp値に依存しないので変わらない。銘柄集約により、同一銘柄が繰り返し現れるコホートの検定力は下がるが、それは元々存在しなかった証拠を数えていたためである。
+
+## ERS-ADR-0043
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: 独立監査が、統計ガードの4件を「PR全体としてはPassではない」と判定した。共通しているのは、**規律が言明されているのに実装が拘束していない**という形である。
+
+第一に、留保期間が公開物に漏れていた。`build_aggregation` は探索期間だけで集計する一方、`publishing.py` の `_avg` / `_anchored` は `final_rows` 全件を読んでいた。dashboard・note に出る数字は留保期間を含んでおり、留保の意味が消えていた。
+
+第二に、`should_stop` は `stop_rule` が `None` の場合を想定しておらず、凍結済み19件すべてで `AttributeError` になった。到達不能な条件は条件ではない。
+
+第三に、`stop_rule` は `Field(exclude=True)` でhash対象外だった。凍結後に条件を書き換えてもhashが動かない。結果を見てから停止条件を緩められる状態であり、`at_least_as_strict_as` はどこからも呼ばれない死にコードだった。
+
+第四に、`reversed` が中央値の符号違いだけで成立していた。効果ゼロの記録を二分割すれば約半数で符号は割れる。実測でも、254件に対する順列検定で符号不一致率は0.514(帰無0.50, p=0.508)であり、**偶然の符号反転で良い仮説を殺す**基準だった。実際に `margin_pressure` を `reversed` として報告していた。
+
+Decision:
+
+- **一覧と統計を分離する。** renderer は `statistics_rows` を任意で受け、`build_reports` が `split_by_date(final_rows).exploration` を一度だけ渡す。`## 仮説検証` 以降と note の自動集計メモは探索期間のみ。留保行は一覧には出る（記録だから）。dashboard・noteには留保件数を明記する。
+- **`stop_rule` は後付けしない。** 凍結済み19件は `stop_rule` なしのまま保持し、`should_stop` は `None` を「停止条件なし」として `None` を返す。停止規則の導入は新しいversionとして凍結する。
+- **`stop_rule` を持つversionではhash・永続化対象に含める。** 未設定時のみキーを落とす（`model_serializer`）ので既存hashは不変。緩和禁止は `verify-stop-rule-tightening` コマンドで後継レジストリと突き合わせて強制する。1レジストリには1仮説につき1versionしか置けないため、比較対象はレジストリ間である。
+- **`reversed` は両半分がそれぞれ方向を主張できる場合に限る。** 両半分の95%中央値区間がともにゼロを除外し、かつ符号が逆のときだけ `reversed`。片方でも区間がゼロを含めば `inconclusive`。中央値がちょうど0なら `flat`。判断根拠として `halves_exclude_zero` を出力する。
+
+Consequences: `margin_pressure` の `open_d5` は `reversed` から `inconclusive` へ変わる。これは検出力の低下ではなく、元々証拠でなかったものを証拠と呼ばなくなっただけである。停止規則は今のところどの仮説にも付いていないため `stop_reason` は全件 `null` になるが、`summarize_trials` が毎回評価するので、付けた瞬間に効く。
+
+## ERS-ADR-0044
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: 移行の主張は「退役システムが公開した3ファイルをバイト単位で再現できる」である。ところがその検査は、比較対象の「旧ファイル」を**現行のrendererで生成していた**（`make_source`）。renderer を変えても検査は必ず通る。
+
+ERS-ADR-0041/0042 で dashboard の表記を「平均のみ」から「勝率 / 中央値 / 平均 (n)」へ変えたため、実際の退役リポジトリ(`a738d2d`)の `dashboard.md` との一致は壊れていた。テストは873件すべて緑のままで、`migrate-legacy-os` を再実行して初めて `legacy publishing parity failed` になる。
+
+Decision: 二つの役割を分ける。`legacy_parity.py` に**退役当時のrendererを凍結して置き**、パリティ検査だけがこれを使う。ERS自身のレポートは `publishing.py` が担い、自由に変わってよい。テストは、リポジトリに実データとして committed 済みの `data/historical_research/earnings_research_os/v1/source/dashboard.md` と `records.csv` を読み、凍結rendererがそのバイト列を再現することを検査する。合成データではないので、renderer の変更が検査をすり抜けられない。
+
+Consequences: 退役リポジトリの実ファイルに対し、凍結rendererで dashboard / weekly_report / note_draft の3つとも一致を確認済み。今後 `publishing.py` を変えてもパリティは壊れない。`legacy_parity.py` は保守対象外であり、変更は過去についての言明を書き換えることを意味する。

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 
 Dimension = Literal[
@@ -69,8 +69,17 @@ class AssessmentRule(BaseModel):
     no_material_positive_rate_delta: float = Field(ge=0)
     # Optional so that registries frozen before stop rules existed keep their
     # hash. A frozen definition is not rewritten to carry a field it never had;
-    # the conditions attach to the next version instead.
-    stop_rule: Optional[StopRule] = Field(default=None, exclude=True)
+    # the conditions attach to the next version instead. Where a version does
+    # carry one it is serialised and hashed like any other term, so the
+    # conditions are as frozen as the rest of the definition.
+    stop_rule: Optional[StopRule] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_stop_rule(self, handler):
+        payload = handler(self)
+        if self.stop_rule is None:
+            payload.pop("stop_rule", None)
+        return payload
 
 
 class HypothesisDefinition(BaseModel):
@@ -153,7 +162,6 @@ class HypothesisRegistry(BaseModel):
         if any(item.frozen_at != self.frozen_at for item in self.hypotheses):
             raise ValueError("all definitions must share the registry freeze timestamp")
         return self
-
 
 class PreEventFeatures(BaseModel):
     captured_at: datetime
@@ -312,6 +320,9 @@ class HypothesisStatus(BaseModel):
     distinct_event_quarters: int = Field(ge=0)
     last_evaluated_at: Optional[datetime]
     production_review_eligible: Literal[False] = False
+    # Why this hypothesis is finished under its own frozen stop rule, or None
+    # while it stays open. Versions carrying no stop rule are always None.
+    stop_reason: Optional[str] = None
     note: str
 
 

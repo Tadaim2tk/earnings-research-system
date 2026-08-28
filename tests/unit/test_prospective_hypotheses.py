@@ -283,5 +283,135 @@ def test_a_registry_frozen_before_stop_rules_keeps_its_hash():
         no_material_mean_delta=0.01,
         no_material_positive_rate_delta=0.01,
     )
-    with_rule = plain.model_copy(update={"stop_rule": StopRule()})
-    assert canonical_hash(plain) == canonical_hash(with_rule)
+    assert "stop_rule" not in plain.model_dump()
+    before = canonical_hash(registry())
+    assert canonical_hash(registry()) == before
+
+
+def test_a_stop_rule_a_version_does_carry_is_frozen_with_it():
+    """Otherwise the conditions could be widened after the results came in."""
+    from earnings_research.prospective_hypotheses.evaluator import canonical_hash
+    from earnings_research.prospective_hypotheses.models import AssessmentRule, StopRule
+
+    plain = AssessmentRule(
+        comparison_basis="target_vs_all_eligible_events",
+        minimum_target_trials=1,
+        minimum_comparator_trials=1,
+        retained_effect_ratio=0.5,
+        no_material_mean_delta=0.01,
+        no_material_positive_rate_delta=0.01,
+    )
+    strict = plain.model_copy(update={"stop_rule": StopRule(maximum_revisions=1)})
+    loose = plain.model_copy(update={"stop_rule": StopRule(maximum_revisions=9)})
+    assert canonical_hash(plain) != canonical_hash(strict)
+    assert canonical_hash(strict) != canonical_hash(loose)
+    assert strict.model_dump()["stop_rule"]["maximum_revisions"] == 1
+
+
+def superseding(stop_rule, version=2):
+    """A successor registry carrying one hypothesis at a bumped version."""
+    from earnings_research.prospective_hypotheses.models import HypothesisRegistry
+
+    base = registry()
+    definition = base.hypotheses[0].model_copy(deep=True)
+    definition.hypothesis_version += 1
+    definition.assessment_rule = definition.assessment_rule.model_copy(
+        update={"stop_rule": stop_rule}
+    )
+    payload = base.model_dump()
+    payload["registry_version"] = version
+    payload["hypotheses"] = [definition.model_dump()]
+    payload["source_candidate_count"] = 1
+    return HypothesisRegistry.model_validate(payload)
+
+
+def test_a_successor_registry_cannot_relax_the_conditions_it_inherited(tmp_path):
+    """A registry holds one version per hypothesis, so the widening would land here."""
+    from earnings_research.prospective_hypotheses.evaluator import stop_rule_relaxations
+    from earnings_research.prospective_hypotheses.models import StopRule
+
+    frozen = superseding(StopRule(maximum_revisions=1), version=1)
+    assert stop_rule_relaxations(frozen, superseding(StopRule(maximum_revisions=0))) == []
+    assert stop_rule_relaxations(frozen, superseding(StopRule(maximum_revisions=9)))
+    assert stop_rule_relaxations(frozen, superseding(None))
+
+
+def _written(tmp_path, name, registry):
+    path = tmp_path / name
+    path.write_text(registry.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def test_the_cli_refuses_a_successor_that_widens_its_stop_rule(tmp_path, capsys):
+    """The check a version bump has to pass, reachable from CI."""
+    from earnings_research.prospective_hypotheses.models import StopRule
+
+    earlier = _written(tmp_path, "v1.json", superseding(StopRule(maximum_revisions=1), version=1))
+    widened = _written(tmp_path, "v2.json", superseding(StopRule(maximum_revisions=9)))
+    tightened = _written(tmp_path, "v2b.json", superseding(StopRule(maximum_revisions=0)))
+    assert main([
+        "verify-stop-rule-tightening",
+        "--previous-registry", str(earlier),
+        "--registry", str(widened),
+    ]) == 1
+    assert "relaxes the stop rule" in capsys.readouterr().err
+    assert main([
+        "verify-stop-rule-tightening",
+        "--previous-registry", str(earlier),
+        "--registry", str(tightened),
+    ]) == 0
+
+
+def test_a_successor_may_not_quietly_drop_an_inherited_stop_rule(tmp_path):
+    from earnings_research.prospective_hypotheses.models import StopRule
+    from earnings_research.prospective_hypotheses.pipeline import verify_stop_rules_only_tightened
+
+    earlier = _written(tmp_path, "v1.json", superseding(StopRule(), version=1))
+    dropped = _written(tmp_path, "v2.json", superseding(None))
+    with pytest.raises(ValueError, match="drops the stop rule"):
+        verify_stop_rules_only_tightened(earlier, dropped)
+
+
+def test_a_registry_that_is_not_a_successor_is_refused(tmp_path):
+    from earnings_research.prospective_hypotheses.models import StopRule
+    from earnings_research.prospective_hypotheses.pipeline import verify_stop_rules_only_tightened
+
+    same = superseding(StopRule(), version=1)
+    with pytest.raises(ValueError, match="earlier registry_version"):
+        verify_stop_rules_only_tightened(
+            _written(tmp_path, "a.json", same), _written(tmp_path, "b.json", same)
+        )
+
+
+def test_a_version_without_a_stop_rule_has_no_stopping_point():
+    """All 19 frozen versions carry none, and none is applied to them later."""
+    from earnings_research.prospective_hypotheses.evaluator import should_stop
+
+    for definition in registry().hypotheses:
+        assert definition.assessment_rule.stop_rule is None
+        assert should_stop(definition, halves_reversed=True, revisions=99) is None
+
+
+def test_the_stop_rule_is_read_where_the_status_is_produced(tmp_path):
+    """A condition nobody evaluates is a condition nobody is bound by."""
+    from earnings_research.prospective_hypotheses.evaluator import summarize_trials
+    from earnings_research.prospective_hypotheses.models import StopRule
+
+    definition = registry().hypotheses[0].model_copy(deep=True)
+    definition.hypothesis_version = 4
+    definition.assessment_rule = definition.assessment_rule.model_copy(
+        update={"stop_rule": StopRule(maximum_revisions=1)}
+    )
+    one = registry().model_copy(deep=True)
+    one.hypotheses = [definition]
+    one.source_candidate_count = 1
+    snapshot = summarize_trials(one, [], datetime(2026, 10, 1, 12, tzinfo=JST))
+    assert "revised 3 times" in snapshot.hypotheses[0].stop_reason
+    assert "stop_reason" in snapshot.model_dump()["hypotheses"][0]
+
+
+def test_an_open_hypothesis_reports_no_stop_reason():
+    from earnings_research.prospective_hypotheses.evaluator import summarize_trials
+
+    snapshot = summarize_trials(registry(), [], datetime(2026, 10, 1, 12, tzinfo=JST))
+    assert {item.stop_reason for item in snapshot.hypotheses} == {None}

@@ -234,13 +234,23 @@ def build_aggregation(rows, context_views, source_commit):
     ]
     split = split_by_date(paired)
     rows = [{key: value for key, value in row.items() if key != _CONTEXT} for row in split.exploration]
-    explored_context = [row[_CONTEXT] for row in split.exploration if row.get(_CONTEXT)]
+    # Keep each row beside its own context rather than re-zipping the two
+    # lists: a row whose TSO link is missing drops out of one list and not the
+    # other, and every row after it inherits the next row's market context. The
+    # 254 legacy records all link, so this is silent today and would stay silent
+    # on the first record that does not.
+    explored = [
+        (row, carrier[_CONTEXT])
+        for row, carrier in zip(rows, split.exploration)
+        if carrier.get(_CONTEXT)
+    ]
+    explored_context = [record for _row, record in explored]
     rates = _base_rates(rows)
     context_by_id = {item["legacy_record_id"]: item for item in explored_context}
     context_groups = defaultdict(list)
     risk_on_scores = []
     risk_off_scores = []
-    for record, row in zip(explored_context, rows):
+    for row, record in explored:
         context = record["market_context"]
         risk_on = _number(context.get("risk_on_score"))
         risk_off = _number(context.get("risk_off_score"))
