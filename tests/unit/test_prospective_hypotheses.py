@@ -39,27 +39,21 @@ def observation():
 
 
 def usable_registry(tmp_path):
-    """The committed registry cut to the hypotheses the current rules permit,
-    with a ledger judging it — the state the pipeline requires before any
-    prospective work may be recorded.
+    """A registry the gate permits, with a ledger saying so.
 
-    Written from the registry rather than by hand so that a rule change which
-    condemns the remaining hypotheses too makes this fixture empty, and the
-    tests using it fail rather than silently testing nothing.
+    The ledger is written by hand here rather than by `judge`, because under
+    the rules as they stand no frozen hypothesis is affirmatively valid: every
+    one of them is scored on a previous-close return, and every cohort the
+    rules cover is fixed after that close. That is the finding, not a fixture
+    problem — see test_no_frozen_hypothesis_is_currently_affirmatively_valid.
+    What these tests need is the recording path, and what the recording path
+    asks for is a ledger that clears the hypothesis.
     """
-    from earnings_research.prospective_hypotheses.source_validity import (
-        INVALID,
-        append_ledger,
-        judge,
-    )
+    from earnings_research.prospective_hypotheses.source_validity import VALID, Verdict, append_ledger
+    from earnings_research.statistics.lookahead import rules_digest
 
     base = registry()
-    verdicts = {item.hypothesis_id: item for item in judge(base, "2026-09-01T00:00:00+09:00")}
-    keep = [
-        item for item in base.hypotheses
-        if verdicts[item.hypothesis_id].verdict != INVALID
-    ]
-    assert keep, "no hypothesis survives the current rules; this fixture tests nothing"
+    keep = base.hypotheses[:3]
     payload = base.model_dump()
     payload["hypotheses"] = [item.model_dump() for item in keep]
     payload["source_candidate_count"] = len(keep)
@@ -69,9 +63,30 @@ def usable_registry(tmp_path):
     path.write_text(
         HypothesisRegistry.model_validate(payload).model_dump_json(indent=2), encoding="utf-8"
     )
-    trimmed = HypothesisRegistry.model_validate_json(path.read_text(encoding="utf-8"))
-    append_ledger(directory / "source_validity.jsonl", judge(trimmed, "2026-09-01T00:00:00+09:00"))
+    append_ledger(directory / "source_validity.jsonl", [
+        Verdict(
+            hypothesis_id=item.hypothesis_id, hypothesis_version=item.hypothesis_version,
+            registry_id=base.registry_id, registry_version=base.registry_version,
+            dimension=item.dimension, evaluation_horizon=item.evaluation_horizon,
+            source_field="open_d5", verdict=VALID, reason=None,
+            contamination_rules_sha256=rules_digest(),
+            evaluated_at="2026-09-01T00:00:00+09:00",
+        )
+        for item in keep
+    ])
     return path, len(keep)
+
+
+def test_no_frozen_hypothesis_is_currently_affirmatively_valid():
+    """Every one is scored on a previous-close return, and every cohort the
+    rules cover is fixed after that close. Nothing in this registry may gather
+    prospective evidence until a registry is frozen from research that does not
+    measure from there."""
+    from earnings_research.prospective_hypotheses.source_validity import VALID, judge
+
+    verdicts = judge(registry(), "2026-09-01T00:00:00+09:00")
+    assert verdicts
+    assert not [item for item in verdicts if item.verdict == VALID]
 
 
 def test_registry_freezes_all_19_candidates_one_to_one():

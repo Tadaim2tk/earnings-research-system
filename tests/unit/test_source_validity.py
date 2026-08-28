@@ -81,19 +81,33 @@ def test_the_name_does_not_depend_on_the_order_the_rules_were_written():
         lookahead.COHORT_SPAN.update(original)
 
 
-def test_a_cohort_the_rules_do_not_cover_is_not_reported_as_sound():
+def test_a_cohort_the_rules_do_not_cover_is_not_reported_as_sound(monkeypatch):
     """`contamination` passes an undeclared cohort on purpose, but "checked and
     sound" and "not covered" are different findings and a ledger that records
-    them as one number hides the second."""
-    verdicts = {item.hypothesis_id: item for item in judge(registry(), "2026-09-01T00:00:00+09:00")}
-    kinds = {item.verdict for item in verdicts.values()}
+    them as one number hides the second.
+
+    Every dimension in the committed registry is declared now, so the case is
+    made by taking one back out — which is also what a rule being removed would
+    look like.
+    """
+    monkeypatch.delitem(lookahead.COHORT_SPAN, "reaction")
+    verdicts = judge(registry(), "2026-09-01T00:00:00+09:00")
+    kinds = {item.verdict for item in verdicts}
     assert UNDECLARED in kinds
-    for item in verdicts.values():
+    for item in verdicts:
         if item.verdict == UNDECLARED:
             assert not lookahead.declares(item.dimension)
             assert "not declared" in item.reason
         if item.verdict == VALID:
             assert lookahead.declares(item.dimension)
+
+
+def test_every_dimension_the_registry_uses_is_covered_by_the_rules():
+    """An undeclared cohort in the committed registry means the rules have a
+    gap on knowledge that is already frozen — which is how dollar_environment
+    sat as `undeclared` while its labels turned on data from after the event."""
+    for item in registry().hypotheses:
+        assert lookahead.declares(item.dimension), item.dimension
 
 
 def test_the_committed_verdicts_are_the_ones_the_rules_produce_today():
@@ -157,8 +171,12 @@ def test_the_effective_status_is_the_latest_word_under_the_current_rules(tmp_pat
     assert {row["evaluated_at"] for row in current.values()} == {"2026-09-05T00:00:00+09:00"}
 
 
-@pytest.mark.parametrize("verdict,usable", [(VALID, True), (UNDECLARED, True), (INVALID, False)])
-def test_only_knowledge_the_rules_do_not_condemn_may_gather_evidence(verdict, usable):
+@pytest.mark.parametrize("verdict,usable", [(VALID, True), (UNDECLARED, False), (INVALID, False)])
+def test_only_knowledge_the_rules_affirmatively_clear_may_gather_evidence(verdict, usable):
+    """`undeclared` is not permission. Letting it through treated "we have not
+    looked" as "go ahead", and two hypotheses passed the gate on it whose
+    labels were afterwards measured to depend on data from seventy days after
+    the event they describe."""
     row = {
         "hypothesis_id": "LRH-X", "hypothesis_version": 1, "verdict": verdict,
         "evaluated_at": "2026-09-01T00:00:00+09:00",

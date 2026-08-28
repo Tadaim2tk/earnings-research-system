@@ -16,8 +16,11 @@ not meet the standard it now holds.
 
 Nothing here decides anything. It reports what the current rules say about
 what was frozen, and a hypothesis whose cohort the rules do not cover comes
-back as `undeclared` rather than as sound, so the gap is visible rather than
-counted as a pass.
+back as `undeclared` rather than as sound — a gap in the rules, not a finding
+about the hypothesis. Only an affirmative `valid` lets prospective work
+proceed: treating "we have not looked" as "go ahead" let two hypotheses
+through whose labels were afterwards measured to depend on data from seventy
+days after the event they describe.
 """
 
 import json
@@ -178,11 +181,15 @@ def unevaluated(registry, ledger: Sequence[dict], digest: Optional[str] = None) 
 def is_usable(hypothesis_id: str, hypothesis_version: int, ledger: Sequence[dict]) -> bool:
     """Whether prospective work may still be recorded against this hypothesis.
 
-    Unjudged is not usable either. A hypothesis nobody has checked under the
-    current rules is exactly the case this capability exists for.
+    Only an affirmative `valid`. Unjudged is not usable — a hypothesis nobody
+    has checked under the current rules is the case this capability exists for
+    — and neither is `undeclared`, which says the rules have nothing to say
+    about the cohort. Letting that through treated "we have not looked" as
+    "go ahead", and two hypotheses whose labels were later measured to depend
+    on data from after the event passed the gate on it.
     """
     row = effective_status(ledger).get((hypothesis_id, hypothesis_version))
-    return row is not None and row["verdict"] != INVALID
+    return row is not None and row["verdict"] == VALID
 
 
 def rates(registry, ledger: Sequence[dict], digest: Optional[str] = None) -> Dict[str, object]:

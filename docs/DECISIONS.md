@@ -979,8 +979,38 @@ Consequences: 初回の再評価結果は **invalid 17 / undeclared 2 / valid 0*
 
 **この数字は8/19ではない。** 8は `reaction` だけを数えた監査時点の値で、その後 `rank` / `judge` が汚染表に入った分が反映されていなかった。想定値に合わせず、常設検査の実装から独立に再計算した結果が17である。内訳は reaction 8 / rank 6 / judge 3。
 
-残る2件は `dollar_environment` で、`COHORT_SPAN` に載っていないため `undeclared`。この次元は `point_in_time_market_context` 由来で、TSOスナップショットは254件すべてで前日終値より前に使用可能なので、アンカーの観点では健全に見える。ただし `knowledge.py` は三分位の境界を**254件全体から**計算しており（`_quantile_thresholds`）、ある1件のラベルがその後のデータに依存する。これはアンカーとは別種の先読みであり、汚染表を拡張するかどうかは規則側の判断なので、ここでは `undeclared` として可視化するに留める。
+残る2件は `dollar_environment` で、当初 `COHORT_SPAN` に載っていないため `undeclared` とした。**この判断は誤りで、結果監査が撤回させた（ERS-ADR-0052）。**
 
 KPIは2つ出す。`retroactive_invalidation_rate`（過去の負債。規則を足すたび上がる）と、レジストリ凍結ごとの `invalidation_rate`（後のレジストリが前のレジストリと同じ誤りを繰り返していれば見える）。前者だけを見ると、**規則を二度と足さないことで数字が改善する**——それは誰も望まない結果である。
 
 本ADRの範囲は source validity のみ。trial開始後の rule immutability は Capability 1.5 として分ける。
+
+## ERS-ADR-0052
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: ERS-ADR-0051 は `dollar_environment` の2件を `undeclared` に留めた。「スコアは point-in-time だが、三分位の境界が全254件から計算されている。これはアンカーとは別種の先読みであり、汚染表を拡張するかは規則側の判断」という理由だった。
+
+結果監査は**事実関係を3点とも裏付けたうえで、結論が誤りだと判定した**。
+
+- スコアが point-in-time であることは正しい。`usable_from_utc` は254/254件で採点起点より前（リード 中央値 7.26時間）。
+- しかしラベルはスコアではない。**スコアが記録全体のどの三分位に入るか**であり、境界は全254件から計算される。スコアは 49.55〜50.49 の31の離散値に密集し、境界の幅は 0.09。
+- **純粋な反実仮想**: 2026-06-26 の 7630（score 49.96、ラベル `middle`）について、**その行自身の入力を一切変えず**、後日の215件のスコアだけを ±0.10 動かすと、ラベルは `weak` と `strong` に動く。後日を全削除すると `strong`。**3値すべてに動く。**
+- 到着順に計算し直すと **40/252件（15.9%）**がラベルを変える。
+- 境界確定に必要な最後のスコアが使えるのは 2026-08-21。最古のイベントは 2026-06-10 で、**そのラベルは記述対象の72日後まで確定しない**。`prev_close` / `next_open` / `next_close` / `d5_close` / `d20_close` の**どのアンカーでも入手不可能**。
+
+加えて、実害が測定された。`is_usable` は `INVALID` だけを弾いていたため、`undeclared` の2件は prospective 証拠収集のゲートを**通過した**。ADR-0051 自身が「invalid または未判定の仮説には prospective 評価を通さない」と書いた条件が、この2件について機能していなかった。
+
+Decision:
+
+- **`dollar_environment` と `volatility_environment` を `COHORT_SPAN` に加える。** span は `frozenset(RETURN_ANCHOR.values())` — つまり**すべてのアンカー**。ラベルがどのアンカーでも入手できないという事実を、そのまま表現する。列挙ではなく導出にしてあるので、アンカーが増えれば自動的に含まれる。`volatility_environment` は同じ機構で、19仮説では未使用だが同じ債務を持つ（29/226 が不一致）。
+- **`is_usable` は `valid` のみを通す。** `undeclared` は「規則が何も言っていない」であって許可ではない。「まだ見ていない」を「進めてよい」として扱ったことが、先読みが実測された2件を通した原因である。
+- **ADR-0051 の用語を訂正する。** 「TSOスナップショットは前日終値より前に使用可能」と書いたが、実データでは `normalized_prices.legacy_date_close == raw.prev_close` であり、`prev_close` は**当日の終値**である（`lookahead.py` の docstring の方が正しい）。
+
+Consequences: 規則が変わったので digest が `3d7c2657` から `b8138a74` へ動き、19件すべてが未判定になった。再走査して追記した結果、**invalid 19 / undeclared 0 / valid 0**、遡及無効化率 **1.0**。台帳には両方の規則バージョンの判定が残っている（38行）。これは仕組みが設計どおり動いた最初の実例である: 規則が伸びた → 過去の判定が無効になった → 再審査が要求された → 履歴が残った。
+
+**現在、prospective 証拠を集められる凍結仮説は1件も無い。** 19件すべてが前日終値起点のリターンで採点されており、規則が扱うどのコホートもその終値より後に確定するため、`valid` は構造的に到達不能である。これは不具合ではなく結論であり、テストで固定した（`test_no_frozen_hypothesis_is_currently_affirmatively_valid`）。汚染を除去した研究から新しいレジストリを凍結するまで、このレジストリは証拠収集に使えない。
+
+監査の結果として: 規則が**過剰に**汚染判定している次元は見つからなかった。`reaction` / `rank` / `judge` / `narrative` / `surprise` / `rc1-3` はいずれも、`field_history.jsonl` 上で254/254件が当日15:00 JST より後（最短でも4.94時間後）に確定しており、`{prev_close}` は正当。`reaction` の変更時刻は `next_open` / `next_close` と同一分布で、`{prev_close, next_open}` も正当。

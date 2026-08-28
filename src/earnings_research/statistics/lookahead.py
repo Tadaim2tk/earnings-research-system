@@ -64,6 +64,20 @@ COHORT_SPAN: Dict[str, FrozenSet[str]] = {
     "rc3": frozenset({"prev_close"}),
     "judge": frozenset({"prev_close"}),
     "surprise": frozenset({"prev_close"}),
+    # Every anchor, because these labels are not available at any of them. The
+    # score behind them is point-in-time — the market snapshot is usable a
+    # median of seven hours before the close it would be measured from — but
+    # the label is not the score. It is which third of the whole record the
+    # score falls in, and those boundaries are computed over all 254 rows. The
+    # scores sit between 49.55 and 50.49 with the boundaries 0.09 apart, so the
+    # third a row lands in turns on rows that had not happened yet: moving only
+    # the later scores by a tenth, with the row's own input untouched, moves it
+    # through all three labels. Recomputed as each row arrives, 40 of 252
+    # labels differ. The last score the boundaries need is usable on 2026-08-21
+    # and the earliest event is 2026-06-10, so the label is fixed seventy-two
+    # days after the day it describes.
+    "dollar_environment": frozenset(RETURN_ANCHOR.values()),
+    "volatility_environment": frozenset(RETURN_ANCHOR.values()),
 }
 
 
