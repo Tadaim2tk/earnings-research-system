@@ -3,7 +3,12 @@
 from collections import defaultdict
 from statistics import mean
 
-from earnings_research.statistics.cohort import adjust_for_multiplicity, summarise
+from earnings_research.statistics.cohort import (
+    adjust_for_multiplicity,
+    base_rate,
+    summarise,
+    tail_capture,
+)
 from earnings_research.statistics.lookahead import contamination
 
 # Returns from the previous close, and the same horizons from the opening
@@ -15,6 +20,15 @@ RETURN_FIELDS = (
     "close_d5", "close_d20",
 )
 
+# Where the money is when outcomes are fat-tailed. A cohort with a flat median
+# still earns its place if it holds the large moves more often than the run of
+# the field, and a tidy median is worth little if it never catches one.
+TAIL_THRESHOLDS = (0.10, 0.20)
+
+# A per-ticker breakdown answers "what did this company do", not "does this
+# predict". It carries no test.
+DESCRIPTIVE_VIEW = "by_ticker"
+
 
 def _number(value):
     if value in (None, ""):
@@ -25,7 +39,7 @@ def _number(value):
         return None
 
 
-def _metrics(rows, cohort_key=None):
+def _metrics(rows, cohort_key=None, base_rates=None):
     """Summarise one group, refusing outcomes that contain its own definition."""
     result = {"record_count": len(rows)}
     for field in RETURN_FIELDS:
@@ -44,8 +58,24 @@ def _metrics(rows, cohort_key=None):
             "available_count": len(values),
             "missing_count": len(rows) - len(values),
             **summary.as_dict(),
+            "tail_capture": [
+                tail_capture(
+                    values, threshold, (base_rates or {}).get((field, threshold))
+                ).as_dict()
+                for threshold in TAIL_THRESHOLDS
+            ],
         }
     return result
+
+
+def _base_rates(rows):
+    """How often the whole field reached each threshold, for comparison."""
+    rates = {}
+    for field in RETURN_FIELDS:
+        values = [value for row in rows if (value := _number(row.get(field))) is not None]
+        for threshold in TAIL_THRESHOLDS:
+            rates[(field, threshold)] = base_rate(values, threshold)
+    return rates
 
 
 def _open_anchored(row):
@@ -69,36 +99,67 @@ def _open_anchored(row):
     return enriched
 
 
-def _group(rows, key):
+def _group(rows, key, base_rates=None):
     groups = defaultdict(list)
     for row in rows:
         value = row.get(key) or "not_recorded"
         groups[value].append(row)
-    return {value: _metrics(items, cohort_key=key) for value, items in sorted(groups.items())}
+    return {
+        value: _metrics(items, cohort_key=key, base_rates=base_rates)
+        for value, items in sorted(groups.items())
+    }
 
 
 def _multiplicity(summary):
-    """Correct every cohort sign test together.
+    """Correct each view's tests together, and only where a test was asked.
 
-    Read one at a time, a report of this many groups will always show something
-    under p<0.05. The corrected value is what says whether it is worth reading.
+    Benjamini-Hochberg controls the false discovery rate within one family of
+    related questions, so each view is corrected separately: "does rank predict"
+    and "does this reason code predict" are different questions and pooling them
+    would spend one's power on the other.
+
+    by_ticker is left out entirely. A per-ticker breakdown is a lookup, not a
+    hypothesis, and it accounted for 3466 of 4252 comparisons here — correcting
+    across it would bury a real effect in the views that are asking something.
+    Its p-values are removed rather than shown uncorrected, because a p beside
+    one company's five observations invites being read as evidence.
     """
-    raw = {}
+    families = {}
     for view, groups in summary.items():
         if not view.startswith("by_") or not isinstance(groups, dict):
             continue
+        descriptive = view == DESCRIPTIVE_VIEW
+        raw = {}
         for label, metrics in groups.items():
             for field, stats in metrics.items():
-                if isinstance(stats, dict) and stats.get("sign_test_p") is not None:
-                    raw["%s/%s/%s" % (view, label, field)] = stats["sign_test_p"]
-    adjusted = adjust_for_multiplicity(raw)
-    for name, value in adjusted.items():
-        view, label, field = name.split("/")
-        summary[view][label][field]["sign_test_p_adjusted"] = value
-    return {"comparisons": len(raw), "method": "benjamini_hochberg"}
+                if not isinstance(stats, dict):
+                    continue
+                if stats.get("sign_test_p") is not None:
+                    if descriptive:
+                        stats.pop("sign_test_p")
+                    else:
+                        raw["%s/%s/sign" % (label, field)] = stats["sign_test_p"]
+                for index, tail in enumerate(stats.get("tail_capture") or []):
+                    if tail.get("p_value") is None:
+                        continue
+                    if descriptive:
+                        tail.pop("p_value")
+                    else:
+                        raw["%s/%s/tail%d" % (label, field, index)] = tail["p_value"]
+        if descriptive:
+            families[view] = {"comparisons": 0, "corrected": False}
+            continue
+        for name, value in adjust_for_multiplicity(raw).items():
+            label, field, which = name.split("/")
+            if which == "sign":
+                groups[label][field]["sign_test_p_adjusted"] = value
+            else:
+                groups[label][field]["tail_capture"][int(which[4:])]["p_value_adjusted"] = value
+        families[view] = {"comparisons": len(raw), "corrected": True}
+    return {"method": "benjamini_hochberg", "scope": "per_view", "families": families}
 
 
-def _reason_groups(rows):
+def _reason_groups(rows, base_rates=None):
     groups = defaultdict(list)
     for row in rows:
         reasons = {row.get(field) for field in ("rc1", "rc2", "rc3") if row.get(field)}
@@ -106,11 +167,15 @@ def _reason_groups(rows):
             reasons = {"not_recorded"}
         for reason in reasons:
             groups[reason].append(row)
-    return {value: _metrics(items) for value, items in sorted(groups.items())}
+    return {
+        value: _metrics(items, base_rates=base_rates)
+        for value, items in sorted(groups.items())
+    }
 
 
 def build_aggregation(rows, context_views, source_commit):
     rows = [_open_anchored(row) for row in rows]
+    rates = _base_rates(rows)
     context_by_id = {item["legacy_record_id"]: item for item in context_views}
     context_groups = defaultdict(list)
     risk_on_scores = []
@@ -138,19 +203,19 @@ def build_aggregation(rows, context_views, source_commit):
         "record_mode": "legacy_observational",
         "source_commit": source_commit,
         "record_count": len(rows),
-        "overall": _metrics(rows),
-        "by_ticker": _group(rows, "code"),
-        "by_rank": _group(rows, "rank"),
-        "by_narrative": _group(rows, "narrative"),
-        "by_reaction": _group(rows, "reaction"),
-        "by_reason_code": _reason_groups(rows),
+        "overall": _metrics(rows, base_rates=rates),
+        "by_ticker": _group(rows, "code", rates),
+        "by_rank": _group(rows, "rank", rates),
+        "by_narrative": _group(rows, "narrative", rates),
+        "by_reaction": _group(rows, "reaction", rates),
+        "by_reason_code": _reason_groups(rows, rates),
         "market_context": {
             "linked_count": len(context_by_id),
             "missing_count": len(rows) - len(context_by_id),
             "mean_risk_on_score": round(mean(risk_on_scores), 4) if risk_on_scores else None,
             "mean_risk_off_score": round(mean(risk_off_scores), 4) if risk_off_scores else None,
             "by_relative_dominance": {
-                label: _metrics(items) for label, items in sorted(context_groups.items())
+                label: _metrics(items, base_rates=rates) for label, items in sorted(context_groups.items())
             },
             "classification_note": "Relative dominance compares the two stored TSO scores only; it is not a TSO regime or trading signal.",
         },

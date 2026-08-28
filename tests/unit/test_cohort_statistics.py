@@ -3,11 +3,14 @@ import pytest
 from earnings_research.statistics.cohort import (
     MIN_REPORTABLE,
     adjust_for_multiplicity,
+    base_rate,
+    binomial_against,
     clopper_pearson,
     concentration,
     median_interval,
     sign_test,
     summarise,
+    tail_capture,
 )
 from earnings_research.statistics.lookahead import contamination, sound_fields
 
@@ -192,3 +195,54 @@ def test_an_unrecognised_cohort_is_not_silently_blessed_or_blocked():
 
 def test_sound_fields_drops_only_the_circular_ones():
     assert sound_fields("shodo", ["gap", "ret_d5", "open_d5"]) == ["open_d5"]
+
+
+# --- 大幅上昇を捕まえられたか -------------------------------------------------
+
+def test_a_flat_median_cohort_can_still_be_the_one_holding_the_big_moves():
+    """Which is the whole reason this is measured separately from the middle."""
+    flat_but_catches = [0.40, 0.35] + [-0.002] * 18
+    tidy_but_never = [0.01] * 20
+    assert summarise(flat_but_catches).median < summarise(tidy_but_never).median
+    assert tail_capture(flat_but_catches, 0.10, 0.05).hits == 2
+    assert tail_capture(tidy_but_never, 0.10, 0.05).hits == 0
+
+
+def test_a_lift_on_its_own_is_not_read_as_a_finding():
+    """One hit in twelve is 1.7x the base rate and means nothing."""
+    capture = tail_capture([0.15] + [0.0] * 11, 0.10, 0.05)
+    assert capture.lift > 1.5
+    assert capture.distinguishable is False
+    assert capture.p_value > 0.05
+
+
+def test_a_rate_clear_of_the_base_rate_is_distinguishable():
+    capture = tail_capture([0.15] * 12 + [0.0] * 8, 0.10, 0.05)
+    assert capture.interval.low > 0.05
+    assert capture.distinguishable is True
+    assert capture.p_value < 0.05
+
+
+def test_the_threshold_is_inclusive():
+    assert tail_capture([0.10, 0.0999], 0.10, 0.05).hits == 1
+
+
+def test_base_rate_counts_the_whole_field():
+    assert base_rate([0.2, 0.05, 0.0, 0.0], 0.10) == 0.25
+    assert base_rate([], 0.10) is None
+
+
+def test_a_cohort_without_a_base_rate_offers_no_verdict():
+    """Nothing to compare against, so no lift and no claim."""
+    capture = tail_capture([0.5, 0.5], 0.10, None)
+    assert capture.lift is None and capture.p_value is None
+    assert capture.distinguishable is False
+
+
+@pytest.mark.parametrize("probability", [0.0, 1.0, -0.1, 1.5])
+def test_an_impossible_base_rate_produces_no_p_value(probability):
+    assert binomial_against(3, 10, probability) is None
+
+
+def test_the_binomial_is_symmetric_about_the_base_rate():
+    assert binomial_against(0, 10, 0.5) == binomial_against(10, 10, 0.5)

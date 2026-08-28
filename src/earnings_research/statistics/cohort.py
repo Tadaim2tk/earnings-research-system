@@ -185,6 +185,102 @@ def _verdict(summary: CohortSummary) -> str:
     return "no_signal"
 
 
+@dataclass(frozen=True)
+class TailCapture:
+    """Whether a cohort caught the large moves, and whether that is telling.
+
+    For fat-tailed outcomes this often matters more than the middle. A cohort
+    whose median sits at zero is still worth holding if it contains the +40%
+    names at better than the base rate, and a cohort with a tidy median is not
+    if it never catches one.
+    """
+
+    threshold: float
+    n: int
+    hits: int
+    rate: Optional[float]
+    interval: Interval
+    base_rate: Optional[float]
+    lift: Optional[float]
+    distinguishable: bool
+    p_value: Optional[float] = None
+
+    def as_dict(self) -> Dict[str, object]:
+        return {
+            "threshold": self.threshold,
+            "n": self.n,
+            "hits": self.hits,
+            "rate": self.rate,
+            "interval": self.interval.as_dict(),
+            "base_rate": self.base_rate,
+            "lift": self.lift,
+            "distinguishable": self.distinguishable,
+            "p_value": self.p_value,
+        }
+
+
+def tail_capture(
+    values: Sequence[float],
+    threshold: float,
+    base_rate: Optional[float] = None,
+) -> TailCapture:
+    """How often this cohort reached ``threshold``, against the base rate.
+
+    The lift on its own invites reading noise: one hit out of twelve is 1.7x
+    the base rate and means nothing. ``distinguishable`` is the figure to read,
+    and it is true only when the exact interval clears the base rate entirely.
+    """
+    n = len(values)
+    if n == 0:
+        return TailCapture(threshold, 0, 0, None, Interval(None, None), base_rate, None, False)
+    hits = sum(1 for value in values if value >= threshold)
+    rate = hits / n
+    interval = clopper_pearson(hits, n)
+    lift = None
+    distinguishable = False
+    if base_rate:
+        lift = round(rate / base_rate, 4)
+        distinguishable = (
+            interval.low is not None
+            and interval.high is not None
+            and (interval.low > base_rate or interval.high < base_rate)
+        )
+    return TailCapture(
+        threshold=threshold,
+        n=n,
+        hits=hits,
+        rate=rate,
+        interval=interval,
+        base_rate=base_rate,
+        lift=lift,
+        distinguishable=distinguishable,
+        p_value=binomial_against(hits, n, base_rate) if base_rate else None,
+    )
+
+
+def binomial_against(successes: int, n: int, probability: float) -> Optional[float]:
+    """Exact two-sided probability of this many hits at the base rate.
+
+    A lift needs this beside it. Fifteen reason codes each showing a lift will
+    always contain a three-times one, and without a p-value entering the
+    multiplicity correction there is nothing to stop it being quoted.
+    """
+    if n == 0 or not 0 < probability < 1:
+        return None
+    probabilities = [
+        comb(n, k) * probability ** k * (1 - probability) ** (n - k) for k in range(n + 1)
+    ]
+    observed = probabilities[successes]
+    return round(min(1.0, sum(p for p in probabilities if p <= observed * (1 + 1e-9))), 6)
+
+
+def base_rate(values: Sequence[float], threshold: float) -> Optional[float]:
+    """Share of the whole population that reached ``threshold``."""
+    if not values:
+        return None
+    return sum(1 for value in values if value >= threshold) / len(values)
+
+
 def sign_test(values: Sequence[float], n_independent: Optional[int] = None) -> Optional[float]:
     """Two-sided exact binomial probability of this many winners by chance.
 
