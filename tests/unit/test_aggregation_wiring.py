@@ -557,75 +557,137 @@ def _expected_figures(rows, column, label, entry_column, exit_column):
     return _figures(_cell(summary))
 
 
-ANCHORED_TABLES = (
-    ("### ランク別", "rank", "B+", 0, "next_open", "next_close"),
-    ("### ランク別", "rank", "B+", 2, "next_open", "d20_close"),
-    ("### ランク別", "rank", "B", 1, "next_open", "d5_close"),
-    ("### ナラティブ整合別", "narrative", "整合", 0, "next_open", "d20_close"),
-    ("### 判断別", "judge", "監視", 0, "next_open", "d20_close"),
-    ("### 初動分類別", "shodo", "GU", 1, "next_open", "d5_close"),
-    ("### 反応分類別", "reaction", "GU継続", 0, "next_close", "d5_close"),
-    ("### AIサプライズ", "surprise", "+1", 1, "next_open", "d20_close"),
+# Every published table, with the two price columns each of its columns is
+# supposed to span, written out here rather than looked up: the thing under
+# test is which prices the report uses, and asking prices_for would be asking
+# the code being checked for its own answer.
+PUBLISHED_TABLES = (
+    ("### ランク別", "rank",
+     (("next_open", "next_close"), ("next_open", "d5_close"), ("next_open", "d20_close"))),
+    ("### ナラティブ整合別", "narrative", (("next_open", "d20_close"),)),
+    ("### 判断別", "judge", (("next_open", "d20_close"),)),
+    ("### 初動分類別", "shodo",
+     (("next_open", "next_close"), ("next_open", "d5_close"), ("next_open", "d20_close"))),
+    ("### 反応分類別", "reaction", (("next_close", "d5_close"), ("next_close", "d20_close"))),
+    ("### AIサプライズ", "surprise", (("next_open", "next_close"), ("next_open", "d20_close"))),
 )
 
 
-@pytest.mark.parametrize(
-    "heading,column,label,position,entry_column,exit_column", ANCHORED_TABLES
-)
-def test_a_published_table_is_measured_between_the_two_prices_it_names(
-    heading, column, label, position, entry_column, exit_column
-):
-    """Fixing every table's entry price to the previous close failed nothing.
-
-    The figures are compared cell by cell, at a named row of a named table, so
-    a matching string somewhere else in the section cannot stand in for the
-    one under test.
-    """
+def _explored_source(source):
+    """The raw rows the published statistics are built from."""
     from earnings_research.legacy_research.aggregation import _open_anchored
     from earnings_research.statistics.holdout import split_by_date
 
-    source = _varied_rows(60)
     prepared = [_open_anchored(row) for row in source]
-    explored_ids = {id(row) for row in split_by_date(prepared).exploration}
-    explored = [raw for raw, ready in zip(source, prepared) if id(ready) in explored_ids]
-    cell = _table_rows(_statistics_section(_dashboard(source)), heading)[label][position]
-    assert _figures(cell) == _expected_figures(
-        explored, column, label, entry_column, exit_column
-    )
+    kept = {id(row) for row in split_by_date(prepared).exploration}
+    return [raw for raw, ready in zip(source, prepared) if id(ready) in kept]
+
+
+@pytest.mark.parametrize("heading,column,prices", PUBLISHED_TABLES)
+def test_every_published_column_is_measured_between_the_prices_it_names(
+    heading, column, prices
+):
+    """Every label of every table at every position.
+
+    The previous version listed eight of the twelve columns by hand and missed
+    two of the three in the gap table — reverting the first of those alone put
+    gap-up back at 83% positive and gap-down at 14%, and failed nothing.
+    Deriving the list from the tables means a new column cannot be added
+    without being covered.
+    """
+    source = _varied_rows(60)
+    explored = _explored_source(source)
+    published = _table_rows(_statistics_section(_dashboard(source)), heading)
+    assert published, heading
+    checked = 0
+    for label, cells in published.items():
+        assert len(cells) == len(prices), (heading, label)
+        for cell, (entry_column, exit_column) in zip(cells, prices):
+            if "%" not in cell:
+                continue
+            assert _figures(cell) == _expected_figures(
+                explored, column, label, entry_column, exit_column
+            ), (heading, label, entry_column, exit_column)
+            checked += 1
+    assert checked, heading
 
 
 def test_the_previous_close_would_give_a_different_answer():
     """The control: without it the test above could pass on any anchor."""
+    source = _varied_rows(60)
+    explored = _explored_source(source)
+    moved = 0
+    for heading, column, prices in PUBLISHED_TABLES:
+        labels = _table_rows(_statistics_section(_dashboard(source)), heading)
+        for label in labels:
+            for entry_column, exit_column in prices:
+                sound = _figures_or_none(explored, column, label, entry_column, exit_column)
+                stale = _figures_or_none(explored, column, label, "prev_close", exit_column)
+                if sound is None or stale is None:
+                    continue
+                moved += sound != stale
+    assert moved >= 20
+
+
+def _figures_or_none(rows, column, label, entry_column, exit_column):
+    """The published figures, or None where the cohort prints no numbers."""
+    try:
+        return _expected_figures(rows, column, label, entry_column, exit_column)
+    except (TypeError, AssertionError):
+        return None
+
+
+def test_the_published_cell_puts_the_median_before_the_mean():
+    """Independent of _cell: swapping the two inside it left the expectations
+    swapped as well, because they are built with the same function."""
+    from statistics import fmean, median
+
+    from earnings_research.legacy_research.publishing import _avg
+
+    values = [-0.01] * 9 + [0.50]
+    rows = [{"code": "N%d" % index, "v": value} for index, value in enumerate(values)]
+    win_rate, second, third, count = _figures(_avg(rows, lambda _row: True, "v"))
+    assert count == len(values)
+    assert second == pytest.approx(round(median(values) * 100, 1))
+    assert third == pytest.approx(round(fmean(values) * 100, 1))
+    assert second != third
+
+
+def test_the_dashboard_prints_the_findings_line_it_computes():
+    """Both helpers were pinned as functions while nothing checked the reports
+    print them. Hardcoding either string in the renderer failed nothing."""
     from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import (
+        findings_line,
+        render_dashboard,
+        statistics_scope,
+    )
     from earnings_research.statistics.holdout import split_by_date
 
     source = _varied_rows(60)
     prepared = [_open_anchored(row) for row in source]
-    explored_ids = {id(row) for row in split_by_date(prepared).exploration}
-    explored = [raw for raw, ready in zip(source, prepared) if id(ready) in explored_ids]
-    for heading, column, label, position, entry_column, exit_column in ANCHORED_TABLES:
-        sound = _expected_figures(explored, column, label, entry_column, exit_column)
-        stale = _expected_figures(explored, column, label, "prev_close", exit_column)
-        assert sound != stale, (heading, label)
+    summary = build_aggregation(source, [], "test")
+    body = render_dashboard(source, "2026-09-01 00:00", aggregation=summary)
+    assert findings_line(summary) in body
+    assert statistics_scope(split_by_date(prepared)) in body
 
 
-def test_the_scope_of_the_statistics_is_stated_beside_them():
-    body = _statistics_section(_dashboard(_varied_rows(60)))
-    assert "統計は探索対象" in body
-
-
-def test_the_note_states_its_scope_inside_the_part_it_asks_to_be_published():
-    """It was stated above the line the note tells the reader to copy from, so
-    the published article carried the figures and left their scope behind."""
+def test_the_note_prints_the_findings_line_it_computes():
     from earnings_research.legacy_research.aggregation import _open_anchored
-    from earnings_research.legacy_research.publishing import render_note
+    from earnings_research.legacy_research.publishing import (
+        findings_line,
+        render_note,
+        statistics_scope,
+    )
     from earnings_research.statistics.holdout import split_by_date
 
-    rows = [_open_anchored(row) for row in _varied_rows(60)]
-    text = render_note(rows, date(2026, 9, 1))
+    source = _varied_rows(60)
+    prepared = [_open_anchored(row) for row in source]
+    summary = build_aggregation(prepared, [], "test")
+    text = render_note(prepared, date(2026, 9, 1), aggregation=summary)
     published = text[text.index("本文ここから"):]
-    assert "## 今週時点の検証メモ" in published
-    assert "統計は探索対象" in published
+    assert findings_line(summary) in published
+    assert statistics_scope(split_by_date(prepared)) in published
 
 
 def test_the_base_rate_never_reads_the_reserved_period():
@@ -659,18 +721,6 @@ def test_the_base_rate_never_reads_the_reserved_period():
                 assert [item["base_rate"] for item in mine] == [
                     item["base_rate"] for item in theirs
                 ], (view, label, field)
-
-
-def test_the_dashboard_says_what_survived_the_correction():
-    """The sentence this whole change exists to produce, in the place people
-    read. The words for correction, p-value, interval and verdict occurred zero
-    times across all three published files, so every table heading phrased as a
-    question read as though the figures beneath it were the answer."""
-    body = _statistics_section(_dashboard(_varied_rows(80)))
-    first = body.splitlines()[2]
-    assert "Benjamini-Hochberg" in first
-    assert "件の比較" in first
-    assert "0件" in first or "残った" in first
 
 
 def test_a_tail_driven_cohort_is_marked_where_it_is_published():
@@ -965,26 +1015,69 @@ def test_every_corrected_half_verdict_answers_to_the_corrected_value(summary):
     assert checked > 100
 
 
-def test_the_aggregation_hands_the_names_down_to_every_measure():
-    """summarise, sign_test and tail_capture each count names, and the wiring
-    that gives them the names was pinned by nothing: dropping all three
-    arguments moved four thousand five hundred leaves and failed no test."""
+def _repeating_names_rows():
+    """Names that repeat on both sides of the comparison.
+
+    The cohort is one company many times. The comparison population is three
+    companies, one of which repeats and reaches the threshold every time — so
+    counting its rows and counting its names give different base rates, which
+    is what makes the comparison_clusters wiring observable at all. The
+    earlier fixture had a flat comparison population, where the two counts
+    agree and dropping the argument changed nothing.
+    """
     rows = []
-    for index in range(40):
-        rows.append({
-            "code": "SAME", "date": "2026-06-%02d" % (index % 28 + 1),
-            "prev_close": "100", "next_open": "100",
-            "next_close": "%d" % (101 + index % 3), "d5_close": "104", "d20_close": "106",
-            "gap": "0", "ret_d1": "0.01", "ret_d5": "0.04", "ret_d20": "0.06",
-            "shodo": "フラット", "reaction": "GU継続", "rank": "B",
-            "narrative": "中立", "judge": "監視", "surprise": "0",
-        })
-    stats = build_aggregation(rows, [], "test")["by_rank"]["B"]["open_d5"]
+
+    def make(code, day, ret):
+        close = 100 * (1 + ret)
+        return {
+            "code": code, "date": "2026-06-%02d" % day,
+            "prev_close": "100", "next_open": "100", "next_close": "%.2f" % close,
+            "d5_close": "%.2f" % close, "d20_close": "%.2f" % close,
+            "gap": "0", "ret_d1": "%.4f" % ret, "ret_d5": "%.4f" % ret,
+            "ret_d20": "%.4f" % ret, "shodo": "フラット", "reaction": "GU継続",
+            "narrative": "整合", "judge": "監視", "surprise": "0",
+        }
+
+    # Enough that the cohort still clears the twelve-row floor for the
+    # stability split after the reserve takes its third.
+    for index in range(30):
+        rows.append({**make("AAAA", index % 18 + 1, 0.30), "rank": "A"})
+    for index in range(24):
+        rows.append({**make("B000", index % 18 + 1, 0.30), "rank": "B"})
+    for index in range(3):
+        rows.append({**make("B001", index + 1, 0.0), "rank": "B"})
+        rows.append({**make("B002", index + 1, 0.0), "rank": "B"})
+    return sorted(rows, key=lambda row: row["date"])
+
+
+def test_the_aggregation_hands_the_names_down_to_every_measure():
+    """Four arguments carry the names into summarise, the sign test, tail
+    capture and the stability split, and only the first was pinned: dropping
+    the other three moved four and a half thousand leaves of published JSON and
+    failed one test. The earlier version of this said it covered all four and
+    asserted three numbers that all come from summarise."""
+    stats = build_aggregation(_repeating_names_rows(), [], "test")["by_rank"]["A"]["open_d1"]
+    # summarise: many rows, one name.
+    assert stats["available_count"] > 5
     assert stats["n_independent"] == 1
-    assert stats["available_count"] > 20
-    # One name cannot assert a direction, whatever the row count says.
     assert stats["median_interval"] == {"low": None, "high": None}
-    assert stats["verdict"] != "directional"
+    # sign test
+    assert stats["n_directional"] == 1
+    assert stats["sign_test_p"] == 1.0
+    # tail capture: one name, not twenty-four rows. One name is below the
+    # reporting floor, so it reports nothing — which is the point. On rows it
+    # would be twenty-four hits out of twenty-four against a base rate of zero,
+    # and would call itself distinguishable.
+    capture = stats["tail_capture"][0]
+    assert (capture["n"], capture["hits"]) == (1, 0)
+    assert capture["distinguishable"] is False
+    # And the comparison population is counted the same way. On its rows the
+    # base rate is 0.727 — one company appearing many times, every appearance
+    # a hit; on its names it is one in three.
+    assert capture["base_rate"] == pytest.approx(1 / 3)
+    # stability
+    for half in ("first_half", "second_half"):
+        assert stats["stability"][half]["n_independent"] == 1
 
 
 def test_the_scope_sentence_states_the_split_it_was_given():
