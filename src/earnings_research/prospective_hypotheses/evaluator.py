@@ -294,10 +294,19 @@ def summarize_trials(registry, bundles, evaluated_at):
         # are compared on the trials themselves; the reserved period belongs to
         # historical exploration and has no counterpart in prospective trials,
         # so that condition is left unevaluated rather than guessed at.
+        reversed_halves = _halves_reversed(definition, target, comparator)
         stop_reason = should_stop(
             definition,
-            halves_reversed=_halves_reversed(definition, target, comparator),
+            halves_reversed=reversed_halves,
             revisions=definition.hypothesis_version - 1,
+        )
+        # Named rather than implied. The reserved-effect condition is absent
+        # from this list on every hypothesis, which is the honest report: the
+        # reserved period belongs to historical exploration and prospective
+        # trials have no counterpart to compare against, so a rule fixed on it
+        # has never once been looked at.
+        evaluated = [] if definition.assessment_rule.stop_rule is None else (
+            (["halves_reverse"] if reversed_halves is not None else []) + ["revisions"]
         )
         if stop_reason is not None:
             # A hypothesis that met its own abandonment condition is finished.
@@ -325,6 +334,7 @@ def summarize_trials(registry, bundles, evaluated_at):
             last_evaluated_at=max((item.recorded_at for item in items), default=None),
             production_review_eligible=False,
             stop_reason=stop_reason,
+            stop_conditions_evaluated=evaluated,
             note=note,
         ))
     return HypothesisStatusSnapshot(

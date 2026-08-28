@@ -331,7 +331,20 @@ class HypothesisStatus(BaseModel):
     # Why this hypothesis is finished under its own frozen stop rule, or None
     # while it stays open. Versions carrying no stop rule are always None.
     stop_reason: Optional[str] = None
+    # Which of the frozen conditions the evaluation was actually able to look
+    # at. A condition with no data behind it never fires, and without this the
+    # difference between "checked and did not fire" and "never checked" is
+    # invisible: the reserved-effect condition has no counterpart in
+    # prospective trials and has never been evaluated once.
+    stop_conditions_evaluated: List[str] = Field(default_factory=list)
     note: str
+
+
+    @model_validator(mode="after")
+    def validate_status(self):
+        if (self.stop_reason is not None) != (self.status == "stopped"):
+            raise ValueError("a stopped hypothesis carries its reason, and only a stopped one")
+        return self
 
 
 class HypothesisStatusSnapshot(BaseModel):

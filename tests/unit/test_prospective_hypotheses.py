@@ -566,3 +566,70 @@ def test_an_unrelated_registry_is_not_a_successor():
     stranger.registry_id = "SOMETHING-ELSE"
     problems = stop_rule_relaxations(previous, stranger)
     assert any("is not a successor" in problem for problem in problems)
+
+
+def test_a_status_and_a_stop_reason_cannot_disagree():
+    """They were derived independently, so `supported` and a stop reason could
+    ride together and a stopped hypothesis could carry none."""
+    from earnings_research.prospective_hypotheses.models import HypothesisStatus
+
+    fields = dict(
+        hypothesis_id="LRH-X", hypothesis_version=1, phase="pre_event", priority="primary",
+        prospective_trials=0, prospective_successes=0, prospective_failures=0,
+        comparator_observations=0, target_mean_return=None, comparator_mean_return=None,
+        prospective_effect=None, target_positive_rate=None, comparator_positive_rate=None,
+        prospective_positive_rate_effect=None, distinct_event_quarters=0,
+        last_evaluated_at=None, note="x",
+    )
+    with pytest.raises(ValidationError):
+        HypothesisStatus(status="supported", stop_reason="halves reversed", **fields)
+    with pytest.raises(ValidationError):
+        HypothesisStatus(status="stopped", stop_reason=None, **fields)
+    assert HypothesisStatus(status="stopped", stop_reason="halves reversed", **fields)
+
+
+def test_a_condition_that_was_never_looked_at_says_so():
+    """The reserved-effect condition has no counterpart in prospective trials
+    and is never passed, so it can never fire. Reporting which conditions were
+    evaluated is the difference between that and a condition that was checked
+    and did not fire."""
+    from earnings_research.prospective_hypotheses.evaluator import summarize_trials
+
+    definition = registry().hypotheses[0].model_copy(deep=True)
+    definition.assessment_rule = definition.assessment_rule.model_copy(
+        update={"stop_rule": stop_rule()}
+    )
+    one = registry().model_copy(deep=True)
+    one.hypotheses = [definition]
+    one.source_candidate_count = 1
+    status = summarize_trials(one, [], datetime(2026, 10, 1, 12, tzinfo=JST)).hypotheses[0]
+    assert "revisions" in status.stop_conditions_evaluated
+    assert "reserved_effect" not in status.stop_conditions_evaluated
+
+
+def test_the_status_snapshot_matches_its_committed_schema(tmp_path):
+    """Nothing validated this schema, so `stopped` and stop_reason were hand
+    added to it with nothing detecting drift from the model."""
+    from earnings_research.prospective_hypotheses.evaluator import summarize_trials
+
+    schema = json.loads(
+        (ROOT / "schemas/analysis/prospective_hypothesis_status.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    snapshot = summarize_trials(registry(), [], datetime(2026, 10, 1, 12, tzinfo=JST))
+    jsonschema.validate(json.loads(snapshot.model_dump_json()), schema)
+    for name in ("stopped", "supported", "rejected"):
+        assert name in schema["$defs"]["HypothesisStatus"]["properties"]["status"]["enum"]
+
+
+def test_the_trial_bundle_schema_accepts_what_the_pipeline_writes():
+    from earnings_research.prospective_hypotheses.evaluator import evaluate_observation
+
+    schema = json.loads(
+        (ROOT / "schemas/analysis/prospective_hypothesis_trial_bundle.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bundle = evaluate_observation(registry(), observation(), datetime(2026, 10, 1, 12, tzinfo=JST))
+    jsonschema.validate(json.loads(bundle.model_dump_json()), schema)

@@ -1,7 +1,7 @@
 import csv
 import json
 import subprocess
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import jsonschema
@@ -11,6 +11,8 @@ from earnings_research.cli.__main__ import main
 from earnings_research.legacy_research.importer import EXPECTED_FIELDS, build_import
 from earnings_research.legacy_research.pipeline import migrate_legacy_os, verify_legacy_migration
 from earnings_research.legacy_research.importer import parse_csv_bytes
+from earnings_research.legacy_research.aggregation import _open_anchored
+from earnings_research.statistics.holdout import MIN_FOR_RESERVE, split_by_date
 from earnings_research.legacy_research.legacy_parity import (
     render_dashboard_as_retired,
     render_note_as_retired,
@@ -58,29 +60,54 @@ def row(code="1111", name="架空会社", event_date="2026-06-10"):
     return item
 
 
-def make_source(tmp_path):
-    repo = tmp_path / "old"
-    init_repo(repo)
-    first = row()
-    write_csv(repo / "data/records.csv", EXPECTED_FIELDS, [first])
-    commit_all(repo, "initial")
+def source_rows(wrong_name=False):
+    """The rows both stand-in repositories are built from.
+
+    Enough of them, over enough days, that the reserve actually divides: two
+    rows meant the split never fired and every migration test ran the path
+    where record_count equals the source row count.
+    """
+    first = row(name="違う会社" if wrong_name else "架空会社")
     first.update({
         "prev_close": "100", "next_open": "102", "next_close": "103", "d5_close": "105",
         "d20_close": "110", "gap": "0.02", "ret_d1": "0.03", "ret_d5": "0.05",
         "ret_d20": "0.1", "shodo": "GU", "reaction": "GU継続",
     })
-    second = row("2222", "別の架空会社")
-    write_csv(repo / "data/records.csv", EXPECTED_FIELDS, [first, second])
+    rows = [first, row("2222", "別の架空会社")]
+    for index in range(MIN_FOR_RESERVE + 6):
+        extra = row("3%03d" % index, "連番%02d" % index, "2026-06-%02d" % (11 + index % 18))
+        extra.update({
+            "prev_close": "100", "next_open": "%d" % (100 + index % 5),
+            "next_close": "%d" % (101 + index % 7), "d5_close": "%d" % (102 + index % 9),
+            "d20_close": "%d" % (103 + index % 11),
+            "gap": "%.4f" % ((index % 5) / 100),
+            "ret_d1": "%.4f" % ((index % 7 - 3) / 100),
+            "ret_d5": "%.4f" % ((index % 9 - 4) / 100),
+            "ret_d20": "%.4f" % ((index % 11 - 5) / 100),
+            "shodo": ("GU", "フラット", "GD")[index % 3],
+            "reaction": ("GU継続", "GU失速", "GD反発", "GD継続")[index % 4],
+        })
+        rows.append(extra)
+    return rows
+
+
+def make_source(tmp_path):
+    repo = tmp_path / "old"
+    init_repo(repo)
+    write_csv(repo / "data/records.csv", EXPECTED_FIELDS, [row()])
+    commit_all(repo, "initial")
+    rows = source_rows()
+    write_csv(repo / "data/records.csv", EXPECTED_FIELDS, rows)
     as_of = date(2026, 6, 10)
     # The stand-in for the retired repository publishes what the retired
     # repository published. Writing these with the current renderer would make
     # the parity check compare ERS against itself, which no renderer change can
     # ever fail.
     (repo / "dashboard.md").write_text(
-        render_dashboard_as_retired([first, second], "2026-06-10 20:00"), encoding="utf-8"
+        render_dashboard_as_retired(rows, "2026-06-10 20:00"), encoding="utf-8"
     )
-    (repo / "weekly_report.md").write_text(render_weekly_as_retired([first, second], as_of), encoding="utf-8")
-    (repo / "note_draft.md").write_text(render_note_as_retired([first, second], as_of), encoding="utf-8")
+    (repo / "weekly_report.md").write_text(render_weekly_as_retired(rows, as_of), encoding="utf-8")
+    (repo / "note_draft.md").write_text(render_note_as_retired(rows, as_of), encoding="utf-8")
     return repo, commit_all(repo, "enrich")
 
 
@@ -113,10 +140,18 @@ def make_tso(tmp_path, future=False, wrong_name=False, bad_cutoff=False, spoofed
         "source_run_id",
     ]
     links = []
-    for code, name in (("1111", "違う会社" if wrong_name else "架空会社"), ("2222", "別の架空会社")):
+    for item in source_rows(wrong_name=wrong_name):
+        event = date.fromisoformat(item["date"])
+        # Every record needs its own link, and the cutoff has to fall on a
+        # calendar day before that record's event. The variants under test
+        # apply to the first row only, which is the one they are asserted on.
+        own_cutoff = cutoff if item["code"] == "1111" else (
+            "%s 23:00:00 UTC" % (event - timedelta(days=1))
+        )
         links.append({
-            "ers_code": code, "ers_name": name, "ers_date": "2026-06-10", "ers_quarter": "1Q",
-            "decision_cutoff_utc": cutoff, "join_status": "ok",
+            "ers_code": item["code"], "ers_name": item["name"], "ers_date": item["date"],
+            "ers_quarter": item["quarter"],
+            "decision_cutoff_utc": own_cutoff, "join_status": "ok",
             "snapshot_id": "MCTX-1", "provenance": "historical_artifact_join",
             "snapshot_usable_from_utc": link_usable,
             "snapshot_generated_at_utc": contexts[0]["generated_at_utc"], "lag_hours": "2",
@@ -137,8 +172,9 @@ def test_lossless_import_keeps_raw_history_and_context(tmp_path):
         source, source_commit, "source-run-1", tso, tso_commit, output, reports,
         "2026-08-26T08:00:00+09:00", date(2026, 6, 10),
     )
-    assert result["record_count"] == 2
-    assert result["tso_context_link_count"] == 2
+    expected = len(source_rows())
+    assert result["record_count"] == expected
+    assert result["tso_context_link_count"] == expected
     assert result["publishing_parity"] is True
     assert (output / "source/records.csv").read_bytes() == (source / "data/records.csv").read_bytes()
     records = [json.loads(line) for line in (output / "legacy_records.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -146,16 +182,20 @@ def test_lossless_import_keeps_raw_history_and_context(tmp_path):
     assert all(item["record_mode"] == "legacy_observational" for item in records)
     assert records[0]["raw_record"]["buy_condition"] == "legacy entry text"
     assert records[0]["normalized_prices"]["legacy_d20_return"] == "0.1"
-    assert len((output / "field_history.jsonl").read_text(encoding="utf-8").splitlines()) == 58
     contexts = [json.loads(line) for line in (output / "legacy_context_view.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert len(contexts) == 2
+    assert len(contexts) == expected
     assert contexts[0]["market_context"]["risk_on_score"] == "55"
     assert all(path.exists() for path in (reports / "dashboard.md", reports / "weekly_report.md", reports / "note_draft.md"))
     summary = json.loads((reports / "aggregation_summary.json").read_text(encoding="utf-8"))
-    assert summary["record_count"] == 2
-    assert summary["market_context"]["linked_count"] == 2
+    # The distinction the two-row fixture could not express: the migration
+    # carries every record, and the summary counts only the explored ones.
+    split = split_by_date([_open_anchored(item["raw_record"]) for item in records])
+    assert split.reserved, "the fixture must actually reserve something"
+    assert summary["record_count"] == len(split.exploration)
+    assert summary["record_count_including_reserved"] == expected
+    assert summary["market_context"]["linked_count"] == len(split.exploration)
     assert summary["prospective_records_included"] == 0
-    assert verify_legacy_migration(output, reports)["field_history_count"] == 58
+    assert verify_legacy_migration(output, reports)["record_count"] == expected
 
 
 def test_same_source_is_idempotent_but_changed_output_is_not_overwritten(tmp_path):

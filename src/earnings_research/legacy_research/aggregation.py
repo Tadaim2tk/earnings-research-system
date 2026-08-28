@@ -156,8 +156,12 @@ def _open_anchored(row):
     for name in ("open_d1", "open_d5", "open_d20", "close_d5", "close_d20"):
         entry_field, exit_field = prices_for(name)
         entry, exit_ = _number(row.get(entry_field)), _number(row.get(exit_field))
-        if entry and entry > 0:
-            enriched[name] = (exit_ - entry) / entry if exit_ and exit_ > 0 else None
+        # The key is always present, None where it cannot be computed. Leaving
+        # it out for a missing entry price and setting None for a missing exit
+        # made the same absence read two ways depending on which price was
+        # gone.
+        usable = entry and entry > 0 and exit_ and exit_ > 0
+        enriched[name] = (exit_ - entry) / entry if usable else None
     return enriched
 
 
