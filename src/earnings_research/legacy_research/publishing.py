@@ -7,6 +7,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from earnings_research.statistics.cohort import summarise
+
 from .aggregation import build_aggregation
 from .importer import JUDGES, NARRATIVES, RANKS, SURPRISES, git_bytes, git_text, parse_csv_bytes, sha256_bytes
 
@@ -18,8 +20,39 @@ def pctf(value):
 
 
 def _avg(rows, predicate, key="ret_d20"):
-    values = [float(row[key]) for row in rows if row.get(key) not in (None, "") and predicate(row)]
-    return f"{sum(values) / len(values) * 100:+.1f}% (n={len(values)})" if values else "-"
+    """Win rate, median and mean, because the mean alone hides its own shape.
+
+    One name limit-up for three days and a group that all drifted up give the
+    same average. The win rate and the middle separate them, and a cohort too
+    small to say anything prints its size instead of a number.
+    """
+    values = sorted(
+        float(row[key]) for row in rows if row.get(key) not in (None, "") and predicate(row)
+    )
+    if not values:
+        return "-"
+    summary = summarise(values)
+    if not summary.reportable:
+        return f"n={summary.n}(少)"
+    return (
+        f"{summary.win_rate * 100:.0f}% / {summary.median * 100:+.1f}% / "
+        f"{summary.mean * 100:+.1f}% (n={summary.n})"
+    )
+
+
+def _anchored(rows, predicate, entry, exit_):
+    """The same figures measured between two prices actually available."""
+    values = []
+    for row in rows:
+        if not predicate(row):
+            continue
+        try:
+            start, end = float(row[entry]), float(row[exit_])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if start:
+            values.append((end - start) / start)
+    return _avg([{"v": value} for value in values], lambda _row: True, "v")
 
 
 def render_dashboard(rows, updated_at: str):
@@ -39,22 +72,43 @@ def render_dashboard(rows, updated_at: str):
             judge=row.get("judge", ""), narrative=row.get("narrative", ""), gap=pctf(row.get("gap")),
             d1=pctf(row.get("ret_d1")), d5=pctf(row.get("ret_d5")), d20=pctf(row.get("ret_d20")),
             rx=row.get("reaction", "") or "記録中"))
-    lines += ["", "## 仮説検証", "", "### ランク別 平均リターン(仮説: AI事前評価に予測力はあるか)",
+    lines += ["", "## 仮説検証", "",
+              "各セルは **勝率 / 中央値 / 平均 (n)**。平均だけでは、1銘柄の大幅高が群を",
+              "持ち上げている場合と、群全体が揃って動いた場合を区別できない。",
+              "", "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
               "| ランク | 翌日 | 5日 | 20日 |", "|---|---|---|---|"]
     for rank in RANKS:
         lines.append(f"| {rank} | {_avg(rows, lambda row, rank=rank: row.get('rank') == rank, 'ret_d1')} | {_avg(rows, lambda row, rank=rank: row.get('rank') == rank, 'ret_d5')} | {_avg(rows, lambda row, rank=rank: row.get('rank') == rank)} |")
-    lines += ["", "### ナラティブ整合別 平均20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 平均 |", "|---|---|"]
+    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 勝率/中央値/平均 |", "|---|---|"]
     for narrative in NARRATIVES:
         lines.append(f"| {narrative} | {_avg(rows, lambda row, narrative=narrative: row.get('narrative') == narrative)} |")
-    lines += ["", "### 判断別 平均20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 平均 |", "|---|---|"]
+    lines += ["", "### 判断別 20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 勝率/中央値/平均 |", "|---|---|"]
     for judge in JUDGES:
         lines.append(f"| {judge} | {_avg(rows, lambda row, judge=judge: row.get('judge') == judge)} |")
-    lines += ["", "### 初動分類別 平均リターン(仮説: 初動ギャップは持続するか)", "| 初動 | 翌日 | 5日 | 20日 |", "|---|---|---|---|"]
+    lines += ["", "### 初動分類別 リターン(仮説: 初動ギャップは持続するか)", "",
+              "これらの群は**ギャップで分けている**ので、前日終値起点のリターンで見ると",
+              "分類に使った当のギャップを測り直すことになり、必ず「GUは強い」と出る。",
+              "約定できる最初の価格は寄り付きなので、**寄り付き起点**で並べる。",
+              "",
+              "| 初動 | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
     for value in ("GU", "フラット", "GD"):
-        lines.append(f"| {value} | {_avg(rows, lambda row, value=value: row.get('shodo') == value, 'ret_d1')} | {_avg(rows, lambda row, value=value: row.get('shodo') == value, 'ret_d5')} | {_avg(rows, lambda row, value=value: row.get('shodo') == value)} |")
-    lines += ["", "### 反応分類別 平均リターン(仮説: 初日の値動きパターンに持続性はあるか)", "| 分類 | 5日 | 20日 |", "|---|---|---|"]
+        match = lambda row, value=value: row.get("shodo") == value
+        lines.append(
+            f"| {value} | {_anchored(rows, match, 'next_open', 'next_close')} | "
+            f"{_anchored(rows, match, 'next_open', 'd5_close')} | "
+            f"{_anchored(rows, match, 'next_open', 'd20_close')} |"
+        )
+    lines += ["", "### 反応分類別 リターン(仮説: 初日の値動きパターンに持続性はあるか)", "",
+              "この群は初日の値動きでも分けているので、寄り付き起点にも定義の半分が入る。",
+              "戻しを見てから入るなら起点は翌日終値になる。",
+              "",
+              "| 分類 | 翌日終値→5日 | 翌日終値→20日 |", "|---|---|---|"]
     for value in ("GU継続", "GU失速", "GD反発", "GD継続"):
-        lines.append(f"| {value} | {_avg(rows, lambda row, value=value: row.get('reaction') == value, 'ret_d5')} | {_avg(rows, lambda row, value=value: row.get('reaction') == value)} |")
+        match = lambda row, value=value: row.get("reaction") == value
+        lines.append(
+            f"| {value} | {_anchored(rows, match, 'next_close', 'd5_close')} | "
+            f"{_anchored(rows, match, 'next_close', 'd20_close')} |"
+        )
     lines += ["", "### AIサプライズ評価 × 実際の市場反応(自己較正)", "| サプライズ | 平均ギャップ | 平均翌日 |", "|---|---|---|"]
     for value in SURPRISES:
         lines.append(f"| {value} | {_avg(rows, lambda row, value=value: str(row.get('surprise', '')).strip() == value, 'gap')} | {_avg(rows, lambda row, value=value: str(row.get('surprise', '')).strip() == value, 'ret_d1')} |")

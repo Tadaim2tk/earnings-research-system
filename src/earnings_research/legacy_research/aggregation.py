@@ -57,7 +57,7 @@ def _metrics(rows, cohort_key=None, base_rates=None):
         result[field] = {
             "available_count": len(values),
             "missing_count": len(rows) - len(values),
-            **summary.as_dict(),
+            **_rounded(summary.as_dict()),
             "tail_capture": [
                 tail_capture(
                     values, threshold, (base_rates or {}).get((field, threshold))
@@ -66,6 +66,14 @@ def _metrics(rows, cohort_key=None, base_rates=None):
             ],
         }
     return result
+
+
+def _rounded(values, places=6):
+    """Keep the six-figure rounding the previous summary had."""
+    return {
+        key: round(value, places) if isinstance(value, float) else value
+        for key, value in values.items()
+    }
 
 
 def _base_rates(rows):
@@ -110,6 +118,23 @@ def _group(rows, key, base_rates=None):
     }
 
 
+def _cohort_views(summary, prefix=""):
+    """Every view that groups records, wherever it sits in the summary.
+
+    by_relative_dominance lives under market_context, so a scan that only
+    looked at top-level `by_` keys skipped it entirely: 52 tests, five of them
+    nominally significant, corrected by nothing and not even listed as
+    uncorrected.
+    """
+    for name, value in summary.items():
+        if not isinstance(value, dict):
+            continue
+        if name.startswith("by_"):
+            yield prefix + name, value
+        elif not prefix:
+            yield from _cohort_views(value, prefix=name + ".")
+
+
 def _multiplicity(summary):
     """Correct each view's tests together, and only where a test was asked.
 
@@ -125,10 +150,8 @@ def _multiplicity(summary):
     one company's five observations invites being read as evidence.
     """
     families = {}
-    for view, groups in summary.items():
-        if not view.startswith("by_") or not isinstance(groups, dict):
-            continue
-        descriptive = view == DESCRIPTIVE_VIEW
+    for view, groups in _cohort_views(summary):
+        descriptive = view.split(".")[-1] == DESCRIPTIVE_VIEW
         raw = {}
         for label, metrics in groups.items():
             for field, stats in metrics.items():
@@ -147,7 +170,7 @@ def _multiplicity(summary):
                     else:
                         raw["%s/%s/tail%d" % (label, field, index)] = tail["p_value"]
         if descriptive:
-            families[view] = {"comparisons": 0, "corrected": False}
+            families[view] = {"comparisons": 0, "corrected": False, "reason": "lookup, not a hypothesis"}
             continue
         for name, value in adjust_for_multiplicity(raw).items():
             label, field, which = name.split("/")
@@ -205,6 +228,7 @@ def build_aggregation(rows, context_views, source_commit):
         "record_count": len(rows),
         "overall": _metrics(rows, base_rates=rates),
         "by_ticker": _group(rows, "code", rates),
+        "by_shodo": _group(rows, "shodo", rates),
         "by_rank": _group(rows, "rank", rates),
         "by_narrative": _group(rows, "narrative", rates),
         "by_reaction": _group(rows, "reaction", rates),

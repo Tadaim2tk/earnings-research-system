@@ -246,3 +246,57 @@ def test_an_impossible_base_rate_produces_no_p_value(probability):
 
 def test_the_binomial_is_symmetric_about_the_base_rate():
     assert binomial_against(0, 10, 0.5) == binomial_against(10, 10, 0.5)
+
+
+# --- 中央値区間の被覆 ---------------------------------------------------------
+
+def normal_samples(n, count, seed=20260828):
+    """Deterministic draws, so the coverage figure is reproducible."""
+    import random
+    generator = random.Random(seed)
+    return [sorted(generator.gauss(0, 1) for _ in range(n)) for _ in range(count)]
+
+
+@pytest.mark.parametrize("n", [6, 10, 20, 40])
+def test_the_median_interval_actually_covers_what_it_claims(n):
+    """It claimed 95% and delivered 78% at n=6: the rank was one place inside."""
+    samples = normal_samples(n, 4000)
+    covered = 0
+    for ordered in samples:
+        interval = median_interval(ordered)
+        assert interval.low is not None
+        if interval.low <= 0 <= interval.high:
+            covered += 1
+    assert covered / len(samples) >= 0.95
+
+
+def test_no_interval_is_offered_where_the_level_cannot_be_reached():
+    """Five observations cannot bracket a median at 95%; saying so beats guessing."""
+    assert median_interval([0.01, 0.02, 0.03, 0.04, 0.05]).low is None
+
+
+def test_the_median_interval_uses_the_expected_ranks():
+    values = [float(i) for i in range(20)]
+    interval = median_interval(values)
+    assert (interval.low, interval.high) == (values[5], values[14])
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # Without the running minimum the first of these adjusts to 0.08:
+        # a smaller raw value must never end up with a larger adjusted one.
+        ({"a": 0.04, "b": 0.041}, {"a": 0.041, "b": 0.041}),
+        (
+            {"a": 0.01, "b": 0.02, "c": 0.03, "d": 0.04, "e": 0.05},
+            {"a": 0.05, "b": 0.05, "c": 0.05, "d": 0.05, "e": 0.05},
+        ),
+        (
+            {"a": 0.001, "b": 0.9, "c": 0.02, "d": 0.5},
+            {"a": 0.004, "b": 0.9, "c": 0.04, "d": 0.666667},
+        ),
+    ],
+)
+def test_the_correction_matches_benjamini_hochberg(raw, expected):
+    """Pinned against the standard definition, not just against monotonicity."""
+    assert adjust_for_multiplicity(raw) == expected

@@ -238,7 +238,7 @@ def tail_capture(
     interval = clopper_pearson(hits, n)
     lift = None
     distinguishable = False
-    if base_rate:
+    if base_rate is not None and base_rate > 0:
         lift = round(rate / base_rate, 4)
         distinguishable = (
             interval.low is not None
@@ -254,7 +254,7 @@ def tail_capture(
         base_rate=base_rate,
         lift=lift,
         distinguishable=distinguishable,
-        p_value=binomial_against(hits, n, base_rate) if base_rate else None,
+        p_value=binomial_against(hits, n, base_rate) if base_rate is not None else None,
     )
 
 
@@ -354,11 +354,16 @@ def median_interval(ordered: Sequence[float], confidence: float = CONFIDENCE) ->
     cumulative = 0.0
     lower_rank = None
     for k in range(n):
-        cumulative += comb(n, k) * 0.5 ** n
-        if cumulative > alpha / 2:
-            lower_rank = k
+        # The rank is the last one whose cumulative tail still fits inside
+        # alpha/2. Taking the first rank that exceeds it spends more of the
+        # tail than the interval is allowed and undercovers at every size.
+        tail = cumulative + comb(n, k) * 0.5 ** n
+        if tail > alpha / 2:
             break
+        cumulative = tail
+        lower_rank = k
     if lower_rank is None:
+        # No rank leaves enough room; at this size the level cannot be met.
         return Interval(None, None)
     upper_rank = n - 1 - lower_rank
     if lower_rank > upper_rank:
