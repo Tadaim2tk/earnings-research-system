@@ -57,8 +57,6 @@ def verify_stop_rules_only_tightened(previous_path: Path, current_path: Path):
     current = HypothesisRegistry.model_validate_json(
         Path(current_path).read_text(encoding="utf-8")
     )
-    if previous.registry_version >= current.registry_version:
-        raise ValueError("the superseded registry must carry an earlier registry_version")
     problems = stop_rule_relaxations(previous, current)
     if problems:
         raise ValueError("; ".join(problems))

@@ -211,3 +211,63 @@ def test_an_unreadable_freeze_date_is_refused_rather_than_assumed():
     split = split_by_date(records(30))
     with pytest.raises(HoldoutViolation):
         evaluate_reserved(split, "sometime last year", len)
+
+
+def test_the_verdict_does_not_depend_on_the_order_the_rows_arrived_in():
+    """A whole earnings season lands on one day, and cutting at the position
+    left that day on both sides. Shuffling twenty-four same-day rows gave
+    reversed 573 times out of 2000 and inconclusive 1425 — the answer was the
+    CSV's sort order, and it decides whether a hypothesis is retired."""
+    rows = [
+        {"date": "2026-02-13", "code": "T%d" % index, "v": 0.05 if index < 12 else -0.05}
+        for index in range(24)
+    ]
+    verdicts = set()
+    for offset in range(len(rows)):
+        verdicts.add(assess(rows[offset:] + rows[:offset], value_of).verdict)
+    assert verdicts == {"too_short"}
+
+
+def test_a_reversal_across_two_real_dates_is_still_found():
+    """The control: snapping to the date boundary must not disarm the check."""
+    rows = [
+        {"date": "2026-02-13" if index < 12 else "2026-03-13",
+         "code": "T%d" % index, "v": 0.05 if index < 12 else -0.05}
+        for index in range(24)
+    ]
+    assert assess(rows, value_of).verdict == "reversed"
+
+
+def test_one_company_appearing_often_cannot_reverse_on_its_own():
+    """Twelve rows of one name were twelve independent trials to the interval,
+    so a single company's twelve quarters could retire a hypothesis while the
+    sign test on the same summary said p=1.0."""
+    rows = [
+        {"date": "2026-%02d-01" % (month + 1), "code": "SAME",
+         "v": 0.05 if month < 6 else -0.05}
+        for month in range(12)
+    ]
+    result = assess(rows, value_of, cluster_of=lambda row: row["code"])
+    assert result.first.n_independent == 1
+    assert result.verdict == "inconclusive"
+
+
+@pytest.mark.parametrize("count", [10, 11])
+def test_a_record_too_short_to_reverse_says_so_rather_than_pretending(count):
+    """A half of five can never produce a median interval at 95%, so below
+    twelve the answer was fixed before the data was read."""
+    rows = dated([0.05] * (count // 2) + [-0.05] * (count - count // 2))
+    result = assess(rows, value_of)
+    assert result.verdict == "too_short"
+    assert result.as_dict()["first_half"] is None
+    assert result.as_dict()["boundary"] is None
+    assert result.as_dict()["halves_exclude_zero"] == [None, None]
+
+
+def test_an_odd_number_of_records_splits_where_it_says_it_does():
+    """Moving the middle row to the other half changed both medians and the
+    boundary, and 55% of the real cells have an odd count."""
+    rows = dated([0.02] * 21)
+    result = assess(rows, value_of)
+    assert (result.first.n, result.second.n) == (10, 11)
+    assert result.boundary == date(2026, 1, 11)

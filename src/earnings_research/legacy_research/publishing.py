@@ -7,7 +7,7 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from earnings_research.statistics.cohort import summarise
+from earnings_research.statistics.cohort import MIN_REPORTABLE, summarise
 from earnings_research.statistics.holdout import split_by_date
 
 from .aggregation import build_aggregation
@@ -25,29 +25,57 @@ def pctf(value):
     return f"{float(value) * 100:+.1f}%"
 
 
+def statistics_scope(listed, counted) -> str:
+    """One sentence saying which records the figures below were built from.
+
+    It used to be injected by build_reports after the fact, which put it above
+    the line the note tells the reader to copy from — so the published article
+    carried the numbers and left the scope behind.
+    """
+    if len(counted) == len(listed):
+        return "統計は一覧の全%d件から。留保期間は設定されていない。" % len(listed)
+    return (
+        "統計は探索対象 %d/%d件 のみ。留保期間のレコードは一覧には出るが、"
+        "この節のどの数字にも入っていない。" % (len(counted), len(listed))
+    )
+
+
 def _avg(rows, predicate, key="ret_d20"):
     """Win rate, median and mean, because the mean alone hides its own shape.
 
     One name limit-up for three days and a group that all drifted up give the
     same average. The win rate and the middle separate them, and a cohort too
     small to say anything prints its size instead of a number.
+
+    Names, not rows: two earnings from one company are one company's evidence,
+    and the aggregation beside this has counted them that way from the start.
     """
-    values = sorted(
-        float(row[key]) for row in rows if row.get(key) not in (None, "") and predicate(row)
-    )
-    if not values:
+    picked = [
+        (float(row[key]), row.get("code"))
+        for row in rows
+        if row.get(key) not in (None, "") and predicate(row)
+    ]
+    if not picked:
         return "-"
-    summary = summarise(values)
-    if not summary.reportable:
+    summary = summarise(
+        [value for value, _code in picked], clusters=[code for _value, code in picked]
+    )
+    if not summary.reportable or summary.win_rate is None:
         return f"n={summary.n}(少)"
+    names = "" if summary.n_independent == summary.n else f", {summary.n_independent}社"
     return (
         f"{summary.win_rate * 100:.0f}% / {summary.median * 100:+.1f}% / "
-        f"{summary.mean * 100:+.1f}% (n={summary.n})"
+        f"{summary.mean * 100:+.1f}% (n={summary.n}{names})"
     )
 
 
 def _anchored(rows, predicate, entry, exit_):
-    """The same figures measured between two prices actually available."""
+    """The same figures measured between two prices actually available.
+
+    Both prices have to be positive. Treating a zero exit as a -100% return,
+    which is what happens when only the entry is checked, disagrees with the
+    aggregation beside it, which drops the row.
+    """
     values = []
     for row in rows:
         if not predicate(row):
@@ -56,12 +84,12 @@ def _anchored(rows, predicate, entry, exit_):
             start, end = float(row[entry]), float(row[exit_])
         except (TypeError, ValueError, KeyError):
             continue
-        if start:
-            values.append((end - start) / start)
-    return _avg([{"v": value} for value in values], lambda _row: True, "v")
+        if start > 0 and end > 0:
+            values.append({"v": (end - start) / start, "code": row.get("code")})
+    return _avg(values, lambda _row: True, "v")
 
 
-def render_dashboard(rows, updated_at: str, statistics_rows=None):
+def render_dashboard(rows, updated_at: str, *, statistics_rows=None):
     """Render the dashboard, listing every record but counting only some.
 
     Listing a reserved record and computing a statistic from it are different
@@ -88,18 +116,36 @@ def render_dashboard(rows, updated_at: str, statistics_rows=None):
             d1=pctf(row.get("ret_d1")), d5=pctf(row.get("ret_d5")), d20=pctf(row.get("ret_d20")),
             rx=row.get("reaction", "") or "記録中"))
     lines += ["", "## 仮説検証", "",
+              statistics_scope(rows, counted),
+              "",
               "各セルは **勝率 / 中央値 / 平均 (n)**。平均だけでは、1銘柄の大幅高が群を",
               "持ち上げている場合と、群全体が揃って動いた場合を区別できない。",
-              "", "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
-              "| ランク | 翌日 | 5日 | 20日 |", "|---|---|---|---|"]
+              f"`n={MIN_REPORTABLE}(少)` はその件数しかなく数字を出さないという意味、",
+              "`-` は該当する観測が1件も無いという意味。同一銘柄が複数回現れる群では",
+              "件数のうしろに社数を添える。",
+              "",
+              "ランク・ナラティブ・判断・サプライズは**開示を読んでから**付けている。",
+              "コミット記録では254件すべてが大引け後、PTSの値動きを引いたメモもある。",
+              "前日終値起点で測るとその日のうちに知り得なかったラベルで当日の値動きを",
+              "採点することになるので、これらも**寄り付き起点**で並べる。",
+              "",
+              "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
+              "| ランク | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
     for rank in RANKS:
-        lines.append(f"| {rank} | {_avg(counted, lambda row, rank=rank: row.get('rank') == rank, 'ret_d1')} | {_avg(counted, lambda row, rank=rank: row.get('rank') == rank, 'ret_d5')} | {_avg(counted, lambda row, rank=rank: row.get('rank') == rank)} |")
-    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 勝率/中央値/平均 |", "|---|---|"]
+        match = lambda row, rank=rank: row.get("rank") == rank
+        lines.append(
+            f"| {rank} | {_anchored(counted, match, 'next_open', 'next_close')} | "
+            f"{_anchored(counted, match, 'next_open', 'd5_close')} | "
+            f"{_anchored(counted, match, 'next_open', 'd20_close')} |"
+        )
+    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 寄り付き→20日 |", "|---|---|"]
     for narrative in NARRATIVES:
-        lines.append(f"| {narrative} | {_avg(counted, lambda row, narrative=narrative: row.get('narrative') == narrative)} |")
-    lines += ["", "### 判断別 20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 勝率/中央値/平均 |", "|---|---|"]
+        match = lambda row, narrative=narrative: row.get("narrative") == narrative
+        lines.append(f"| {narrative} | {_anchored(counted, match, 'next_open', 'd20_close')} |")
+    lines += ["", "### 判断別 20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 寄り付き→20日 |", "|---|---|"]
     for judge in JUDGES:
-        lines.append(f"| {judge} | {_avg(counted, lambda row, judge=judge: row.get('judge') == judge)} |")
+        match = lambda row, judge=judge: row.get("judge") == judge
+        lines.append(f"| {judge} | {_anchored(counted, match, 'next_open', 'd20_close')} |")
     lines += ["", "### 初動分類別 リターン(仮説: 初動ギャップは持続するか)", "",
               "これらの群は**ギャップで分けている**ので、前日終値起点のリターンで見ると",
               "分類に使った当のギャップを測り直すことになり、必ず「GUは強い」と出る。",
@@ -124,10 +170,21 @@ def render_dashboard(rows, updated_at: str, statistics_rows=None):
             f"| {value} | {_anchored(counted, match, 'next_close', 'd5_close')} | "
             f"{_anchored(counted, match, 'next_close', 'd20_close')} |"
         )
-    lines += ["", "### AIサプライズ評価 × 実際の市場反応(自己較正)", "| サプライズ | 平均ギャップ | 平均翌日 |", "|---|---|---|"]
+    lines += ["", "### AIサプライズ評価 × 実際の市場反応(自己較正)", "",
+              "元はギャップで較正していたが、ギャップは寄り付きで起きるのでどちら向きにも",
+              "取引できず、しかもサプライズ評価自体が大引け後に付く。",
+              "",
+              "| サプライズ | 寄り付き→翌日終値 | 寄り付き→20日 |", "|---|---|---|"]
     for value in SURPRISES:
-        lines.append(f"| {value} | {_avg(counted, lambda row, value=value: str(row.get('surprise', '')).strip() == value, 'gap')} | {_avg(counted, lambda row, value=value: str(row.get('surprise', '')).strip() == value, 'ret_d1')} |")
-    done = [row for row in rows if (row.get("result") or "").strip()]
+        match = lambda row, value=value: str(row.get("surprise", "")).strip() == value
+        lines.append(
+            f"| {value} | {_anchored(counted, match, 'next_open', 'next_close')} | "
+            f"{_anchored(counted, match, 'next_open', 'd20_close')} |"
+        )
+    # A section titled 集計 three lines under a sentence promising the reserved
+    # rows enter no aggregate. Empty today because no result column is filled,
+    # and the dashboard directly asks the reader to fill it.
+    done = [row for row in counted if (row.get("result") or "").strip()]
     if done:
         counts = {}
         for row in done:
@@ -163,7 +220,7 @@ def render_weekly(rows, as_of: date):
     return "\n".join(lines) + "\n"
 
 
-def render_note(rows, as_of: date, statistics_rows=None):
+def render_note(rows, as_of: date, *, statistics_rows=None):
     counted = rows if statistics_rows is None else statistics_rows
     since = as_of - timedelta(days=7)
     week = sorted((row for row in rows if str(since) <= row.get("date", "") <= str(as_of)), key=lambda item: (item.get("rank", "z"), item.get("date", "")))
@@ -189,7 +246,12 @@ def render_note(rows, as_of: date, statistics_rows=None):
     else:
         lines += ["今週の新規記録はありませんでした。", ""]
     if insights:
-        lines += ["## 今週時点の検証メモ(自動集計)", ""] + [f"・{item}" for item in insights] + [""]
+        lines += [
+            "## 今週時点の検証メモ(自動集計)",
+            "",
+            statistics_scope(rows, counted),
+            "",
+        ] + [f"・{item}" for item in insights] + [""]
     lines += ["──────────  本文ここまで  ──────────", "", "免責: 本記事は特定銘柄の売買を推奨するものではありません。投資判断はご自身の責任で行ってください。"]
     return "\n".join(lines) + "\n"
 
@@ -237,23 +299,21 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
         return "-" if value is None else f"{value:.2f}"
 
     context_line = (
-        f"TSO point-in-time context: {context['linked_count']}/{len(final_rows)}件 / "
+        f"TSO point-in-time context: {context['linked_count']}/{aggregation['record_count']}件(探索対象) / "
         f"平均risk-on {_score('mean_risk_on_score')} / 平均risk-off {_score('mean_risk_off_score')}"
     )
     # The reserved period may be listed but not counted. Splitting here, once,
     # keeps the published tables on the same records the JSON summary used.
     explored = split_by_date(final_rows).exploration
-    holdout_line = (
-        f"統計は探索対象 {len(explored)}/{len(final_rows)}件 のみ。"
-        "留保期間のレコードは一覧には出るが、どの集計にも入らない。"
-    )
+    # The scope sentence is written by the renderers now, beside the figures it
+    # qualifies. Injected here it landed above the line the note tells the
+    # reader to copy from, so the published article carried the numbers and
+    # left their scope behind.
     dashboard = render_dashboard(final_rows, f"{as_of} 00:00", statistics_rows=explored)
-    dashboard = dashboard.replace(
-        "\n\n", f"\n\n{provenance}\n\n{context_line}\n\n{holdout_line}\n\n", 1
-    )
+    dashboard = dashboard.replace("\n\n", f"\n\n{provenance}\n\n{context_line}\n\n", 1)
     weekly = render_weekly(final_rows, as_of).replace("\n\n", f"\n\n{provenance}\n\n", 1)
     note = render_note(final_rows, as_of, statistics_rows=explored).replace(
-        "\n\n", f"\n\n{provenance}\n\n{holdout_line}\n\n", 1
+        "\n\n", f"\n\n{provenance}\n\n", 1
     )
     reports = {
         "dashboard.md": dashboard.encode("utf-8"),

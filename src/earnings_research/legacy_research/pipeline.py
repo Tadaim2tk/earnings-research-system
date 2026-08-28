@@ -100,7 +100,12 @@ def verify_legacy_migration(output_root: Path, reports_output: Path):
     if not all(item.get("byte_equal") for item in parity.get("outputs", {}).values()):
         raise ValueError("legacy publishing parity is not complete")
     aggregation = json.loads((reports_output / "aggregation_summary.json").read_text(encoding="utf-8"))
-    if aggregation.get("record_count") != expected_count or aggregation.get("prospective_records_included") != 0:
+    # record_count became the explored subset when the reserve was introduced,
+    # so the migration's completeness is asserted against the total instead. A
+    # summary that lost rows on the way in still fails; one that merely holds
+    # some back does not.
+    counted = aggregation.get("record_count_including_reserved", aggregation.get("record_count"))
+    if counted != expected_count or aggregation.get("prospective_records_included") != 0:
         raise ValueError("legacy aggregation count or cohort is invalid")
     return {
         "status": "verified",

@@ -19,6 +19,10 @@ from datetime import date
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from earnings_research.statistics.cohort import MIN_REPORTABLE, CohortSummary, summarise
+
+# Both halves have to be able to produce a median interval, and that needs six
+# observations, not five.
+MINIMUM_FOR_HALVES = 12
 from earnings_research.statistics.holdout import _as_date
 
 
@@ -39,8 +43,8 @@ class Stability:
             # Surfaced beside the verdict because it is the whole reason a sign
             # difference did or did not become a reversal.
             "halves_exclude_zero": [
-                bool(self.first and self.first.median_interval.excludes_zero()),
-                bool(self.second and self.second.median_interval.excludes_zero()),
+                half.median_interval.excludes_zero() if half else None
+                for half in (self.first, self.second)
             ],
             "verdict": self.verdict,
         }
@@ -62,11 +66,25 @@ def assess(
         day = _as_date(record.get(date_key))
         if day is not None and value_of(record) is not None:
             dated.append((day, record))
-    if len(dated) < MIN_REPORTABLE * 2:
+    # Twelve, not ten. A half of five can never produce a median interval at
+    # 95%, so below twelve the verdict was decided before the data was read:
+    # the strongest reversal available, every row +1 then every row -1, came
+    # back inconclusive. Saying too_short is the honest answer.
+    if len(dated) < MINIMUM_FOR_HALVES:
         return Stability(None, None, None, "too_short")
     dated.sort(key=lambda item: item[0])
     middle = len(dated) // 2
     boundary = dated[middle][0]
+    # Dates repeat — a whole earnings season lands on one day — so cutting at
+    # the position leaves the boundary day on both sides and the order the rows
+    # arrived in decides which half they fall in. Shuffling twenty-four rows of
+    # one date gave `reversed` 573 times out of 2000 and `inconclusive` 1425.
+    # The reserve split already guards this; the verdict that retires a
+    # hypothesis did not.
+    while middle > 0 and dated[middle - 1][0] == boundary:
+        middle -= 1
+    if min(middle, len(dated) - middle) < MIN_REPORTABLE:
+        return Stability(None, None, None, "too_short")
     halves = []
     for part in (dated[:middle], dated[middle:]):
         values = [value_of(record) for _day, record in part]

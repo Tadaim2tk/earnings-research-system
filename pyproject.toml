@@ -16,6 +16,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  # The tests import this directly; it was reaching them only as somebody
+  # else's transitive dependency, which a clean CI checkout does not have.
+  "jsonschema>=4.0",
   "pytest>=7.0",
   "PyYAML>=6.0",
 ]

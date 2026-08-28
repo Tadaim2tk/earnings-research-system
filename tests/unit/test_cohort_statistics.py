@@ -2,15 +2,18 @@ import pytest
 
 from earnings_research.statistics.cohort import (
     MIN_REPORTABLE,
+    Interval,
     adjust_for_multiplicity,
     base_rate,
     binomial_against,
     clopper_pearson,
     concentration,
+    fisher_exact,
     median_interval,
     sign_test,
     summarise,
     tail_capture,
+    verdict_for,
 )
 from earnings_research.statistics.lookahead import contamination, sound_fields
 
@@ -76,14 +79,14 @@ def test_one_name_appearing_often_does_not_decide_the_test():
     assert summary.win_rate == 0.8  # rows
     # Aggregating each name to its own median leaves one winner out of six, so
     # the test cannot read the repeated name as a majority.
-    assert summary.sign_test_p == sign_test([-0.01] * 5 + [0.01])
+    assert summary.sign_test_p == sign_test([-0.01] * 5 + [0.01])[0]
 
 
 def test_a_name_votes_by_its_own_middle():
     # A's median is negative even though its best row is not.
     values = [0.05, -0.01, -0.01] + [0.02, 0.03, 0.04]
     clusters = ["A", "A", "A", "B", "C", "D"]
-    assert summarise(values, clusters=clusters).sign_test_p == sign_test([-0.01, 0.02, 0.03, 0.04])
+    assert summarise(values, clusters=clusters).sign_test_p == sign_test([-0.01, 0.02, 0.03, 0.04])[0]
 
 
 def test_the_sign_test_pairs_values_with_their_own_cluster():
@@ -92,7 +95,7 @@ def test_the_sign_test_pairs_values_with_their_own_cluster():
     clusters = ["A", "B", "A", "B", "A", "B"]
     # A is entirely positive and B entirely negative; scrambling the pairing
     # would mix them and change the vote.
-    assert summarise(values, clusters=clusters).sign_test_p == sign_test([0.05, -0.03])
+    assert summarise(values, clusters=clusters).sign_test_p == sign_test([0.05, -0.03])[0]
 
 
 def test_clusters_must_line_up_with_values():
@@ -102,7 +105,7 @@ def test_clusters_must_line_up_with_values():
 
 def test_flat_outcomes_do_not_look_decisive():
     """Zeroes carry no direction, so they are dropped rather than counted."""
-    assert sign_test([0.0] * 20) is None
+    assert sign_test([0.0] * 20) == (None, 0)
     assert sign_test([0.01, 0.0, 0.0, 0.0, 0.0]) == sign_test([0.01])
 
 
@@ -217,8 +220,41 @@ def test_a_reaction_cohort_is_scored_from_the_close_it_was_read_at(field):
 
 
 def test_an_unrecognised_cohort_is_not_silently_blessed_or_blocked():
-    assert contamination("rank", "ret_d5") is None
-    assert sound_fields("rank", ["ret_d5", "open_d5"]) == ["ret_d5", "open_d5"]
+    assert contamination("some_new_split", "ret_d5") is None
+    assert sound_fields("some_new_split", ["ret_d5", "open_d5"]) == ["ret_d5", "open_d5"]
+
+
+def test_a_label_decided_after_the_close_cannot_be_scored_from_it():
+    """The judgement fields, which the first pass of this table missed.
+
+    They are not arithmetically inside the return the way a gap is. They simply
+    did not exist yet: across 254 records every rank, narrative and reason code
+    was committed after 15:00 JST, one memo quotes an after-hours PTS move, and
+    there is a pts_negative reason code. prev_close is that afternoon's close.
+    """
+    for cohort in ("rank", "narrative", "reason_code", "judge", "surprise"):
+        for field in ("gap", "ret_d1", "ret_d5", "ret_d20"):
+            assert contamination(cohort, field) is not None
+        for field in ("open_d1", "open_d5", "open_d20", "close_d5", "close_d20"):
+            assert contamination(cohort, field) is None
+
+
+def test_an_outcome_field_with_no_declared_anchor_is_refused():
+    """Adding a return and forgetting the table reproduces the original bug.
+
+    Silently: a ret_d60 measured from prev_close restores gap-up at 74%
+    positive and gap-down at 24% — the numbers this module exists to withhold —
+    while the sound field beside it says the opposite.
+    """
+    assert contamination("shodo", "ret_d60") is not None
+    assert sound_fields("shodo", ["ret_d60", "open_d5"]) == ["open_d5"]
+
+
+def test_every_reported_return_declares_the_price_it_is_measured_from():
+    from earnings_research.legacy_research.aggregation import RETURN_FIELDS
+    from earnings_research.statistics.lookahead import RETURN_ANCHOR
+
+    assert set(RETURN_FIELDS) <= set(RETURN_ANCHOR)
 
 
 def test_sound_fields_drops_only_the_circular_ones():
@@ -252,7 +288,19 @@ def test_a_rate_clear_of_the_base_rate_is_distinguishable():
 
 
 def test_the_threshold_is_inclusive():
-    assert tail_capture([0.10, 0.0999], 0.10, 0.05).hits == 1
+    assert tail_capture([0.10, 0.0999, 0.0, 0.0, 0.0], 0.10, 0.05).hits == 1
+
+
+def test_a_handful_of_observations_is_not_a_tail_finding():
+    """The floor the rest of the summary keeps, which this measure lacked.
+
+    Thirteen of the fifteen cohorts calling themselves distinguishable had
+    fewer than five observations; nine had exactly one. One company's one
+    quarter reading as a caught tail is the same error the win rate refuses.
+    """
+    assert tail_capture([0.5] * 4, 0.10, 0.01).distinguishable is False
+    assert tail_capture([0.5] * 4, 0.10, 0.01).p_value is None
+    assert tail_capture([0.5] * 5, 0.10, 0.01).distinguishable is True
 
 
 def test_base_rate_counts_the_whole_field():
@@ -267,9 +315,29 @@ def test_a_cohort_without_a_base_rate_offers_no_verdict():
     assert capture.distinguishable is False
 
 
-@pytest.mark.parametrize("probability", [0.0, 1.0, -0.1, 1.5])
-def test_an_impossible_base_rate_produces_no_p_value(probability):
+@pytest.mark.parametrize("probability", [-0.1, 1.5, None])
+def test_a_base_rate_outside_the_unit_interval_produces_no_p_value(probability):
     assert binomial_against(3, 10, probability) is None
+
+
+def test_a_base_rate_of_zero_is_evidence_rather_than_silence():
+    """It is the strongest statement the comparison can make, not a gap.
+
+    Nothing outside the cohort ever reached the threshold. Any hit at all has
+    probability zero under that null. Returning None threw that away, and it
+    stops being hypothetical once the base rate excludes the cohort itself:
+    the two records in the whole set that reached +10% on open_d1 are both
+    inside one cohort, so its comparison base is exactly zero.
+    """
+    assert binomial_against(3, 20, 0.0) == 0.0
+    assert binomial_against(0, 20, 0.0) == 1.0
+    assert binomial_against(20, 20, 1.0) == 1.0
+    assert binomial_against(19, 20, 1.0) == 0.0
+
+
+def test_a_p_value_is_never_rounded_all_the_way_to_zero():
+    """Six decimals would report 9e-53 as certainty."""
+    assert 0 < binomial_against(40, 40, 0.05) < 1e-50
 
 
 def test_the_binomial_is_symmetric_about_the_base_rate():
@@ -334,7 +402,275 @@ def test_a_verdict_is_computed_from_whichever_p_value_it_is_given():
     """So a caller holding the corrected value can recompute with it."""
     from earnings_research.statistics.cohort import verdict_for
 
-    assert verdict_for(0.02, 0.02, 0.01, 0.01) == "directional"
-    assert verdict_for(0.02, 0.02, 0.01, 0.9) == "no_signal"
+    sound = {"trimmed_mean": 0.02, "mean_without_worst": 0.02}
+    assert verdict_for(0.02, 0.02, 0.01, 0.01, **sound) == "directional"
+    assert verdict_for(0.02, 0.02, 0.01, 0.9, **sound) == "no_signal"
     # A tail-driven cohort stays tail-driven whatever the p-value says.
-    assert verdict_for(0.02, -0.01, 0.01, 0.001) == "tail_driven"
+    assert verdict_for(0.02, -0.01, 0.01, 0.001, **sound) == "tail_driven"
+    # No p-value means no test was run, which is not the same as no signal.
+    assert verdict_for(0.02, 0.02, 0.01, None, **sound) == "not_tested"
+
+
+# --- 監査が「生存した変異」と報告した箇所を固定する ---------------------------
+
+# Reference Clopper-Pearson bounds, computed independently (scipy beta.ppf) and
+# rounded to six places. Pinning them kills at once: halving alpha the wrong
+# way, the classic off-by-one in the lower tail, cutting the bisection short,
+# rounding the bounds coarsely, and losing the lower bound at one success —
+# every one of which passed the whole suite before this existed.
+# Generated with scipy.stats.beta.ppf, an implementation this repository does
+# not use, so the check is against something other than itself.
+CLOPPER_PEARSON_REFERENCE = {
+    (0, 1): (0.0, 0.975), (1, 1): (0.025, 1.0),
+    (0, 5): (0.0, 0.521824), (1, 5): (0.005051, 0.716418),
+    (3, 5): (0.146633, 0.947255), (5, 5): (0.478176, 1.0),
+    (1, 10): (0.002529, 0.445016), (5, 10): (0.187086, 0.812914),
+    (8, 12): (0.348876, 0.900754),
+}
+
+
+@pytest.mark.parametrize("key,expected", sorted(CLOPPER_PEARSON_REFERENCE.items()))
+def test_the_win_rate_interval_matches_an_independent_reference(key, expected):
+    successes, n = key
+    interval = clopper_pearson(successes, n)
+    assert interval.low == pytest.approx(expected[0], abs=1e-6)
+    assert interval.high == pytest.approx(expected[1], abs=1e-6)
+
+
+@pytest.mark.parametrize("n", [5, 10, 20, 40])
+def test_the_win_rate_interval_covers_what_it_claims(n):
+    """Exact coverage by enumeration — no sampling, so no tolerance needed.
+
+    Substituting the normal approximation the module docstring rejects passed
+    every test in the suite while dropping coverage as low as 0.005.
+    """
+    from math import comb
+
+    bounds = [clopper_pearson(k, n) for k in range(n + 1)]
+    for p in (0.05, 0.1, 0.3, 0.5, 0.7, 0.9):
+        covered = sum(
+            comb(n, k) * p ** k * (1 - p) ** (n - k)
+            for k in range(n + 1)
+            if bounds[k].low <= p <= bounds[k].high
+        )
+        assert covered >= 0.95, (n, p, covered)
+
+
+def test_a_summary_carries_the_win_rate_interval_at_all():
+    """Deleting it outright used to pass the suite."""
+    summary = summarise([0.01] * 8 + [-0.01] * 2)
+    assert summary.win_rate_interval.low is not None
+    assert summary.win_rate_interval.high is not None
+
+
+def test_a_cohort_of_a_thousand_names_does_not_crash():
+    """comb(1030, 515) stops fitting in a float, and every public entry point
+    that summed binomial terms term-by-term raised OverflowError there."""
+    summary = summarise([0.01] * 600 + [-0.01] * 500)
+    assert summary.reportable
+    assert summary.win_rate_interval.low is not None
+    assert summary.sign_test_p is not None
+    assert tail_capture([0.2] * 600 + [0.0] * 500, 0.10, 0.05).p_value is not None
+
+
+def test_a_flat_outcome_is_not_counted_as_a_loss():
+    """The win rate and the sign test now drop ties by the same rule."""
+    summary = summarise([0.0] * 10 + [0.02] * 10)
+    assert summary.ties == 10
+    assert summary.win_rate == 1.0
+    assert summarise([0.0] * 20).win_rate is None
+
+
+def test_the_intervals_are_built_on_names_not_on_repeat_appearances():
+    """The cohort this module's own docstring describes.
+
+    One company twenty times against five others once each. On rows the win
+    rate interval excluded a coin entirely while the sign test beside it said
+    nothing had been shown; measured coverage falls to 62% when eight earnings
+    share a name.
+    """
+    summary = summarise([0.01] * 20 + [-0.01] * 5, clusters=["SAME"] * 20 + list("BCDEF"))
+    assert (summary.n, summary.n_independent) == (25, 6)
+    assert summary.win_rate == 0.8
+    assert summary.win_rate_interval.low < 0.5 < summary.win_rate_interval.high
+    assert summary.median_interval.excludes_zero() is False
+    assert summary.verdict != "directional"
+
+
+def test_the_vote_count_is_reported_beside_the_name_count():
+    """They differ whenever a name's own rows cancel, and the p-value is on the
+    second one."""
+    summary = summarise([0.01, -0.01] + [0.02] * 5, clusters=["A", "A"] + list("BCDEF"))
+    assert summary.n_independent == 6
+    assert summary.n_directional == 5
+
+
+@pytest.mark.parametrize("n", range(1, 26))
+def test_the_sign_test_is_two_sided_and_stays_a_probability(n):
+    """One-sided was the mutation nobody caught: five names losing five times
+    went from 0.0625 to 0.03125 and a cohort that showed nothing became
+    significant."""
+    for wins in range(n + 1):
+        p, votes = sign_test([1.0] * wins + [-1.0] * (n - wins))
+        assert votes == n
+        assert 0 < p <= 1.0
+        assert p == sign_test([-1.0] * wins + [1.0] * (n - wins))[0]
+    assert sign_test([1.0] * 5)[0] == pytest.approx(0.0625)
+
+
+def test_a_name_votes_by_which_way_more_of_its_rows_went():
+    """Its median let magnitude decide, and moved with 1e-7 of noise."""
+    quiet = list("BCDEF")
+    assert sign_test([-0.001, 0.80] + [-0.02] * 5, ["A", "A"] + quiet)[0] == pytest.approx(
+        sign_test([-0.80, 0.001] + [-0.02] * 5, ["A", "A"] + quiet)[0]
+    )
+
+
+def test_the_threshold_and_the_base_rate_use_the_same_comparison():
+    """Relaxing one of the two >= comparisons moved real base rates and no test
+    noticed."""
+    values = [0.10, 0.09, 0.0, 0.0, 0.0]
+    assert tail_capture(values, 0.10, base_rate(values, 0.10)).hits == 1
+    assert base_rate([0.10, 0.0], 0.10) == 0.5
+
+
+def test_a_cohort_that_caught_none_of_the_large_moves_says_so():
+    """Direction-blind, it reported the same thing as a cohort that caught them
+    all."""
+    missed = tail_capture([0.0] * 60, 0.10, 0.20)
+    caught = tail_capture([0.15] * 20, 0.10, 0.02)
+    assert (missed.distinguishable, missed.direction) == (True, "below")
+    assert (caught.distinguishable, caught.direction) == (True, "above")
+
+
+def test_the_trimmed_mean_actually_trims_at_every_reportable_size():
+    """A tenth of nine rounds to nothing, so below ten it was the mean under
+    another name — and no test in the suite asserted anything about it at all."""
+    for n in range(MIN_REPORTABLE, 12):
+        values = [-0.01] * (n - 1) + [1.50]
+        summary = summarise(values)
+        assert summary.trimmed_mean != summary.mean, n
+        assert summary.trimmed_mean == pytest.approx(-0.01)
+
+
+def test_the_quartiles_and_extremes_are_the_ones_they_claim_to_be():
+    """Swapping q1 with q3, or best with worst, passed the whole suite."""
+    summary = summarise([-0.05, -0.01, 0.0, 0.01, 0.02, 0.03, 0.50])
+    assert summary.worst == -0.05
+    assert summary.best == 0.50
+    assert summary.q1 < summary.median < summary.q3
+
+
+def test_the_significance_threshold_is_the_one_the_module_declares():
+    """Loosening it from 0.05 to 0.5 passed the whole suite."""
+    sound = {"trimmed_mean": 0.02, "mean_without_worst": 0.02}
+    assert verdict_for(0.02, 0.02, 0.02, 0.049, **sound) == "directional"
+    assert verdict_for(0.02, 0.02, 0.02, 0.051, **sound) == "no_signal"
+
+
+def test_concentration_answers_to_a_large_loss_as_well_as_a_large_gain():
+    """It measured the largest deviation, but nothing checked the sign, and
+    taking the maximum before the absolute value passed the suite."""
+    up = concentration([0.001] * 20 + [1.5])
+    down = concentration([-0.001] * 20 + [-1.5])
+    assert up == pytest.approx(down)
+
+
+def test_concentration_is_reported_beside_the_ceiling_it_saturates_at():
+    """9.4 is 57% of the ceiling at n=33 and 12% of it at n=163."""
+    summary = summarise([0.01] * 32 + [0.5])
+    assert summary.concentration_ceiling == 33 / 2
+
+
+def test_a_cohort_carried_by_its_tail_is_named_however_the_crowd_sits():
+    """The sign checks caught the flagship case only because its crowd was
+    negative. Nudge the crowd to +0.01%, below what it costs to trade, and the
+    same single name carrying everything reported directional. Two large names
+    defeated the check outright, since only one is ever removed."""
+    for outliers in (1, 2, 3, 5):
+        summary = summarise([0.0001] * (100 - outliers) + [1.0] * outliers)
+        assert summary.verdict == "tail_driven", outliers
+        assert summary.tail_share > 0.5
+        assert summary.tail_direction == "up"
+
+
+def test_a_cohort_dragged_by_one_loss_is_named_too():
+    """The mirror image, which removing only the largest name could not see."""
+    summary = summarise([-0.001] * 99 + [-1.50])
+    assert summary.verdict == "tail_driven"
+    assert summary.tail_direction == "down"
+    assert summary.mean_without_worst == pytest.approx(-0.001)
+
+
+def test_a_cohort_the_group_actually_carries_is_left_alone():
+    """The control: ninety-nine at +1.00% and one at +1.01% is not tail-driven,
+    though concentration saturates at n/2 for both."""
+    summary = summarise([0.01] * 99 + [0.0101])
+    assert summary.verdict != "tail_driven"
+    assert summary.tail_share < 0.01
+    assert summary.concentration == summary.concentration_ceiling
+
+
+def test_a_return_that_is_not_a_number_is_refused_rather_than_averaged():
+    """A single "nan" left the available count untouched, cost the win rate a
+    silent point, poisoned the mean and flipped a published verdict."""
+    with pytest.raises(ValueError):
+        summarise([0.01, 0.02, float("nan"), 0.03, 0.04, 0.05])
+    with pytest.raises(ValueError):
+        summarise([0.01, 0.02, float("inf"), 0.03, 0.04, 0.05])
+
+
+@pytest.mark.parametrize(
+    "bounds,expected",
+    [((0.0, 0.5), False), ((-0.5, 0.0), False), ((-0.0, 0.5), False),
+     ((-0.5, -0.0), False), ((5e-324, 0.5), True), ((-0.5, -1e-9), True)],
+)
+def test_a_bound_sitting_on_zero_is_not_a_direction(bounds, expected):
+    """The gate stability uses to decide whether a hypothesis is finished.
+    Relaxing either comparison passed the whole suite while turning
+    inconclusive halves into a reversal."""
+    assert Interval(*bounds).excludes_zero() is expected
+
+
+def test_an_interval_is_refused_when_it_cannot_be_built_rather_than_faked():
+    assert median_interval([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], 0.0) == Interval(None, None)
+    with pytest.raises(ValueError):
+        clopper_pearson(5, 10, 1.5)
+    with pytest.raises(ValueError):
+        clopper_pearson(11, 10)
+
+
+def test_the_median_interval_does_not_depend_on_the_order_it_is_given():
+    ascending = [-0.05, -0.04, -0.03, -0.02, -0.01, 0.01, 0.02, 0.03, 0.04, 0.05]
+    assert median_interval(ascending) == median_interval(list(reversed(ascending)))
+
+
+def test_a_close_anchored_field_declares_its_price_like_every_other():
+    """Deleting close_d5 and close_d20 from the anchor table passed the suite,
+    because the tests only asked whether the pairing was contaminated and an
+    undeclared field answered no."""
+    from earnings_research.statistics.lookahead import RETURN_ANCHOR
+
+    assert RETURN_ANCHOR["close_d5"] == "next_close"
+    assert RETURN_ANCHOR["close_d20"] == "next_close"
+
+
+def test_a_cohort_is_tested_against_the_rest_rather_than_a_rate_assumed_known():
+    """The base rate is estimated from the other rows, not given. Where those
+    rows happened never to reach the threshold it came out at exactly zero, and
+    under a point null of zero any hit at all has probability zero: two real
+    cohorts shipped p=0.0 and survived the correction on it. Conditioning on
+    the observed margins asks whether the hits fall disproportionately inside
+    the cohort, which is the actual question."""
+    from earnings_research.statistics.cohort import fisher_exact
+
+    assert fisher_exact(2, 10, 0, 155) == pytest.approx(0.003326, abs=1e-5)
+    assert binomial_against(2, 10, 0.0) == 0.0
+    capture = tail_capture([0.5, 0.5] + [0.0] * 8, 0.10, comparison=[0.0] * 155)
+    assert capture.base_rate == 0.0
+    assert 0.001 < capture.p_value < 0.01
+
+
+def test_a_cohort_indistinguishable_from_the_rest_says_so():
+    assert fisher_exact(1, 20, 8, 160) > 0.5
+    assert fisher_exact(0, 20, 0, 160) is not None

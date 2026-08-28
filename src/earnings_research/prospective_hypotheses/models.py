@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 Dimension = Literal[
@@ -41,15 +41,23 @@ class StopRule(BaseModel):
     later version may only tighten them.
     """
 
+    # No defaults, and no unknown keys. With defaults, a frozen registry that
+    # omitted a term took whatever the code said that day, so its hash depended
+    # on the code rather than on its own bytes; and a misspelled
+    # stop_when_halves_reversed was accepted in silence as the default, leaving
+    # a rule that reads as tightened and is not. The committed JSON schema has
+    # required all three from the start.
+    model_config = ConfigDict(extra="forbid")
+
     # A relationship present in one half of the record and reversed in the
     # other is what decay and luck both look like.
-    stop_when_halves_reverse: bool = True
+    stop_when_halves_reverse: bool
     # Below this share of the frozen historical effect, on data reserved before
     # the definition existed, the hypothesis is finished rather than weakened.
-    stop_below_reserved_effect_ratio: float = Field(gt=0, le=1, default=0.5)
+    stop_below_reserved_effect_ratio: float = Field(gt=0, le=1)
     # Revisions are how a dead hypothesis stays alive. After this many the
     # question has to be asked again from scratch, not patched.
-    maximum_revisions: int = Field(ge=0, default=2)
+    maximum_revisions: int = Field(ge=0)
 
     def at_least_as_strict_as(self, earlier: "StopRule") -> bool:
         """A later version may tighten these, never loosen them."""
@@ -306,7 +314,7 @@ class HypothesisStatus(BaseModel):
     hypothesis_version: int
     phase: Phase
     priority: Literal["primary", "secondary"]
-    status: Literal["active", "insufficient", "supported", "weakened", "rejected"]
+    status: Literal["active", "insufficient", "supported", "weakened", "rejected", "stopped"]
     prospective_trials: int = Field(ge=0)
     prospective_successes: int = Field(ge=0)
     prospective_failures: int = Field(ge=0)

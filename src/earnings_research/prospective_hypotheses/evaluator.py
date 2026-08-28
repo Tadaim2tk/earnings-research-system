@@ -154,50 +154,87 @@ def _status(definition, target, comparator):
     return "weakened", "prospective mean effect retains direction but is below the frozen retained-effect ratio"
 
 
-def _halves_reversed(trials):
-    """Whether the trials split in two assert opposite directions.
+def _halves_reversed(definition, target, comparator):
+    """Whether the *effect* changed sign between the halves of the record.
 
-    None where the question cannot be answered — too few trials, or halves that
-    merely disagree in sign without either being able to claim a direction. A
-    stop rule reading None does not fire, which is the intent: silence is not
-    evidence of a reversal.
+    Reading the target group's raw returns instead answers a different
+    question, and answers it wrongly in both directions. A market that fell and
+    then rose flips those returns while the hypothesis holds perfectly in each
+    half, so a regime change retires a good hypothesis; and an effect that
+    genuinely decays from +5% to -5% keeps positive raw returns throughout, so
+    the real decay is missed. For a hypothesis whose claim is that there is no
+    material difference, the target group's raw sign says nothing at all.
+
+    So each half is scored on what the hypothesis actually claims: the target
+    group against its comparator. The reversal has to clear the definition's
+    own materiality band on both sides, which keeps a hair either side of zero
+    from counting as a change of direction.
+
+    None wherever the question cannot be answered — too few trials in a half,
+    or a difference too small to call. A stop rule reading None does not fire.
     """
-    records = [
-        {"date": trial.outcome_observed_at, "value": trial.return_value}
-        for trial in trials
-    ]
-    verdict = assess(records, lambda record: record["value"]).verdict
-    if verdict in {"too_short", "flat"}:
+    rule = definition.assessment_rule
+    dated = sorted(
+        ((trial.outcome_observed_at, trial) for trial in list(target) + list(comparator)),
+        key=lambda item: item[0],
+    )
+    if len(dated) < 2:
         return None
-    if verdict == "inconclusive":
+    middle = len(dated) // 2
+    deltas = []
+    for part in (dated[:middle], dated[middle:]):
+        rows = [trial for _when, trial in part]
+        inside = [item.return_value for item in rows if item.cohort == "target"]
+        outside = [item.return_value for item in rows]
+        if len(inside) < rule.minimum_target_trials or len(outside) < rule.minimum_comparator_trials:
+            return None
+        deltas.append(fmean(inside) - fmean(outside))
+    first, second = deltas
+    band = rule.no_material_mean_delta
+    if abs(first) <= band or abs(second) <= band:
         return None
-    return verdict == "reversed"
+    return (first > 0) != (second > 0)
 
 
 def stop_rule_relaxations(previous, current):
-    """Report hypotheses whose stop rule was loosened by a later registry.
+    """Report every way a successor registry loosened what it inherited.
 
-    A registry holds one version per hypothesis, so a successor registry is
-    where a version bump actually lands, and it is the only place the widening
-    could happen. Conditions fixed before the results are seen mean nothing if
-    the next freeze can quietly widen them.
+    Widening a condition is the obvious way. Dropping the hypothesis entirely
+    is the larger one and was passing silently: a successor keeping one of
+    nineteen definitions, or renaming every identifier so that nothing matched,
+    was reported as having only tightened. So is comparing against an unrelated
+    registry, which the version check alone cannot catch.
     """
-    earlier = {item.hypothesis_id: item for item in previous.hypotheses}
     problems = []
+    if previous.registry_id != current.registry_id:
+        problems.append(
+            "registry %s is not a successor of %s" % (current.registry_id, previous.registry_id)
+        )
+        return problems
+    if previous.registry_version >= current.registry_version:
+        problems.append("the superseded registry must carry an earlier registry_version")
+    earlier = {item.hypothesis_id: item for item in previous.hypotheses}
+    now = {item.hypothesis_id: item for item in current.hypotheses}
+    for missing in sorted(set(earlier) - set(now)):
+        problems.append("%s was dropped, which retires its stop rule with it" % missing)
     for item in current.hypotheses:
         before = earlier.get(item.hypothesis_id)
         if before is None:
             continue
-        was = before.assessment_rule.stop_rule
-        now = item.assessment_rule.stop_rule
+        if item.hypothesis_version < before.hypothesis_version:
+            problems.append(
+                "%s went back from v%d to v%d"
+                % (item.hypothesis_id, before.hypothesis_version, item.hypothesis_version)
+            )
+        was, current_rule = before.assessment_rule.stop_rule, item.assessment_rule.stop_rule
         if was is None:
             continue
-        if now is None:
+        if current_rule is None:
             problems.append(
                 "%s v%d drops the stop rule frozen in v%d"
                 % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
             )
-        elif not now.at_least_as_strict_as(was):
+        elif not current_rule.at_least_as_strict_as(was):
             problems.append(
                 "%s v%d relaxes the stop rule frozen in v%d"
                 % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
@@ -259,9 +296,15 @@ def summarize_trials(registry, bundles, evaluated_at):
         # so that condition is left unevaluated rather than guessed at.
         stop_reason = should_stop(
             definition,
-            halves_reversed=_halves_reversed(target),
+            halves_reversed=_halves_reversed(definition, target, comparator),
             revisions=definition.hypothesis_version - 1,
         )
+        if stop_reason is not None:
+            # A hypothesis that met its own abandonment condition is finished.
+            # Leaving the status at supported let a stopped hypothesis keep
+            # reading as a live one, and the stop reason appeared nowhere a
+            # reader would look.
+            status, note = "stopped", stop_reason
         statuses.append(HypothesisStatus(
             hypothesis_id=definition.hypothesis_id,
             hypothesis_version=definition.hypothesis_version,

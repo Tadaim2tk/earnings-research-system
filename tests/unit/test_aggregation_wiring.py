@@ -20,10 +20,21 @@ ROOT = Path(__file__).resolve().parents[2]
 RECORDS = ROOT / "data/historical_research/earnings_research_os/v1/source/records.csv"
 
 
+def _all_rows():
+    return list(csv.DictReader(RECORDS.open(encoding="utf-8-sig")))
+
+
+def _explored_rows():
+    """The rows the summary is actually built from, reserve already removed."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.statistics.holdout import split_by_date
+
+    return split_by_date([_open_anchored(row) for row in _all_rows()]).exploration
+
+
 @pytest.fixture(scope="module")
 def summary():
-    rows = list(csv.DictReader(RECORDS.open(encoding="utf-8-sig")))
-    return build_aggregation(rows, [], "test")
+    return build_aggregation(_all_rows(), [], "test")
 
 
 def test_a_gap_cohort_withholds_the_returns_that_contain_the_gap(summary):
@@ -126,9 +137,42 @@ def test_the_tail_capture_of_a_reason_code_matches_the_records(summary):
     capture = summary["by_reason_code"]["margin_pressure"]["open_d5"]["tail_capture"][0]
     # Measured on the exploration set only; the reserved third is not in view.
     assert (capture["hits"], capture["n"]) == (4, 26)
-    assert capture["lift"] > 2.5
-    assert capture["p_value_adjusted"] == 1.0
+    # Against the rest of the record rather than against a base rate this
+    # cohort helped set. It was 16% of the population, and comparing it with
+    # itself included put the lift at 2.5077 against an assertion of 2.5.
+    assert capture["base_rate"] < 0.05
+    assert capture["lift"] > 3.5
+    # Nominally 0.055 against the rest of the record — the binomial form,
+    # which treated the base rate as known rather than estimated, said 0.025 —
+    # and nowhere at all after the family is counted.
+    assert 0.05 < capture["p_value"] < 0.06
+    assert capture["p_value_adjusted"] > 0.5
     assert capture["distinguishable"] is False
+
+
+def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set(summary):
+    """Every cohort here is a subset, one of them of more than half the record."""
+    from earnings_research.legacy_research.aggregation import _Population
+
+    rows = _explored_rows()
+    population = _Population(rows)
+    whole = population.rate_excluding([], "open_d5", 0.10)
+    biggest = max(
+        (
+            [row for row in rows if row.get("narrative") == label]
+            for label in {row.get("narrative") for row in rows}
+        ),
+        key=len,
+    )
+    assert len(biggest) / len(rows) > 0.4
+    assert population.rate_excluding(biggest, "open_d5", 0.10) != whole
+
+
+def test_the_whole_record_has_nothing_outside_it_to_be_compared_with(summary):
+    for capture in summary["overall"]["open_d5"]["tail_capture"]:
+        assert capture["base_rate"] is None
+        assert capture["lift"] is None
+        assert capture["distinguishable"] is False
 
 
 def test_the_reserved_period_is_declared_but_not_summarised(summary):
@@ -248,7 +292,9 @@ def _dated_rows(count, start_day=1):
 def _context_for(rows, risk_on):
     return [
         {
-            "legacy_record_id": row["code"],
+            "legacy_record_id": "ERSO-%s" % row["code"],
+            "ticker": row["code"],
+            "legacy_event_date": row["date"],
             "join_status": "ok",
             "market_context": {"risk_on_score": str(risk_on), "risk_off_score": "10"},
         }
@@ -269,25 +315,30 @@ def test_a_row_keeps_its_own_market_context_across_the_reserve_split():
     assert set(summary["market_context"]["by_relative_dominance"]) == {"risk_on_dominant"}
 
 
-def test_a_missing_context_link_does_not_shift_every_later_row():
-    """One unlinked row hands its successors the wrong context under a re-zip."""
+def test_a_missing_context_link_is_refused_rather_than_shifting_every_later_row():
+    """Dropping one link slides all the rest onto their neighbour's context.
+
+    Nothing objected: the linked count stayed right and the dominance tables
+    merely moved by one, which is the shape of an error that survives review.
+    The producer enforces a one-to-one join today, and that is exactly why this
+    went unnoticed rather than a reason not to check it.
+    """
+    from earnings_research.legacy_research.aggregation import build_aggregation
+
+    rows = _dated_rows(30)
+    contexts = _context_for(rows, 90)[1:]
+    with pytest.raises(ValueError, match="does not belong to legacy record"):
+        build_aggregation(rows, contexts, "deadbeef")
+
+
+def test_a_reordered_context_list_is_refused():
     from earnings_research.legacy_research.aggregation import build_aggregation
 
     rows = _dated_rows(30)
     contexts = _context_for(rows, 90)
-    for item in contexts[15:]:
-        item["market_context"] = {"risk_on_score": "10", "risk_off_score": "90"}
-    # The unlinked row carries an unmistakable return. Correctly paired it
-    # belongs to no context group at all; re-zipped it takes the next row's
-    # context and shows up as that group's best name.
-    rows[0]["next_close"] = "199"
-    contexts[0] = None
-    summary = build_aggregation(rows, contexts, "deadbeef")
-    groups = summary["market_context"]["by_relative_dominance"]
-    assert summary["record_count"] == 20
-    assert summary["market_context"]["linked_count"] == 19
-    assert groups["risk_on_dominant"]["open_d1"]["best"] < 0.9
-    assert groups["risk_off_dominant"]["open_d1"]["best"] < 0.9
+    contexts[3], contexts[9] = contexts[9], contexts[3]
+    with pytest.raises(ValueError, match="does not belong to legacy record"):
+        build_aggregation(rows, contexts, "deadbeef")
 
 
 def test_fewer_context_views_than_rows_does_not_borrow_a_neighbour_s_context():
@@ -359,3 +410,126 @@ def test_the_reserved_rows_are_still_listed():
     published = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
     listing = published[: published.index("## 仮説検証")]
     assert split.reserved[-1]["code"] in listing
+
+
+# --- 公開物のテストが自分自身を検査していないこと -----------------------------
+
+def _varied_rows(count=40):
+    """A fixture with spread, several cohorts, and repeated companies.
+
+    The one the renderers were tested through had thirty identical rows, so the
+    win rate was 100% and the median equalled the mean by construction: a
+    renderer printing only the mean and one printing all three were
+    indistinguishable, and every narrative cell was empty because the label did
+    not match any real one.
+    """
+    ranks = ("A", "B+", "B", "C+", "C")
+    narratives = ("整合", "中立", "衝突")
+    judges = ("即買い候補", "押し目待ち", "監視", "見送り")
+    rows = []
+    for index in range(count):
+        drift = (index % 7 - 3) / 100
+        opening = 100 + index % 5
+        rows.append({
+            # Two appearances each, so names and rows differ.
+            "code": "%04d" % (1000 + index // 2),
+            "name": "架空%02d" % index,
+            "date": "2026-%02d-%02d" % (6 + index // 28, index % 28 + 1),
+            "prev_close": "100",
+            "next_open": "%.2f" % opening,
+            "next_close": "%.2f" % (opening * (1 + drift)),
+            "d5_close": "%.2f" % (opening * (1 + drift * 2)),
+            "d20_close": "%.2f" % (opening * (1 + drift * 3)),
+            "gap": "%.4f" % ((opening - 100) / 100),
+            "ret_d1": "%.4f" % (drift + 0.02),
+            "ret_d5": "%.4f" % (drift * 2 + 0.02),
+            "ret_d20": "%.4f" % (drift * 3 + 0.02),
+            "shodo": ("GU", "フラット", "GD")[index % 3],
+            "reaction": ("GU継続", "GU失速", "GD反発", "GD継続")[index % 4],
+            "rank": ranks[index % 5],
+            "narrative": narratives[index % 3],
+            "judge": judges[index % 4],
+            "surprise": ("+2", "+1", "0", "-1", "-2")[index % 5],
+            "rc1": ("margin_pressure", "guidance_cut", "")[index % 3],
+        })
+    return rows
+
+
+def _dashboard(rows=None):
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import render_dashboard
+    from earnings_research.statistics.holdout import split_by_date
+
+    prepared = [_open_anchored(row) for row in (rows or _varied_rows())]
+    return render_dashboard(
+        prepared, "2026-09-01 00:00", statistics_rows=split_by_date(prepared).exploration
+    )
+
+
+def test_every_published_cell_carries_the_win_rate_and_the_middle():
+    """Printing the mean alone is the defect this whole change exists to fix,
+    and reverting the renderer to it passed the entire suite."""
+    import re
+
+    body = _statistics_section(_dashboard())
+    cells = [
+        cell.strip()
+        for line in body.splitlines()
+        if line.startswith("|") and "---" not in line
+        for cell in line.strip("|").split("|")[1:]
+    ]
+    figures = [cell for cell in cells if "%" in cell]
+    assert figures, "the fixture produced no numbers at all"
+    for cell in figures:
+        assert re.fullmatch(r"\d+% / [+-]\d+\.\d% / [+-]\d+\.\d% \(n=\d+(, \d+社)?\)", cell), cell
+
+
+def test_a_handful_of_records_prints_its_size_instead_of_a_number():
+    rows = [row for row in _varied_rows() if row["rank"] != "C"][:20]
+    rows += [dict(row, rank="C") for row in _varied_rows()[:2]]
+    body = _statistics_section(_dashboard(rows))
+    assert "(少)" in body
+
+
+def test_the_published_tables_are_anchored_at_prices_a_trade_could_have_used():
+    """Reverting any one table's anchor to the previous close passed the suite,
+    while restoring the exact circular figures the prose warns about."""
+    body = _statistics_section(_dashboard())
+    assert "寄り付き→翌日終値" in body
+    assert "翌日終値→5日" in body
+    assert "平均ギャップ" not in body
+    assert "| 翌日 | 5日 | 20日 |" not in body
+
+
+def test_the_scope_of_the_statistics_is_stated_beside_them():
+    body = _statistics_section(_dashboard(_varied_rows(60)))
+    assert "統計は探索対象" in body
+
+
+def test_the_note_states_its_scope_inside_the_part_it_asks_to_be_published():
+    """It was stated above the line the note tells the reader to copy from, so
+    the published article carried the figures and left their scope behind."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import render_note
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = [_open_anchored(row) for row in _varied_rows(60)]
+    text = render_note(rows, date(2026, 9, 1), statistics_rows=split_by_date(rows).exploration)
+    published = text[text.index("本文ここから"):]
+    assert "## 今週時点の検証メモ" in published
+    assert "統計は探索対象" in published
+
+
+def test_the_base_rate_never_reads_the_reserved_period():
+    """The renderers have a test for this leak; the base rate did not, and
+    including the reserve moved a nominal p-value across 0.05."""
+    from earnings_research.legacy_research.aggregation import _Population, _open_anchored
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = [_open_anchored(row) for row in _all_rows()]
+    split = split_by_date(rows)
+    before = _Population(split.exploration).rate_excluding([], "open_d5", 0.10)
+    for row in split.reserved:
+        row["open_d5"] = 5.0
+    after = _Population(split.exploration).rate_excluding([], "open_d5", 0.10)
+    assert before == after
