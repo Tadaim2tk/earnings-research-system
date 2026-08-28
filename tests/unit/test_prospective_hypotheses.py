@@ -238,8 +238,17 @@ def test_a_stop_rule_states_every_term_and_refuses_unknown_ones():
 
     from earnings_research.prospective_hypotheses.models import StopRule
 
-    with pytest.raises(_ValidationError):
-        StopRule(stop_when_halves_reverse=True)
+    complete = {
+        "stop_when_halves_reverse": True,
+        "stop_below_reserved_effect_ratio": 0.5,
+        "maximum_revisions": 2,
+    }
+    # Each term on its own: the earlier version omitted one and so pinned only
+    # that one, leaving a default on either of the other two undetected.
+    for missing in complete:
+        with pytest.raises(_ValidationError):
+            StopRule(**{key: value for key, value in complete.items() if key != missing})
+    assert StopRule(**complete)
     with pytest.raises(_ValidationError):
         stop_rule(stop_when_halves_reversed=False)
 

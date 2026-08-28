@@ -175,24 +175,6 @@ def test_the_tail_capture_of_a_reason_code_matches_the_records(summary):
     assert capture["distinguishable"] is False
 
 
-def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set(summary):
-    """Every cohort here is a subset, one of them of more than half the record."""
-    from earnings_research.legacy_research.aggregation import _Population
-
-    rows = _explored_rows()
-    population = _Population(rows)
-    whole = population.rate_excluding([], "open_d5", 0.10)
-    biggest = max(
-        (
-            [row for row in rows if row.get("narrative") == label]
-            for label in {row.get("narrative") for row in rows}
-        ),
-        key=len,
-    )
-    assert len(biggest) / len(rows) > 0.4
-    assert population.rate_excluding(biggest, "open_d5", 0.10) != whole
-
-
 def test_the_whole_record_has_nothing_outside_it_to_be_compared_with(summary):
     for capture in summary["overall"]["open_d5"]["tail_capture"]:
         assert capture["base_rate"] is None
@@ -454,7 +436,10 @@ def _varied_rows(count=40):
     rows = []
     for index in range(count):
         drift = (index % 7 - 3) / 100
-        opening = 100 + index % 5
+        # A different modulus from the one that assigns rank: sharing it
+        # gave every rank-A row next_open == prev_close, so the anchor was
+        # irrelevant to the exact cohort the anchor test checked.
+        opening = 100 + (index * 3) % 11
         rows.append({
             # Two appearances each, so names and rows differ.
             "code": "%04d" % (1000 + index // 2),
@@ -520,36 +505,108 @@ def test_a_handful_of_records_prints_its_size_instead_of_a_number():
     assert "(件数不足)" in body
 
 
-def test_the_published_tables_are_anchored_at_prices_a_trade_could_have_used():
-    """Reverting any one table's anchor restored the circular figures the prose
-    warns about, and passed the suite.
+def _table_rows(body, heading):
+    """The cells of one named table, keyed by its first column."""
+    section = body[body.index(heading):]
+    rows = {}
+    for line in section.splitlines()[1:]:
+        if not line.startswith("|"):
+            if rows:
+                break
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if not cells or "---" in cells[0]:
+            continue
+        rows[cells[0]] = cells[1:]
+    return rows
 
-    The first version of this test read the column headings, so changing every
-    anchor while leaving the headings alone still passed — the same shape of
-    defect it was written to catch. It compares figures now.
+
+def _figures(cell):
+    """The three published numbers, read back out of a cell."""
+    import re
+
+    match = re.match(
+        r"(\d+)% \[\d+〜\d+%\] / ([+-]\d+\.\d)% / ([+-]\d+\.\d)% \(n=(\d+)", cell
+    )
+    assert match, cell
+    return int(match[1]), float(match[2]), float(match[3]), int(match[4])
+
+
+def _expected_figures(rows, column, label, entry_column, exit_column):
+    """The same three numbers, from the two price columns named right here.
+
+    The price columns are written out rather than looked up, because the thing
+    under test is which prices the table uses. Asking prices_for for them would
+    be asking the answer of the code being checked.
+    """
+    from earnings_research.legacy_research.publishing import _cell
+    from earnings_research.statistics.cohort import summarise
+
+    values, names = [], []
+    for row in rows:
+        if row.get(column) != label:
+            continue
+        try:
+            entry, exit_ = float(row[entry_column]), float(row[exit_column])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if entry > 0 and exit_ > 0:
+            values.append((exit_ - entry) / entry)
+            names.append(row.get("code"))
+    summary = summarise(values, clusters=names)
+    return _figures(_cell(summary))
+
+
+ANCHORED_TABLES = (
+    ("### ランク別", "rank", "B+", 0, "next_open", "next_close"),
+    ("### ランク別", "rank", "B+", 2, "next_open", "d20_close"),
+    ("### ランク別", "rank", "B", 1, "next_open", "d5_close"),
+    ("### ナラティブ整合別", "narrative", "整合", 0, "next_open", "d20_close"),
+    ("### 判断別", "judge", "監視", 0, "next_open", "d20_close"),
+    ("### 初動分類別", "shodo", "GU", 1, "next_open", "d5_close"),
+    ("### 反応分類別", "reaction", "GU継続", 0, "next_close", "d5_close"),
+    ("### AIサプライズ", "surprise", "+1", 1, "next_open", "d20_close"),
+)
+
+
+@pytest.mark.parametrize(
+    "heading,column,label,position,entry_column,exit_column", ANCHORED_TABLES
+)
+def test_a_published_table_is_measured_between_the_two_prices_it_names(
+    heading, column, label, position, entry_column, exit_column
+):
+    """Fixing every table's entry price to the previous close failed nothing.
+
+    The figures are compared cell by cell, at a named row of a named table, so
+    a matching string somewhere else in the section cannot stand in for the
+    one under test.
     """
     from earnings_research.legacy_research.aggregation import _open_anchored
-    from earnings_research.legacy_research.publishing import _anchored, _avg
     from earnings_research.statistics.holdout import split_by_date
 
-    rows = [_open_anchored(row) for row in _varied_rows(60)]
-    explored = split_by_date(rows).exploration
-    body = _statistics_section(_dashboard(_varied_rows(60)))
-    checks = (
-        ("rank", "A", "open_d1", "ret_d1"),
-        ("rank", "A", "open_d20", "ret_d20"),
-        ("narrative", "整合", "open_d20", "ret_d20"),
-        ("judge", "監視", "open_d20", "ret_d20"),
-        ("shodo", "GU", "open_d5", "ret_d5"),
-        ("reaction", "GU継続", "close_d5", "ret_d5"),
+    source = _varied_rows(60)
+    prepared = [_open_anchored(row) for row in source]
+    explored_ids = {id(row) for row in split_by_date(prepared).exploration}
+    explored = [raw for raw, ready in zip(source, prepared) if id(ready) in explored_ids]
+    cell = _table_rows(_statistics_section(_dashboard(source)), heading)[label][position]
+    assert _figures(cell) == _expected_figures(
+        explored, column, label, entry_column, exit_column
     )
-    for column, label, sound_field, stale_field in checks:
-        match = lambda row, column=column, label=label: row.get(column) == label
-        sound = _anchored(explored, match, sound_field)
-        stale = _avg(explored, match, stale_field)
-        assert sound != stale, (column, label)
-        assert sound in body, (column, label, sound)
-        assert stale not in body, (column, label, stale)
+
+
+def test_the_previous_close_would_give_a_different_answer():
+    """The control: without it the test above could pass on any anchor."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.statistics.holdout import split_by_date
+
+    source = _varied_rows(60)
+    prepared = [_open_anchored(row) for row in source]
+    explored_ids = {id(row) for row in split_by_date(prepared).exploration}
+    explored = [raw for raw, ready in zip(source, prepared) if id(ready) in explored_ids]
+    for heading, column, label, position, entry_column, exit_column in ANCHORED_TABLES:
+        sound = _expected_figures(explored, column, label, entry_column, exit_column)
+        stale = _expected_figures(explored, column, label, "prev_close", exit_column)
+        assert sound != stale, (heading, label)
 
 
 def test_the_scope_of_the_statistics_is_stated_beside_them():
@@ -819,3 +876,158 @@ def test_the_weekly_listing_says_it_is_not_a_verification():
     text = render_weekly(rows, date(2026, 9, 1))
     assert "経過観測" in text
     assert "多重比較補正を通っていない" in text
+
+
+def _survivors(aggregation):
+    """Claims that survived the correction, counted here rather than read off."""
+    directional = distinguishable = 0
+    stack = [aggregation]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            directional += node.get("verdict") == "directional"
+            distinguishable += node.get("distinguishable") is True
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return directional, distinguishable
+
+
+def test_the_findings_line_states_the_numbers_the_summary_actually_holds():
+    """Substring checks let it be hardcoded, cut loose from the aggregation, or
+    inflated by one survivor, and the suite stayed green. Destroying the
+    function outright failed nothing at all."""
+    from earnings_research.legacy_research.publishing import findings_line
+
+    summary = build_aggregation(_all_rows(), [], "test")
+    comparisons = sum(
+        family["comparisons"] for family in summary["multiplicity"]["families"].values()
+    )
+    directional, distinguishable = _survivors(summary)
+    line = findings_line(summary)
+    assert str(comparisons) in line
+    assert (directional + distinguishable) == 0
+    assert "0件" in line
+
+
+def test_the_findings_line_changes_when_something_survives():
+    """The control. Without it, a sentence that always says zero passes."""
+    from earnings_research.legacy_research.publishing import findings_line
+
+    summary = build_aggregation(_all_rows(), [], "test")
+    empty = findings_line(summary)
+    summary["by_shodo"]["GU"]["open_d5"]["verdict"] = "directional"
+    survived = findings_line(summary)
+    assert survived != empty
+    assert "0件" not in survived
+    assert "1件" in survived or "方向性 1" in survived
+
+
+def test_the_declared_comparison_count_is_the_one_that_was_corrected():
+    """Under-reporting it tenfold changed the published heading and nothing
+    else."""
+    from earnings_research.legacy_research.publishing import findings_line
+
+    summary = build_aggregation(_all_rows(), [], "test")
+    families = summary["multiplicity"]["families"]
+    corrected = sum(
+        1
+        for view, groups in summary.items()
+        if isinstance(groups, dict) and view.startswith("by_") and view != DESCRIPTIVE_VIEW
+        for metrics in groups.values()
+        for stats in metrics.values()
+        if isinstance(stats, dict) and "sign_test_p_adjusted" in stats
+    )
+    assert corrected > 0
+    assert sum(family["comparisons"] for family in families.values()) >= corrected
+    assert str(sum(family["comparisons"] for family in families.values())) in findings_line(summary)
+
+
+def test_every_corrected_half_verdict_answers_to_the_corrected_value(summary):
+    """The comment above the code says the verdict is recomputed on the
+    corrected p-value. Reverting it to the raw one returned eight cells to
+    `directional` and failed nothing."""
+    checked = 0
+    for view, groups in summary.items():
+        if not isinstance(groups, dict) or not view.startswith("by_") or view == DESCRIPTIVE_VIEW:
+            continue
+        for metrics in groups.values():
+            for stats in metrics.values():
+                if not isinstance(stats, dict):
+                    continue
+                for name in ("first_half", "second_half"):
+                    part = (stats.get("stability") or {}).get(name)
+                    if not isinstance(part, dict) or "sign_test_p_adjusted" not in part:
+                        continue
+                    checked += 1
+                    if part["sign_test_p_adjusted"] >= 0.05:
+                        assert part["verdict"] != "directional", (view, name)
+    assert checked > 100
+
+
+def test_the_aggregation_hands_the_names_down_to_every_measure():
+    """summarise, sign_test and tail_capture each count names, and the wiring
+    that gives them the names was pinned by nothing: dropping all three
+    arguments moved four thousand five hundred leaves and failed no test."""
+    rows = []
+    for index in range(40):
+        rows.append({
+            "code": "SAME", "date": "2026-06-%02d" % (index % 28 + 1),
+            "prev_close": "100", "next_open": "100",
+            "next_close": "%d" % (101 + index % 3), "d5_close": "104", "d20_close": "106",
+            "gap": "0", "ret_d1": "0.01", "ret_d5": "0.04", "ret_d20": "0.06",
+            "shodo": "フラット", "reaction": "GU継続", "rank": "B",
+            "narrative": "中立", "judge": "監視", "surprise": "0",
+        })
+    stats = build_aggregation(rows, [], "test")["by_rank"]["B"]["open_d5"]
+    assert stats["n_independent"] == 1
+    assert stats["available_count"] > 20
+    # One name cannot assert a direction, whatever the row count says.
+    assert stats["median_interval"] == {"low": None, "high": None}
+    assert stats["verdict"] != "directional"
+
+
+def test_the_scope_sentence_states_the_split_it_was_given():
+    """Prefix-only checks let it report 254 of 254 with a cutoff in 2099."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import statistics_scope
+    from earnings_research.statistics.holdout import split_by_date
+
+    split = split_by_date([_open_anchored(row) for row in _all_rows()])
+    line = statistics_scope(split)
+    assert str(len(split.exploration)) in line
+    assert str(len(split.exploration) + len(split.reserved)) in line
+    assert split.cutoff.isoformat() in line
+
+
+def test_the_verdict_reads_every_figure_the_cell_carries():
+    """_verdict_from exists so a caller cannot hand over three of the figures
+    and lose the tail checks — which is exactly what happened the first time.
+    Passing trimmed_mean=None moved eighty-nine published cells from
+    tail_driven to no_signal and failed nothing."""
+    from earnings_research.legacy_research.aggregation import _verdict_from
+
+    carried = {"mean": 0.02, "median": 0.001, "trimmed_mean": 0.001}
+    assert _verdict_from(carried, 0.9) == "tail_driven"
+    assert _verdict_from({**carried, "trimmed_mean": None}, 0.9) == "no_signal"
+    assert _verdict_from({**carried, "trimmed_mean": 0.019}, 0.9) == "no_signal"
+
+
+def test_a_cohort_is_not_compared_against_a_base_rate_it_helped_set():
+    """Rewritten: the earlier version took the summary fixture and never used
+    it, the defect this suite has now reintroduced twice."""
+    from earnings_research.legacy_research.aggregation import _Population, _open_anchored
+    from earnings_research.statistics.holdout import split_by_date
+
+    rows = split_by_date([_open_anchored(row) for row in _all_rows()]).exploration
+    population = _Population(rows)
+    whole = population.rate_excluding([], "open_d5", 0.10)
+    biggest = max(
+        (
+            [row for row in rows if row.get("narrative") == label]
+            for label in {row.get("narrative") for row in rows}
+        ),
+        key=len,
+    )
+    assert len(biggest) / len(rows) > 0.4
+    assert population.rate_excluding(biggest, "open_d5", 0.10) != whole

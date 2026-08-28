@@ -878,3 +878,35 @@ Decision:
 - **`README.md` と `SUPERSEDED.md` の「各ファイルの冒頭に注記がある」を訂正する。** 注記があるのは Markdown 6ファイルのみ。`aggregation_summary.json` は `superseded_note` キー、`research_knowledge.json` と `publishing_parity.json` は持たない。前者は凍結レジストリにSHA-256で束縛されており、1バイト足すと検証が落ちることを実測済み。
 
 Consequences: テストは 997→1000件。3つの修正はいずれも変異で落ちることを確認した（note から結論を外す→2件、weekly から断りを外す→1件、`research_report` から注記を外す→1件）。CLI 4本のうち3本が exit 0、`verify-legacy-migration` のみ exit 1 だが、これは base でも同じ理由（committed manifest に `reports_sha256` が無い）で失敗する既存の問題で、ADR-0045 の未対応事項に記載済み。
+
+## ERS-ADR-0049
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: 変異・敵対専任の監査が78変異を当て、**22件が生存**した。判定は「実装コード自体は正しい。縛っていないのはテスト側」。
+
+最も重いのは、私が書いた起点テストに**欠陥が3つ重なっていた**ことである。`test_the_published_tables_are_anchored_at_prices_a_trade_could_have_used` は:
+
+1. 期待値を `_anchored()` ——**検査対象と同じ関数**——で計算していた（自己参照）
+2. `assert sound in body` は節のどこかに同じ文字列があれば通る。fixture が同一文字列を複数の表に出すため、初動表の起点を戻してもナラティブ行のコピーで通過した
+3. 検査対象が `rank="A"` だったが、fixture の `opening = 100 + index % 5` と `rank = ranks[index % 5]` が**同じ剰余を共有**しており、rank A の12行すべてで `next_open == prev_close`。**起点が原理的に無関係な行**を検査していた
+
+結果、`prices_for()` を `prev_close` 固定にしても、呼び出しを `ret_d*` に戻しても、**0件失敗**。実データで初動GU `42% / -0.2%` が `83% / +3.2%`、GD `56% / +0.7%` が `14% / -4.8%` に戻る——このPRが withhold するために存在している循環数値そのものが復活する。
+
+`findings_line` も部分文字列しか見られていなかった。ハードコード文に潰しても、集計から切り離しても、**存在しない生存件数を1件水増ししても**通った。中心関数を丸ごと壊したときの失敗件数は **0**。
+
+stability 半分の verdict が補正後p値で取り直されているかも誰も検査しておらず、生p値に戻すと8セルが `directional` に戻った。コード側のコメントが「直した」と明言している当のものである。
+
+Decision:
+
+- **fixture の剰余衝突を外す。** `opening` を `(index * 3) % 11` にして、rank と独立させる。これを直さない限り、どのテストを足しても rank A では起点が効かない。
+- **起点テストを、名前のついた表の名前のついた行のセル単位で突き合わせる。** 期待値は**価格の列名をテスト内に直書き**して算出する（`prices_for` に問い合わせるのは、検査対象のコードに答えを聞くこと）。8つの (表, ラベル, 位置, 起点, 終点) を parametrize し、「前日終値起点なら別の答えになる」対照も置く。
+- **`findings_line` を数値で検査する。** 比較件数と生存件数を独立に数えて一致を要求し、生存が1件出れば文が変わることを対照で確かめる。
+- **stability 半分の verdict を全数走査する。** 補正後p ≥ 0.05 のセルが `directional` を名乗らないこと。
+- **集計の銘柄配線を縛る。** 1銘柄40行のコホートを `build_aggregation` に通し、`n_independent == 1`、中央値区間が `null`、`directional` にならないことを要求する。`summarise` / `sign_test` / `tail_capture` は単体で固定済みだったが、**呼び出し側の配線は一切固定されていなかった**（3つの引数を全部落としても0件失敗、公開JSONの4525 leaf が変化）。
+- **`statistics_scope` / 比較件数 / `_verdict_from` の `trimmed_mean` / `StopRule` の3項目**を、それぞれ実測値で固定する。`StopRule` のテストは名前に反して1項目分の条件しか固定していなかったので、3項目を個別に parametrize する。
+- **`summary` fixture を引数に取って本文で使っていないテストを書き直す。** これは過去に指摘された欠陥と同型で、**このスイートで2度目**である。
+
+Consequences: テストは 1000→1015件。監査が挙げた生存変異はすべて落ちる（起点固定 8件、呼び出し戻し 7件、`RETURN_ANCHOR` 破壊 6件、`findings_line` ハードコード 5件、半分verdictの生p値化 3件、銘柄配線の除去・スコープ文の嘘・比較件数の過少申告・`trimmed_mean` 未伝達・`StopRule` の既定値 各1件）。中心関数を丸ごと壊したときの失敗件数は `findings_line` 0→5、`_anchored` 0→14。
