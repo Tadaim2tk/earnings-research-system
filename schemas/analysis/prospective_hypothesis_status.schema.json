@@ -123,7 +123,8 @@
             "insufficient",
             "supported",
             "weakened",
-            "rejected"
+            "rejected",
+            "stopped"
           ],
           "title": "Status",
           "type": "string"
@@ -149,6 +150,28 @@
             }
           ],
           "title": "Target Positive Rate"
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Reason",
+          "description": "Why this hypothesis is finished under its own frozen stop rule, or null while it stays open. Null also covers versions carrying no stop rule."
+        },
+        "stop_conditions_evaluated": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Stop Conditions Evaluated",
+          "type": "array",
+          "description": "Which frozen stop conditions the evaluation could look at. A condition absent here was never checked, which is not the same as checked and not fired."
         }
       },
       "required": [

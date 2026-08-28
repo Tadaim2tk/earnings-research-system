@@ -35,6 +35,7 @@ from earnings_research.prospective_hypotheses import (
     evaluate_observation_file,
     summarize_trials_file,
     verify_registry_file,
+    verify_stop_rules_only_tightened,
 )
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
@@ -262,6 +263,13 @@ def main(argv=None) -> int:
     )
     hypothesis_verify_parser.add_argument("--knowledge", required=True, type=Path)
     hypothesis_verify_parser.add_argument("--registry", required=True, type=Path)
+
+    stop_rule_parser = subparsers.add_parser(
+        "verify-stop-rule-tightening",
+        help="Refuse a successor registry that widened an inherited stop rule.",
+    )
+    stop_rule_parser.add_argument("--previous-registry", required=True, type=Path)
+    stop_rule_parser.add_argument("--registry", required=True, type=Path)
 
     hypothesis_evaluate_parser = subparsers.add_parser(
         "evaluate-hypothesis-event",
@@ -499,6 +507,19 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Hypothesis registry verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-stop-rule-tightening":
+        try:
+            registry = verify_stop_rules_only_tightened(args.previous_registry, args.registry)
+            print(json.dumps({
+                "registry_id": registry.registry_id,
+                "registry_version": registry.registry_version,
+                "status": "stop_rules_only_tightened",
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Stop rule verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "evaluate-hypothesis-event":

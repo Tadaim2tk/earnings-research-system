@@ -5,6 +5,7 @@ from .pipeline import (
     evaluate_observation_file,
     summarize_trials_file,
     verify_registry_file,
+    verify_stop_rules_only_tightened,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "evaluate_observation_file",
     "summarize_trials_file",
     "verify_registry_file",
+    "verify_stop_rules_only_tightened",
 ]

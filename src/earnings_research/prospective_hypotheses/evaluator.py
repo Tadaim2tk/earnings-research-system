@@ -5,6 +5,8 @@ import json
 from datetime import datetime
 from statistics import fmean
 
+from earnings_research.statistics.stability import assess
+
 from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
@@ -97,6 +99,36 @@ def _rounded(value):
     return None if value is None else round(value, 8)
 
 
+def should_stop(definition, *, halves_reversed=None, reserved_effect_ratio=None, revisions=None):
+    """Return why this hypothesis is finished, or None to keep it open.
+
+    Every condition was fixed when the definition was frozen. Reaching one is
+    not a setback to be worked around; it is the answer.
+    """
+    rule = definition.assessment_rule.stop_rule
+    if rule is None:
+        # Versions frozen before stop rules existed carry none, and one is not
+        # applied to them after the fact. They simply have no stopping point
+        # until a new version is frozen with one.
+        return None
+    if rule.stop_when_halves_reverse and halves_reversed:
+        return "the effect reversed between the two halves of the record"
+    if (
+        reserved_effect_ratio is not None
+        and reserved_effect_ratio < rule.stop_below_reserved_effect_ratio
+    ):
+        return (
+            "the reserved period retained %.2f of the frozen effect, below the %.2f required"
+            % (reserved_effect_ratio, rule.stop_below_reserved_effect_ratio)
+        )
+    if revisions is not None and revisions > rule.maximum_revisions:
+        return (
+            "revised %d times against a limit of %d; the question needs asking again, not patching"
+            % (revisions, rule.maximum_revisions)
+        )
+    return None
+
+
 def _status(definition, target, comparator):
     if not target and not comparator:
         return "active", "prospective observation is not recorded yet"
@@ -120,6 +152,94 @@ def _status(definition, target, comparator):
     if abs(mean_delta) >= abs(historical) * rule.retained_effect_ratio:
         return "supported", "prospective mean effect retains the direction and required historical-effect ratio"
     return "weakened", "prospective mean effect retains direction but is below the frozen retained-effect ratio"
+
+
+def _halves_reversed(definition, target, comparator):
+    """Whether the *effect* changed sign between the halves of the record.
+
+    Reading the target group's raw returns instead answers a different
+    question, and answers it wrongly in both directions. A market that fell and
+    then rose flips those returns while the hypothesis holds perfectly in each
+    half, so a regime change retires a good hypothesis; and an effect that
+    genuinely decays from +5% to -5% keeps positive raw returns throughout, so
+    the real decay is missed. For a hypothesis whose claim is that there is no
+    material difference, the target group's raw sign says nothing at all.
+
+    So each half is scored on what the hypothesis actually claims: the target
+    group against its comparator. The reversal has to clear the definition's
+    own materiality band on both sides, which keeps a hair either side of zero
+    from counting as a change of direction.
+
+    None wherever the question cannot be answered — too few trials in a half,
+    or a difference too small to call. A stop rule reading None does not fire.
+    """
+    rule = definition.assessment_rule
+    dated = sorted(
+        ((trial.outcome_observed_at, trial) for trial in list(target) + list(comparator)),
+        key=lambda item: item[0],
+    )
+    if len(dated) < 2:
+        return None
+    middle = len(dated) // 2
+    deltas = []
+    for part in (dated[:middle], dated[middle:]):
+        rows = [trial for _when, trial in part]
+        inside = [item.return_value for item in rows if item.cohort == "target"]
+        outside = [item.return_value for item in rows]
+        if len(inside) < rule.minimum_target_trials or len(outside) < rule.minimum_comparator_trials:
+            return None
+        deltas.append(fmean(inside) - fmean(outside))
+    first, second = deltas
+    band = rule.no_material_mean_delta
+    if abs(first) <= band or abs(second) <= band:
+        return None
+    return (first > 0) != (second > 0)
+
+
+def stop_rule_relaxations(previous, current):
+    """Report every way a successor registry loosened what it inherited.
+
+    Widening a condition is the obvious way. Dropping the hypothesis entirely
+    is the larger one and was passing silently: a successor keeping one of
+    nineteen definitions, or renaming every identifier so that nothing matched,
+    was reported as having only tightened. So is comparing against an unrelated
+    registry, which the version check alone cannot catch.
+    """
+    problems = []
+    if previous.registry_id != current.registry_id:
+        problems.append(
+            "registry %s is not a successor of %s" % (current.registry_id, previous.registry_id)
+        )
+        return problems
+    if previous.registry_version >= current.registry_version:
+        problems.append("the superseded registry must carry an earlier registry_version")
+    earlier = {item.hypothesis_id: item for item in previous.hypotheses}
+    now = {item.hypothesis_id: item for item in current.hypotheses}
+    for missing in sorted(set(earlier) - set(now)):
+        problems.append("%s was dropped, which retires its stop rule with it" % missing)
+    for item in current.hypotheses:
+        before = earlier.get(item.hypothesis_id)
+        if before is None:
+            continue
+        if item.hypothesis_version < before.hypothesis_version:
+            problems.append(
+                "%s went back from v%d to v%d"
+                % (item.hypothesis_id, before.hypothesis_version, item.hypothesis_version)
+            )
+        was, current_rule = before.assessment_rule.stop_rule, item.assessment_rule.stop_rule
+        if was is None:
+            continue
+        if current_rule is None:
+            problems.append(
+                "%s v%d drops the stop rule frozen in v%d"
+                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
+            )
+        elif not current_rule.at_least_as_strict_as(was):
+            problems.append(
+                "%s v%d relaxes the stop rule frozen in v%d"
+                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
+            )
+    return problems
 
 
 def summarize_trials(registry, bundles, evaluated_at):
@@ -169,6 +289,31 @@ def summarize_trials(registry, bundles, evaluated_at):
         target_rate = _rate(target_values)
         comparator_rate = _rate(comparator_values)
         status, note = _status(definition, target, comparator)
+        # The stop rule is read here rather than by a reviewer, because a
+        # condition nobody evaluates is a condition nobody is bound by. Halves
+        # are compared on the trials themselves; the reserved period belongs to
+        # historical exploration and has no counterpart in prospective trials,
+        # so that condition is left unevaluated rather than guessed at.
+        reversed_halves = _halves_reversed(definition, target, comparator)
+        stop_reason = should_stop(
+            definition,
+            halves_reversed=reversed_halves,
+            revisions=definition.hypothesis_version - 1,
+        )
+        # Named rather than implied. The reserved-effect condition is absent
+        # from this list on every hypothesis, which is the honest report: the
+        # reserved period belongs to historical exploration and prospective
+        # trials have no counterpart to compare against, so a rule fixed on it
+        # has never once been looked at.
+        evaluated = [] if definition.assessment_rule.stop_rule is None else (
+            (["halves_reverse"] if reversed_halves is not None else []) + ["revisions"]
+        )
+        if stop_reason is not None:
+            # A hypothesis that met its own abandonment condition is finished.
+            # Leaving the status at supported let a stopped hypothesis keep
+            # reading as a live one, and the stop reason appeared nowhere a
+            # reader would look.
+            status, note = "stopped", stop_reason
         statuses.append(HypothesisStatus(
             hypothesis_id=definition.hypothesis_id,
             hypothesis_version=definition.hypothesis_version,
@@ -188,6 +333,8 @@ def summarize_trials(registry, bundles, evaluated_at):
             distinct_event_quarters=len({item.event_quarter for item in items}),
             last_evaluated_at=max((item.recorded_at for item in items), default=None),
             production_review_eligible=False,
+            stop_reason=stop_reason,
+            stop_conditions_evaluated=evaluated,
             note=note,
         ))
     return HypothesisStatusSnapshot(

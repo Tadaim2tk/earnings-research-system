@@ -1,5 +1,18 @@
 ## Legacy Research Weekly Digest
 
+> **⚠ この成果物は、統計ガードを通っていない経路から生成されています。**
+>
+> `knowledge.py` には留保期間の分割も、寄り付き起点のリターンも、多重比較補正も
+> 入っていません（`aggregation.py` と `publishing.py` にのみ入っています）。
+> したがって下の差分は、254件全部・前日終値起点・補正なしで算出されたもので、
+> 統計的な所見ではありません。`research_report.md` と `research_knowledge.json` に出る
+> `potentially_favorable` / `potentially_unfavorable` は方向の候補であって、
+> 検証結果ではありません。
+>
+> とくに `reaction` を `D5` / `D20` で評価している項目は、現在のコードが
+> 「分類の定義が結果に入っている」として withhold する組合せです。
+> この経路の是正は ERS-ADR-0045 の未対応事項として別PRに残しています。
+
 対象はlegacy_observational 254件。D1 245件（実効41）、D5 242件（実効39）、D20 139件（実効25）を利用した。
 
 - reaction=GU継続のD5は全体比平均差9.59%（n=34、limited）。

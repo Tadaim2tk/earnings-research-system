@@ -10,12 +10,16 @@ requires-python = ">=3.11"
 dependencies = [
   "httpcore>=1.0,<2.0",
   "httpx>=0.27,<1.0",
-  "PyMuPDF>=1.24,<2.0",
+  # `import pymupdf` (the lowercase module) only exists from 1.24.3.
+  "PyMuPDF>=1.24.3,<2.0",
   "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+  # The tests import this directly; it was reaching them only as somebody
+  # else's transitive dependency, which a clean CI checkout does not have.
+  "jsonschema>=4.0",
   "pytest>=7.0",
   "PyYAML>=6.0",
 ]

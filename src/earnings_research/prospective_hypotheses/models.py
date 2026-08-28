@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 Dimension = Literal[
@@ -32,6 +32,42 @@ class HistoricalEffect(BaseModel):
     positive_rate_delta_vs_overall: float
 
 
+class StopRule(BaseModel):
+    """When to abandon the hypothesis, decided before any result is seen.
+
+    Without this, a hypothesis is never wrong — it is only ever awaiting more
+    data or one more condition. The conditions are frozen with the definition
+    precisely because they are easy to relax once the numbers are in, and a
+    later version may only tighten them.
+    """
+
+    # No defaults, and no unknown keys. With defaults, a frozen registry that
+    # omitted a term took whatever the code said that day, so its hash depended
+    # on the code rather than on its own bytes; and a misspelled
+    # stop_when_halves_reversed was accepted in silence as the default, leaving
+    # a rule that reads as tightened and is not. The committed JSON schema has
+    # required all three from the start.
+    model_config = ConfigDict(extra="forbid")
+
+    # A relationship present in one half of the record and reversed in the
+    # other is what decay and luck both look like.
+    stop_when_halves_reverse: bool
+    # Below this share of the frozen historical effect, on data reserved before
+    # the definition existed, the hypothesis is finished rather than weakened.
+    stop_below_reserved_effect_ratio: float = Field(gt=0, le=1)
+    # Revisions are how a dead hypothesis stays alive. After this many the
+    # question has to be asked again from scratch, not patched.
+    maximum_revisions: int = Field(ge=0)
+
+    def at_least_as_strict_as(self, earlier: "StopRule") -> bool:
+        """A later version may tighten these, never loosen them."""
+        return (
+            (self.stop_when_halves_reverse or not earlier.stop_when_halves_reverse)
+            and self.stop_below_reserved_effect_ratio >= earlier.stop_below_reserved_effect_ratio
+            and self.maximum_revisions <= earlier.maximum_revisions
+        )
+
+
 class AssessmentRule(BaseModel):
     comparison_basis: Literal["target_vs_all_eligible_events"]
     minimum_target_trials: int = Field(ge=1)
@@ -39,6 +75,19 @@ class AssessmentRule(BaseModel):
     retained_effect_ratio: float = Field(gt=0, le=1)
     no_material_mean_delta: float = Field(ge=0)
     no_material_positive_rate_delta: float = Field(ge=0)
+    # Optional so that registries frozen before stop rules existed keep their
+    # hash. A frozen definition is not rewritten to carry a field it never had;
+    # the conditions attach to the next version instead. Where a version does
+    # carry one it is serialised and hashed like any other term, so the
+    # conditions are as frozen as the rest of the definition.
+    stop_rule: Optional[StopRule] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_stop_rule(self, handler):
+        payload = handler(self)
+        if self.stop_rule is None:
+            payload.pop("stop_rule", None)
+        return payload
 
 
 class HypothesisDefinition(BaseModel):
@@ -121,7 +170,6 @@ class HypothesisRegistry(BaseModel):
         if any(item.frozen_at != self.frozen_at for item in self.hypotheses):
             raise ValueError("all definitions must share the registry freeze timestamp")
         return self
-
 
 class PreEventFeatures(BaseModel):
     captured_at: datetime
@@ -266,7 +314,7 @@ class HypothesisStatus(BaseModel):
     hypothesis_version: int
     phase: Phase
     priority: Literal["primary", "secondary"]
-    status: Literal["active", "insufficient", "supported", "weakened", "rejected"]
+    status: Literal["active", "insufficient", "supported", "weakened", "rejected", "stopped"]
     prospective_trials: int = Field(ge=0)
     prospective_successes: int = Field(ge=0)
     prospective_failures: int = Field(ge=0)
@@ -280,7 +328,23 @@ class HypothesisStatus(BaseModel):
     distinct_event_quarters: int = Field(ge=0)
     last_evaluated_at: Optional[datetime]
     production_review_eligible: Literal[False] = False
+    # Why this hypothesis is finished under its own frozen stop rule, or None
+    # while it stays open. Versions carrying no stop rule are always None.
+    stop_reason: Optional[str] = None
+    # Which of the frozen conditions the evaluation was actually able to look
+    # at. A condition with no data behind it never fires, and without this the
+    # difference between "checked and did not fire" and "never checked" is
+    # invisible: the reserved-effect condition has no counterpart in
+    # prospective trials and has never been evaluated once.
+    stop_conditions_evaluated: List[str] = Field(default_factory=list)
     note: str
+
+
+    @model_validator(mode="after")
+    def validate_status(self):
+        if (self.stop_reason is not None) != (self.status == "stopped"):
+            raise ValueError("a stopped hypothesis carries its reason, and only a stopped one")
+        return self
 
 
 class HypothesisStatusSnapshot(BaseModel):
