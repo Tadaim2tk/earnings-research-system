@@ -649,3 +649,40 @@ Context: ADR-0039は強制力を「マージ手順の恒久ルール」という
 Decision: リポジトリruleset `main-merge-gate` を有効化する。(1) mainへのpushに `wait-for-codex-review` check（GitHub Actions発）を必須化、(2) force pushとブランチ削除を禁止。例外経路（bypass）は設定しない。マージは `gh pr merge --auto` で予約する運用へ一本化する。あわせてcheckの成功条件を「レビュー到着」から「未解決のCodex指摘スレッドがゼロ」へ強化する（TSO #121へのCodex P1指摘: 到着だけで緑にすると、--auto予約が指摘を読む前にマージしてしまう）。指摘スレッドが残ったまま20分経過するとcheckは失敗（赤）になり、fail-open（timeoutで成功）はレビューが一切届かない場合に限る。
 
 Consequences: チェック完了前のマージ、および未解決指摘を積んだままのマージはGitHub側で拒否され、人側の規律が単一障害点でなくなる。checkの緑がレビュー精読を意味しない点は不変 — 届いたレビューを読み、指摘をPR内で処理（修正pushまたはthread resolve）する義務は手順側に残る。Codexが指摘を出したPRは、処理が済むまで自動マージされない。将来ボットがmainへ直接pushする運用を導入する場合は、専用Deploy keyを例外経路として追加する必要がある。
+
+## ERS-ADR-0041
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: legacy aggregationは各fieldについて平均と中央値だけを返していた。この2つでは「1銘柄が連日ストップ高で群を持ち上げた」場合と「群全体が揃って動いた」場合を区別できない。どちらも同じ平均になる。さらに `by_reaction` はギャップで群を分けながら結果を `prev_close` 起点のリターンで見ており、分類に使ったギャップが結果に含まれていた。実測では、この起点の違いだけでギャップアップ群の勝率が74%から47%へ反転する。
+
+Decision: `legacy_aggregation_summary` を **v1からv2** へ上げる。各fieldは以下を持つ。
+
+- `win_rate` / `median` と、その厳密な区間（Clopper-Pearson と 順序統計量。リターンは正規分布から遠いので分布仮定を置かず、乱数seedも挟まないので再現する）
+- `mean` と `mean_without_best`、および `concentration`（最大の1件が何件分のばらつきを担うか。上限は n/2）
+- `tail_capture`（+10%/+20%に達した割合、全体比率との比較、厳密なp値）
+- `stability`（前半と後半を別々に集計し、符号が一致するか）
+- `verdict`（`directional` / `tail_driven` / `no_signal` / `insufficient`）
+- コホート定義が結果に混入する組合せは数値の代わりに `withheld` と理由を持つ
+
+summary本体は `holdout`（留保件数と cutoff。留保側の統計は計算しない）と `multiplicity`（ビュー単位のBenjamini-Hochberg補正と比較件数）を持つ。`record_count` は探索対象の件数であり、留保を含む総数は `record_count_including_reserved` に入る。
+
+Consequences: v1を読む消費側は `mean`/`median` の位置が変わらないので壊れないが、n<5のセルでは値がnullになる（件数だけを出す）。repo内の消費側は `pipeline.py` の `verify_legacy_migration` だけで、`record_count` と `prospective_records_included` しか読まないため影響しない。`aggregation_summary.json` にJSON schemaは無く、契約は本ADRとテストが担う。
+
+## ERS-ADR-0042
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: 独立監査が統計ガードの実装2箇所を指摘した。どちらも理念は正しいのに実装が追いついていなかった。
+
+第一に、sign testの銘柄クラスタ化が効いていなかった。行単位で勝ちを数えたあと `n_independent` へ比例縮小していたため、同じ銘柄が多数回現れると**その銘柄の方向が検定を支配し続ける**。実測では、1銘柄20行が正、他5銘柄が負のコホートが「6件中5勝」として扱われた。真の集約は「6銘柄中1勝」であり、方向が逆になる。
+
+第二に、`verdict` が生のp値のまま残っていた。`_multiplicity` は `sign_test_p_adjusted` を追加するだけで `verdict` を再計算しないため、生p<0.05・補正後p>=0.05のコホートが `directional` を名乗り続けた。補正を入れた目的そのものが失われる。
+
+Decision: sign testは**銘柄ごとに一度集約してから**符号検定する。各銘柄はその銘柄自身の中央値で方向を決め、検定は行ではなく銘柄を数える。`verdict` は `verdict_for(mean, median, mean_without_best, p_value)` として切り出し、p値を引数で受ける。`_multiplicity` は補正後の値でこれを呼び直す。p値を持たない記述用ビュー（`by_ticker`）では `directional` を残さない。
+
+Consequences: 実データで `directional` は0件になる。補正前は生p<0.05が28件あった。`tail_driven` の判定はp値に依存しないので変わらない。銘柄集約により、同一銘柄が繰り返し現れるコホートの検定力は下がるが、それは元々存在しなかった証拠を数えていたためである。

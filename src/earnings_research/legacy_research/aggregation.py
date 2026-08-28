@@ -8,6 +8,7 @@ from earnings_research.statistics.cohort import (
     base_rate,
     summarise,
     tail_capture,
+    verdict_for,
 )
 from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import contamination
@@ -170,6 +171,12 @@ def _multiplicity(summary):
                 if stats.get("sign_test_p") is not None:
                     if descriptive:
                         stats.pop("sign_test_p")
+                        stats["verdict"] = verdict_for(
+                            stats.get("mean"),
+                            stats.get("median"),
+                            stats.get("mean_without_best"),
+                            None,
+                        )
                     else:
                         raw["%s/%s/sign" % (label, field)] = stats["sign_test_p"]
                 for index, tail in enumerate(stats.get("tail_capture") or []):
@@ -184,10 +191,18 @@ def _multiplicity(summary):
             continue
         for name, value in adjust_for_multiplicity(raw).items():
             label, field, which = name.split("/")
+            stats = groups[label][field]
             if which == "sign":
-                groups[label][field]["sign_test_p_adjusted"] = value
+                stats["sign_test_p_adjusted"] = value
+                # The verdict was formed before the family was counted. Leaving
+                # it on the raw p-value would keep calling a cohort directional
+                # after the correction has dismissed it, which would make the
+                # correction decorative.
+                stats["verdict"] = verdict_for(
+                    stats.get("mean"), stats.get("median"), stats.get("mean_without_best"), value
+                )
             else:
-                groups[label][field]["tail_capture"][int(which[4:])]["p_value_adjusted"] = value
+                stats["tail_capture"][int(which[4:])]["p_value_adjusted"] = value
         families[view] = {"comparisons": len(raw), "corrected": True}
     return {"method": "benjamini_hochberg", "scope": "per_view", "families": families}
 

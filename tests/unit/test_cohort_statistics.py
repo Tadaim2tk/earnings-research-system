@@ -67,6 +67,34 @@ def test_repeated_names_are_not_repeated_evidence():
     assert repeated.sign_test_p > distinct.sign_test_p
 
 
+def test_one_name_appearing_often_does_not_decide_the_test():
+    """Twenty rows from one company against five other companies going the
+    other way: one name won, not five."""
+    values = [0.01] * 20 + [-0.01] * 5
+    clusters = ["SAME"] * 20 + list("BCDEF")
+    summary = summarise(values, clusters=clusters)
+    assert summary.win_rate == 0.8  # rows
+    # Aggregating each name to its own median leaves one winner out of six, so
+    # the test cannot read the repeated name as a majority.
+    assert summary.sign_test_p == sign_test([-0.01] * 5 + [0.01])
+
+
+def test_a_name_votes_by_its_own_middle():
+    # A's median is negative even though its best row is not.
+    values = [0.05, -0.01, -0.01] + [0.02, 0.03, 0.04]
+    clusters = ["A", "A", "A", "B", "C", "D"]
+    assert summarise(values, clusters=clusters).sign_test_p == sign_test([-0.01, 0.02, 0.03, 0.04])
+
+
+def test_the_sign_test_pairs_values_with_their_own_cluster():
+    """Sorting the values before the test would scramble the pairing."""
+    values = [0.05, -0.02, 0.04, -0.03, 0.06, -0.04]
+    clusters = ["A", "B", "A", "B", "A", "B"]
+    # A is entirely positive and B entirely negative; scrambling the pairing
+    # would mix them and change the vote.
+    assert summarise(values, clusters=clusters).sign_test_p == sign_test([0.05, -0.03])
+
+
 def test_clusters_must_line_up_with_values():
     with pytest.raises(ValueError, match="line up"):
         summarise([0.01, 0.02], clusters=["A"])
@@ -300,3 +328,13 @@ def test_the_median_interval_uses_the_expected_ranks():
 def test_the_correction_matches_benjamini_hochberg(raw, expected):
     """Pinned against the standard definition, not just against monotonicity."""
     assert adjust_for_multiplicity(raw) == expected
+
+
+def test_a_verdict_is_computed_from_whichever_p_value_it_is_given():
+    """So a caller holding the corrected value can recompute with it."""
+    from earnings_research.statistics.cohort import verdict_for
+
+    assert verdict_for(0.02, 0.02, 0.01, 0.01) == "directional"
+    assert verdict_for(0.02, 0.02, 0.01, 0.9) == "no_signal"
+    # A tail-driven cohort stays tail-driven whatever the p-value says.
+    assert verdict_for(0.02, -0.01, 0.01, 0.001) == "tail_driven"

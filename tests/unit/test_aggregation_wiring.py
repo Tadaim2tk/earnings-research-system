@@ -144,3 +144,76 @@ def test_a_cohort_that_reverses_between_halves_is_named(summary):
     stability = summary["by_reason_code"]["margin_pressure"]["open_d5"]["stability"]
     assert stability["verdict"] == "reversed"
     assert stability["first_half"]["median"] > 0 > stability["second_half"]["median"]
+
+
+def test_no_cohort_stays_directional_after_the_correction_dismisses_it(summary):
+    """Otherwise the correction is decorative: it records a number nobody uses."""
+    for view, groups in summary.items():
+        if not view.startswith("by_") or not isinstance(groups, dict):
+            continue
+        for label, metrics in groups.items():
+            for field, stats in metrics.items():
+                if not isinstance(stats, dict) or stats.get("verdict") != "directional":
+                    continue
+                adjusted = stats.get("sign_test_p_adjusted")
+                assert adjusted is not None and adjusted < 0.05, (view, label, field)
+
+
+def test_a_descriptive_view_carries_no_directional_verdict(summary):
+    """Its p-values are removed, so a verdict resting on one must go too."""
+    for metrics in summary[DESCRIPTIVE_VIEW].values():
+        for stats in metrics.values():
+            if isinstance(stats, dict):
+                assert stats.get("verdict") != "directional"
+
+
+def cohort(p_value, verdict="directional"):
+    return {
+        "mean": 0.02,
+        "median": 0.02,
+        "mean_without_best": 0.015,
+        "sign_test_p": p_value,
+        "verdict": verdict,
+        "tail_capture": [],
+    }
+
+
+def test_the_correction_takes_back_a_verdict_it_dismisses():
+    """Raw p under five percent, adjusted p over it: the label has to move."""
+    from earnings_research.legacy_research.aggregation import _multiplicity
+
+    summary = {
+        "by_rank": {
+            "A": {"open_d5": cohort(0.02)},
+            **{
+                "R%d" % index: {"open_d5": cohort(0.4 + index * 0.01, "no_signal")}
+                for index in range(30)
+            },
+        }
+    }
+    _multiplicity(summary)
+    dismissed = summary["by_rank"]["A"]["open_d5"]
+    assert dismissed["sign_test_p"] == 0.02
+    assert dismissed["sign_test_p_adjusted"] >= 0.05
+    assert dismissed["verdict"] == "no_signal"
+
+
+def test_a_verdict_the_correction_upholds_is_left_alone():
+    from earnings_research.legacy_research.aggregation import _multiplicity
+
+    summary = {"by_rank": {"A": {"open_d5": cohort(0.0001)}}}
+    _multiplicity(summary)
+    upheld = summary["by_rank"]["A"]["open_d5"]
+    assert upheld["sign_test_p_adjusted"] < 0.05
+    assert upheld["verdict"] == "directional"
+
+
+def test_a_tail_driven_cohort_keeps_its_label_whatever_the_p_value():
+    """It is a statement about shape, not about significance."""
+    from earnings_research.legacy_research.aggregation import _multiplicity
+
+    tail = cohort(0.0001)
+    tail["median"] = -0.01  # mean and median now disagree
+    summary = {"by_rank": {"A": {"open_d5": tail}}}
+    _multiplicity(summary)
+    assert summary["by_rank"]["A"]["open_d5"]["verdict"] == "tail_driven"

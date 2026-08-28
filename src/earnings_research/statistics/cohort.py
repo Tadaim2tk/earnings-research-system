@@ -132,7 +132,8 @@ def summarise(
         worst=ordered[0],
         mean_without_best=sum(ordered[:-1]) / (n - 1),
         concentration=concentration(ordered),
-        sign_test_p=sign_test(ordered, independent),
+        # Ordered values would break the pairing with clusters.
+        sign_test_p=sign_test(numbers, clusters),
     )
     return replace(summary, verdict=_verdict(summary))
 
@@ -156,33 +157,47 @@ def concentration(ordered: Sequence[float]) -> Optional[float]:
     return round(largest / spread * n, 4)
 
 
-def _verdict(summary: CohortSummary) -> str:
+def verdict_for(
+    mean: Optional[float],
+    median: Optional[float],
+    mean_without_best: Optional[float],
+    p_value: Optional[float],
+) -> str:
     """Name what the numbers support, so a table can be read at a glance.
 
     `tail_driven` is not a claim that the cohort is wrong. It says the average
     and the typical member disagree, so whichever one gets quoted decides the
     conclusion.
+
+    Takes the p-value as an argument rather than reading it off the summary, so
+    the caller that holds the corrected value can recompute the verdict with it.
+    A verdict left on the raw p-value would keep saying `directional` for
+    cohorts the correction has already dismissed, which is the whole point of
+    correcting.
     """
-    mean = summary.mean
-    median = summary.median
     if mean is None or median is None:
         return "no_signal"
     # The average and the middle pointing opposite ways, or the average
     # changing sign when the single largest name leaves, both mean the headline
     # rests on the tail rather than on the group.
     opposed = median != 0 and (median > 0) != (mean > 0)
-    without_best = summary.mean_without_best
     flips = (
-        without_best is not None
+        mean_without_best is not None
         and mean != 0
-        and without_best != 0
-        and (mean > 0) != (without_best > 0)
+        and mean_without_best != 0
+        and (mean > 0) != (mean_without_best > 0)
     )
     if opposed or flips:
         return "tail_driven"
-    if summary.sign_test_p is not None and summary.sign_test_p < 0.05:
+    if p_value is not None and p_value < 0.05:
         return "directional"
     return "no_signal"
+
+
+def _verdict(summary: CohortSummary) -> str:
+    return verdict_for(
+        summary.mean, summary.median, summary.mean_without_best, summary.sign_test_p
+    )
 
 
 @dataclass(frozen=True)
@@ -281,23 +296,36 @@ def base_rate(values: Sequence[float], threshold: float) -> Optional[float]:
     return sum(1 for value in values if value >= threshold) / len(values)
 
 
-def sign_test(values: Sequence[float], n_independent: Optional[int] = None) -> Optional[float]:
+def sign_test(
+    values: Sequence[float],
+    clusters: Optional[Sequence[object]] = None,
+) -> Optional[float]:
     """Two-sided exact binomial probability of this many winners by chance.
 
-    Ties at exactly zero carry no direction and are dropped, the usual
-    treatment, which keeps a cohort of flat outcomes from looking decisive.
+    Each name gets one vote. Where a cohort holds several appearances of the
+    same company, its own median decides which way it votes, and the test then
+    counts names rather than rows.
+
+    Rescaling the row count instead — twenty wins out of twenty-five becoming
+    five out of six — keeps whichever name appeared most often in charge of the
+    answer. One company appearing twenty times with the other five going the
+    other way reads as five names winning when one did.
+
+    Ties at exactly zero carry no direction and are dropped, which keeps a
+    cohort of flat outcomes from looking decisive.
     """
-    directional = [value for value in values if value != 0]
-    observed = len(directional)
-    if observed == 0:
+    if clusters is None:
+        directions = list(values)
+    else:
+        grouped: Dict[object, List[float]] = {}
+        for value, cluster in zip(values, clusters):
+            grouped.setdefault(cluster, []).append(float(value))
+        directions = [_median(sorted(group)) for group in grouped.values()]
+    directional = [value for value in directions if value != 0]
+    if not directional:
         return None
-    n = observed
-    if n_independent is not None:
-        # Repeated names inflate the count. Scaling down keeps the test from
-        # claiming more evidence than the number of distinct bets supports.
-        n = min(observed, max(1, n_independent))
-    wins = round(sum(1 for value in directional if value > 0) * n / observed)
-    return _binomial_two_sided(wins, n)
+    wins = sum(1 for value in directional if value > 0)
+    return _binomial_two_sided(wins, len(directional))
 
 
 def _binomial_two_sided(successes: int, n: int) -> float:
