@@ -402,13 +402,12 @@ def test_a_verdict_is_computed_from_whichever_p_value_it_is_given():
     """So a caller holding the corrected value can recompute with it."""
     from earnings_research.statistics.cohort import verdict_for
 
-    sound = {"trimmed_mean": 0.02, "mean_without_worst": 0.02}
-    assert verdict_for(0.02, 0.02, 0.01, 0.01, **sound) == "directional"
-    assert verdict_for(0.02, 0.02, 0.01, 0.9, **sound) == "no_signal"
+    assert verdict_for(0.02, 0.02, 0.01, trimmed_mean=0.02) == "directional"
+    assert verdict_for(0.02, 0.02, 0.9, trimmed_mean=0.02) == "no_signal"
     # A tail-driven cohort stays tail-driven whatever the p-value says.
-    assert verdict_for(0.02, -0.01, 0.01, 0.001, **sound) == "tail_driven"
+    assert verdict_for(0.02, -0.01, 0.001, trimmed_mean=0.02) == "tail_driven"
     # No p-value means no test was run, which is not the same as no signal.
-    assert verdict_for(0.02, 0.02, 0.01, None, **sound) == "not_tested"
+    assert verdict_for(0.02, 0.02, None, trimmed_mean=0.02) == "not_tested"
 
 
 # --- 監査が「生存した変異」と報告した箇所を固定する ---------------------------
@@ -563,9 +562,8 @@ def test_the_quartiles_and_extremes_are_the_ones_they_claim_to_be():
 
 def test_the_significance_threshold_is_the_one_the_module_declares():
     """Loosening it from 0.05 to 0.5 passed the whole suite."""
-    sound = {"trimmed_mean": 0.02, "mean_without_worst": 0.02}
-    assert verdict_for(0.02, 0.02, 0.02, 0.049, **sound) == "directional"
-    assert verdict_for(0.02, 0.02, 0.02, 0.051, **sound) == "no_signal"
+    assert verdict_for(0.02, 0.02, 0.049, trimmed_mean=0.02) == "directional"
+    assert verdict_for(0.02, 0.02, 0.051, trimmed_mean=0.02) == "no_signal"
 
 
 def test_concentration_answers_to_a_large_loss_as_well_as_a_large_gain():
@@ -674,3 +672,62 @@ def test_a_cohort_is_tested_against_the_rest_rather_than_a_rate_assumed_known():
 def test_a_cohort_indistinguishable_from_the_rest_says_so():
     assert fisher_exact(1, 20, 8, 160) > 0.5
     assert fisher_exact(0, 20, 0, 160) is not None
+
+
+def test_the_tail_measure_counts_names_like_every_other_measure():
+    """The interval fix moved the win rate and the median onto names and left
+    this one on rows. Same cohort, same page: twenty hits out of twenty-five
+    with an interval of [0.593, 0.932] and p = 4e-9, beside a sign test on the
+    same summary saying p = 1.0."""
+    rows = [0.5] * 20 + [0.0] * 5
+    names = ["SAME"] * 20 + list("BCDEF")
+    outside = [0.0] * 80 + [0.5] * 20
+    outside_names = ["X%d" % index for index in range(100)]
+    by_row = tail_capture(rows, 0.10, comparison=outside, comparison_clusters=outside_names)
+    by_name = tail_capture(
+        rows, 0.10, clusters=names, comparison=outside, comparison_clusters=outside_names
+    )
+    assert (by_row.n, by_row.hits) == (25, 20)
+    assert (by_name.n, by_name.hits) == (6, 1)
+    assert by_row.distinguishable is True
+    assert by_name.distinguishable is False
+    assert summarise(rows, clusters=names).sign_test_p == 1.0
+
+
+def test_a_name_that_reached_the_threshold_once_counts_once():
+    """Its best, not its middle: a company that hit +20% in one quarter out of
+    eight did reach it."""
+    capture = tail_capture(
+        [0.0, 0.0, 0.0, 0.5] + [0.0] * 16,
+        0.10,
+        clusters=["A"] * 4 + ["B%d" % index for index in range(16)],
+        comparison=[0.0] * 40,
+        comparison_clusters=["Y%d" % index for index in range(40)],
+    )
+    assert (capture.n, capture.hits) == (17, 1)
+
+
+@pytest.mark.parametrize(
+    "field,expected",
+    [("gap", ("prev_close", "next_open")), ("ret_d1", ("prev_close", "next_close")),
+     ("ret_d20", ("prev_close", "d20_close")), ("open_d1", ("next_open", "next_close")),
+     ("open_d5", ("next_open", "d5_close")), ("open_d20", ("next_open", "d20_close")),
+     ("close_d5", ("next_close", "d5_close")), ("close_d20", ("next_close", "d20_close"))],
+)
+def test_each_field_spans_the_two_prices_its_name_claims(field, expected):
+    """Both the aggregation and the published tables read their prices here, so
+    a wrong pair moves every figure at once and nothing else would notice."""
+    from earnings_research.statistics.lookahead import prices_for
+
+    assert prices_for(field) == expected
+
+
+def test_the_win_rate_interval_and_the_sign_test_agree_on_a_name_s_direction():
+    """Reading it off the name's median let magnitude decide for an even number
+    of rows, so two cohorts with identical signs disagreed about whether they
+    cleared a coin while the sign test gave them the same p."""
+    quiet = list("BCDEF")
+    up = summarise([-0.001, 0.80] + [-0.02] * 5, clusters=["A", "A"] + quiet)
+    down = summarise([-0.80, 0.001] + [-0.02] * 5, clusters=["A", "A"] + quiet)
+    assert up.sign_test_p == down.sign_test_p
+    assert up.win_rate_interval == down.win_rate_interval

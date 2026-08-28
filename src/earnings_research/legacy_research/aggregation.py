@@ -12,7 +12,7 @@ from earnings_research.statistics.cohort import (
     verdict_for,
 )
 from earnings_research.statistics.holdout import split_by_date
-from earnings_research.statistics.lookahead import contamination
+from earnings_research.statistics.lookahead import contamination, prices_for
 from earnings_research.statistics.stability import assess as assess_stability
 
 # Returns from the previous close, and the same horizons from the opening
@@ -76,7 +76,11 @@ def _metrics(rows, cohort_key=None, population=None):
                 tail_capture(
                     values,
                     threshold,
+                    clusters=[code for _value, code in pairs],
                     comparison=population.outside(rows, field) if population else None,
+                    comparison_clusters=(
+                        population.names_outside(rows, field) if population else None
+                    ),
                 ).as_dict()
                 for threshold in TAIL_THRESHOLDS
             ],
@@ -116,14 +120,18 @@ class _Population:
         self.by_field = {}
         for field in RETURN_FIELDS:
             self.by_field[field] = [
-                (id(row), value)
+                (id(row), value, row.get("code"))
                 for row in rows
                 if (value := _number(row.get(field))) is not None
             ]
 
     def outside(self, cohort_rows, field):
         excluded = {id(row) for row in cohort_rows}
-        return [value for key, value in self.by_field[field] if key not in excluded]
+        return [value for key, value, _code in self.by_field[field] if key not in excluded]
+
+    def names_outside(self, cohort_rows, field):
+        excluded = {id(row) for row in cohort_rows}
+        return [code for key, _value, code in self.by_field[field] if key not in excluded]
 
     def rate_excluding(self, cohort_rows, field, threshold):
         return base_rate(self.outside(cohort_rows, field), threshold)
@@ -141,20 +149,15 @@ def _open_anchored(row):
     one. Only the entry moves; that is the comparison.
     """
     enriched = dict(row)
-    opening = _number(row.get("next_open"))
-    if opening and opening > 0:
-        for name, close_field in (
-            ("open_d1", "next_close"), ("open_d5", "d5_close"), ("open_d20", "d20_close")
-        ):
-            close = _number(row.get(close_field))
-            enriched[name] = (close - opening) / opening if close and close > 0 else None
     # Acting on the first day's pattern means acting at its close, so the
-    # horizons a reaction cohort can be scored on start there.
-    first_close = _number(row.get("next_close"))
-    if first_close and first_close > 0:
-        for name, close_field in (("close_d5", "d5_close"), ("close_d20", "d20_close")):
-            close = _number(row.get(close_field))
-            enriched[name] = (close - first_close) / first_close if close and close > 0 else None
+    # horizons a reaction cohort can be scored on start there; acting on the
+    # gap means the opening price. Both pairs come from the declaration table
+    # rather than being written out again here.
+    for name in ("open_d1", "open_d5", "open_d20", "close_d5", "close_d20"):
+        entry_field, exit_field = prices_for(name)
+        entry, exit_ = _number(row.get(entry_field)), _number(row.get(exit_field))
+        if entry and entry > 0:
+            enriched[name] = (exit_ - entry) / entry if exit_ and exit_ > 0 else None
     return enriched
 
 
@@ -290,10 +293,8 @@ def _verdict_from(stats, p_value):
     return verdict_for(
         stats.get("mean"),
         stats.get("median"),
-        stats.get("mean_without_best"),
         p_value,
         trimmed_mean=stats.get("trimmed_mean"),
-        mean_without_worst=stats.get("mean_without_worst"),
     )
 
 

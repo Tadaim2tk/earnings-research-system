@@ -22,6 +22,10 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 # Below this a cohort reports its size and nothing else. Statistics from a
 # handful of observations read as precise while carrying none of the weight.
 MIN_REPORTABLE = 5
+# A mean smaller than the smallest increment the reports print rounds to zero
+# on the page, so no reader can be misled by it and the tail warning has
+# nothing to warn about.
+NEGLIGIBLE_MEAN = 0.0005
 TRIM_FRACTION = 0.1
 CONFIDENCE = 0.95
 # Concentration is reported, not thresholded. A cut-off would have to be
@@ -154,8 +158,13 @@ def summarise(
     ties = sum(1 for value in ordered if value == 0)
     decided = n - ties
     wins = sum(1 for value in ordered if value > 0)
-    name_ties = sum(1 for value in per_name if value == 0)
-    name_wins = sum(1 for value in per_name if value > 0)
+    # The name's direction, decided the way the sign test decides it. Reading
+    # it off the name's median instead let magnitude choose for an even number
+    # of rows, so two cohorts with identical signs produced intervals that
+    # disagreed about whether they cleared a coin.
+    name_directions = _directions_by_cluster(numbers, clusters)
+    name_ties = sum(1 for value in name_directions if value == 0)
+    name_wins = sum(1 for value in name_directions if value > 0)
     mean = sum(ordered) / n
     quarters = quantiles(ordered, n=4)
     # A tenth of nine rounds to nothing, so below ten the trimmed mean was the
@@ -175,8 +184,8 @@ def summarise(
         ties=ties,
         win_rate=wins / decided if decided else None,
         win_rate_interval=(
-            clopper_pearson(name_wins, len(per_name) - name_ties)
-            if len(per_name) - name_ties
+            clopper_pearson(name_wins, len(name_directions) - name_ties)
+            if len(name_directions) - name_ties
             else Interval(None, None)
         ),
         median=_median(ordered),
@@ -265,6 +274,21 @@ def _by_cluster(values, clusters):
     return sorted(_median(sorted(group)) for group in grouped.values())
 
 
+def _directions_by_cluster(values, clusters):
+    """One direction per name, by which way more of its own rows went."""
+    if clusters is None:
+        return [_sign(float(value)) for value in values]
+    grouped: Dict[object, List[float]] = {}
+    for value, cluster in zip(values, clusters):
+        grouped.setdefault(cluster, []).append(float(value))
+    return [
+        _sign(
+            sum(1 for value in group if value > 0) - sum(1 for value in group if value < 0)
+        )
+        for group in grouped.values()
+    ]
+
+
 def _sign(value: float) -> int:
     return (value > 0) - (value < 0)
 
@@ -272,11 +296,9 @@ def _sign(value: float) -> int:
 def verdict_for(
     mean: Optional[float],
     median: Optional[float],
-    mean_without_best: Optional[float],
     p_value: Optional[float],
     *,
     trimmed_mean: Optional[float],
-    mean_without_worst: Optional[float],
 ) -> str:
     """Name what the numbers support, so a table can be read at a glance.
 
@@ -304,15 +326,23 @@ def verdict_for(
     # The average and the middle pointing opposite ways, or the average
     # changing sign when a single name leaves either end, both mean the
     # headline rests on the tail rather than on the group.
-    opposed = _sign(median) != 0 and _sign(median) != _sign(mean)
-    flips = any(
-        end is not None and _sign(end) != 0 and _sign(mean) != 0 and _sign(end) != _sign(mean)
-        for end in (mean_without_best, mean_without_worst)
-    )
-    share = tail_share(mean, trimmed_mean)
-    carried = share is not None and share > 0.5
-    if opposed or flips or carried:
-        return "tail_driven"
+    if abs(mean) >= NEGLIGIBLE_MEAN:
+        # Only worth saying of a mean somebody could quote. Below the smallest
+        # increment the reports print there is nothing for a reader to be
+        # misled by.
+        #
+        # Two checks, not three. Asking whether removing a single name flips
+        # the mean's sign was the original guard, and it is redundant where it
+        # is right — a name carrying the mean shows up in tail_share — and
+        # unstable where it is not: near zero, taking any name off crosses zero
+        # by coincidence of scale. Sixty-seven cohorts were labelled on that
+        # alone, with the median and the trimmed mean both agreeing with the
+        # mean.
+        opposed = _sign(median) != 0 and _sign(median) != _sign(mean)
+        share = tail_share(mean, trimmed_mean)
+        carried = share is not None and share > 0.5
+        if opposed or carried:
+            return "tail_driven"
     if p_value is None:
         # No test was run — the descriptive views have their p-values stripped.
         # Saying `no_signal` there would report an absence of evidence that
@@ -325,12 +355,7 @@ def verdict_for(
 
 def _verdict(summary: CohortSummary) -> str:
     return verdict_for(
-        summary.mean,
-        summary.median,
-        summary.mean_without_best,
-        summary.sign_test_p,
-        trimmed_mean=summary.trimmed_mean,
-        mean_without_worst=summary.mean_without_worst,
+        summary.mean, summary.median, summary.sign_test_p, trimmed_mean=summary.trimmed_mean
     )
 
 
@@ -378,6 +403,8 @@ def tail_capture(
     base_rate: Optional[float] = None,
     *,
     comparison: Optional[Sequence[float]] = None,
+    clusters: Optional[Sequence[object]] = None,
+    comparison_clusters: Optional[Sequence[object]] = None,
 ) -> TailCapture:
     """How often this cohort reached ``threshold``, against the base rate.
 
@@ -385,7 +412,17 @@ def tail_capture(
     the base rate and means nothing. ``distinguishable`` is the figure to read,
     and it is true only when the exact interval clears the base rate entirely.
     """
+    # A name that reached the threshold once counts once, for the same reason
+    # the sign test counts names: twenty quarters of one company are not twenty
+    # tries. Left on rows, the cohort of one company twenty times reported
+    # 20 hits out of 25 with an interval of [0.593, 0.932] and p = 4e-9 beside
+    # a sign test on the same summary saying p = 1.0 — the interval this
+    # module's docstring holds up as the example of what not to publish.
+    if clusters is not None:
+        values = _reached_by_name(values, clusters)
     if comparison is not None:
+        if comparison_clusters is not None:
+            comparison = _reached_by_name(comparison, comparison_clusters)
         base_rate = globals()["base_rate"](comparison, threshold)
     n = len(values)
     if n < MIN_REPORTABLE:
@@ -504,6 +541,21 @@ def fisher_exact(hits: int, n: int, other_hits: int, other_n: int) -> Optional[f
     )
 
 
+def _reached_by_name(values, clusters):
+    """One value per name: its best outcome, so a name is counted once.
+
+    The best rather than the median, because the question is whether the name
+    ever reached the threshold. A company that hit +20% once out of eight
+    quarters did reach it.
+    """
+    grouped: Dict[object, float] = {}
+    for value, cluster in zip(values, clusters):
+        number = float(value)
+        if cluster not in grouped or number > grouped[cluster]:
+            grouped[cluster] = number
+    return sorted(grouped.values())
+
+
 def base_rate(values: Sequence[float], threshold: float) -> Optional[float]:
     """Share of the comparison population that reached ``threshold``.
 
@@ -543,19 +595,7 @@ def sign_test(
     Ties carry no direction and are dropped, which keeps a cohort of flat
     outcomes from looking decisive.
     """
-    if clusters is None:
-        directions = [_sign(float(value)) for value in values]
-    else:
-        grouped: Dict[object, List[float]] = {}
-        for value, cluster in zip(values, clusters):
-            grouped.setdefault(cluster, []).append(float(value))
-        directions = [
-            _sign(
-                sum(1 for value in group if value > 0)
-                - sum(1 for value in group if value < 0)
-            )
-            for group in grouped.values()
-        ]
+    directions = _directions_by_cluster(values, clusters)
     directional = [value for value in directions if value != 0]
     if not directional:
         return None, 0

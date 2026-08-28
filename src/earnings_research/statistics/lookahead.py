@@ -107,13 +107,31 @@ def sound_fields(cohort_key: str, outcome_fields) -> list:
     return [field for field in outcome_fields if contamination(cohort_key, field) is None]
 
 
-def anchor_for(outcome_field: str) -> str:
-    """The price a field is measured from, refusing to guess at an unknown one.
+# The price each field is measured to. With RETURN_ANCHOR above this gives the
+# pair of prices a field spans, which is the whole definition of the field.
+RETURN_EXIT: Dict[str, str] = {
+    "gap": "next_open",
+    "ret_d1": "next_close",
+    "ret_d5": "d5_close",
+    "ret_d20": "d20_close",
+    "open_d1": "next_close",
+    "open_d5": "d5_close",
+    "open_d20": "d20_close",
+    "close_d5": "d5_close",
+    "close_d20": "d20_close",
+}
 
-    Published tables built their own anchors by hand, so the table could be
-    corrected without the reports moving. They ask here instead.
+
+def prices_for(outcome_field: str) -> tuple:
+    """The two prices a field spans, refusing to guess at an undeclared one.
+
+    Both the aggregation and the published tables used to name their prices by
+    hand, so the tables could be corrected here and the reports would not move
+    — and for a while they did not: the dashboard went on publishing the
+    previous-close figures this table withholds. There is one place to change
+    now, and both readers take it from here.
     """
-    anchor = RETURN_ANCHOR.get(outcome_field)
-    if anchor is None:
-        raise KeyError("no declared anchor for %r" % outcome_field)
-    return anchor
+    entry, exit_ = RETURN_ANCHOR.get(outcome_field), RETURN_EXIT.get(outcome_field)
+    if entry is None or exit_ is None:
+        raise KeyError("no declared prices for %r" % outcome_field)
+    return entry, exit_

@@ -62,23 +62,44 @@ def test_the_gap_cohorts_reverse_once_measured_from_the_open(summary):
     assert up["open_d5"]["median"] < 0 < down["open_d5"]["median"]
 
 
-def test_the_opening_anchor_is_arithmetically_consistent(summary):
+def test_the_opening_anchor_measures_between_the_prices_it_declares():
+    """This replaces a test that could not fail.
+
+    It computed (f/o)(v/f) == v/o from the CSV and compared the answer with
+    itself — an identity true of any three prices — while taking the summary
+    fixture as an argument and never touching it. Gutting _open_anchored to
+    `return dict(row)` left it green. The prices now come from the declaration
+    table and the returns are checked against hand arithmetic on real rows.
+    """
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.statistics.lookahead import prices_for
+
     rows = list(csv.DictReader(RECORDS.open(encoding="utf-8-sig")))
     checked = 0
     for row in rows:
-        try:
-            opening, first, fifth = (
-                float(row["next_open"]), float(row["next_close"]), float(row["d5_close"])
-            )
-        except (ValueError, KeyError):
-            continue
-        if not opening or not first:
-            continue
-        open_d1, close_d5 = (first - opening) / opening, (fifth - first) / first
-        open_d5 = (fifth - opening) / opening
-        assert (1 + open_d1) * (1 + close_d5) == pytest.approx(1 + open_d5)
-        checked += 1
-    assert checked > 200
+        enriched = _open_anchored(row)
+        for field in ("open_d1", "open_d5", "open_d20", "close_d5", "close_d20"):
+            entry_field, exit_field = prices_for(field)
+            try:
+                entry, exit_ = float(row[entry_field]), float(row[exit_field])
+            except (ValueError, KeyError):
+                continue
+            if entry <= 0 or exit_ <= 0:
+                continue
+            assert enriched[field] == pytest.approx((exit_ - entry) / entry), (field, row["code"])
+            checked += 1
+    assert checked > 800
+
+
+def test_the_declared_prices_cover_every_reported_field():
+    from earnings_research.legacy_research.aggregation import RETURN_FIELDS
+    from earnings_research.statistics.lookahead import prices_for
+
+    for field in RETURN_FIELDS:
+        entry, exit_ = prices_for(field)
+        assert entry != exit_, field
+    with pytest.raises(KeyError):
+        prices_for("ret_d60")
 
 
 def test_a_per_ticker_breakdown_carries_no_test(summary):
@@ -141,7 +162,8 @@ def test_the_tail_capture_of_a_reason_code_matches_the_records(summary):
     # cohort helped set. It was 16% of the population, and comparing it with
     # itself included put the lift at 2.5077 against an assertion of 2.5.
     assert capture["base_rate"] < 0.05
-    assert capture["lift"] > 3.5
+    # Names, not rows: the comparison population is counted the same way.
+    assert capture["lift"] > 3.4
     # Nominally 0.055 against the rest of the record — the binomial form,
     # which treated the base rate as known rather than estimated, said 0.025 —
     # and nowhere at all after the family is counted.
@@ -374,14 +396,14 @@ def test_the_published_statistics_cannot_see_the_reserved_period():
     rows = _dated_rows(30)
     split = split_by_date(rows)
     assert split.reserved, "the sample must actually reserve something"
-    before = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
-    note_before = _note_insights(render_note(rows, date(2026, 6, 10), statistics_rows=split.exploration))
+    before = render_dashboard(rows, "2026-06-10 00:00")
+    note_before = _note_insights(render_note(rows, date(2026, 6, 10)))
     for row in split.reserved:
         # Returns nothing like the explored period's, in every anchored field.
         row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
         row["ret_d1"] = row["ret_d5"] = row["ret_d20"] = "0.8"
-    after = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
-    note_after = _note_insights(render_note(rows, date(2026, 6, 10), statistics_rows=split.exploration))
+    after = render_dashboard(rows, "2026-06-10 00:00")
+    note_after = _note_insights(render_note(rows, date(2026, 6, 10)))
     assert _statistics_section(after) == _statistics_section(before)
     assert note_after == note_before
     assert "+80.0%" not in _statistics_section(after)
@@ -394,10 +416,10 @@ def test_changing_the_explored_period_does_move_the_published_statistics():
 
     rows = _dated_rows(30)
     split = split_by_date(rows)
-    before = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    before = render_dashboard(rows, "2026-06-10 00:00")
     for row in split.exploration:
         row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
-    after = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    after = render_dashboard(rows, "2026-06-10 00:00")
     assert _statistics_section(after) != _statistics_section(before)
 
 
@@ -407,7 +429,7 @@ def test_the_reserved_rows_are_still_listed():
 
     rows = _dated_rows(30)
     split = split_by_date(rows)
-    published = render_dashboard(rows, "2026-06-10 00:00", statistics_rows=split.exploration)
+    published = render_dashboard(rows, "2026-06-10 00:00")
     listing = published[: published.index("## 仮説検証")]
     assert split.reserved[-1]["code"] in listing
 
@@ -461,9 +483,7 @@ def _dashboard(rows=None):
     from earnings_research.statistics.holdout import split_by_date
 
     prepared = [_open_anchored(row) for row in (rows or _varied_rows())]
-    return render_dashboard(
-        prepared, "2026-09-01 00:00", statistics_rows=split_by_date(prepared).exploration
-    )
+    return render_dashboard(prepared, "2026-09-01 00:00")
 
 
 def test_every_published_cell_carries_the_win_rate_and_the_middle():
@@ -485,7 +505,8 @@ def test_every_published_cell_carries_the_win_rate_and_the_middle():
     assert figures, "the fixture produced no numbers at all"
     for cell in figures:
         assert re.fullmatch(
-            r"\d+% \[\d+〜\d+%\] / [+-]\d+\.\d% / [+-]\d+\.\d% \(n=\d+(, \d+社)?\)†?", cell
+            r"\d+% \[\d+〜\d+%\] / [+-]\d+\.\d% / [+-]\d+\.\d% \(n=\d+(, \d+社)?(, 引分\d+)?\)†?",
+            cell,
         ), cell
 
 
@@ -519,7 +540,7 @@ def test_the_note_states_its_scope_inside_the_part_it_asks_to_be_published():
     from earnings_research.statistics.holdout import split_by_date
 
     rows = [_open_anchored(row) for row in _varied_rows(60)]
-    text = render_note(rows, date(2026, 9, 1), statistics_rows=split_by_date(rows).exploration)
+    text = render_note(rows, date(2026, 9, 1))
     published = text[text.index("本文ここから"):]
     assert "## 今週時点の検証メモ" in published
     assert "統計は探索対象" in published
@@ -574,7 +595,7 @@ def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
 
     assert contamination("narrative", "ret_d1") is not None
     rows = [_open_anchored(row) for row in _varied_rows(60)]
-    text = render_note(rows, date(2026, 9, 1), statistics_rows=split_by_date(rows).exploration)
+    text = render_note(rows, date(2026, 9, 1))
     published = text[text.index("本文ここから"):]
     insights = [line for line in published.splitlines() if line.startswith("・ナラティブ")]
     assert insights
@@ -585,7 +606,19 @@ def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
     for line in insights:
         label = line.split("「")[1].split("」")[0]
         match = lambda row, label=label: row.get("narrative") == label
-        sound = _anchored(explored, match, "next_open", "next_close")
+        sound = _anchored(explored, match, "open_d1")
         stale = _avg(explored, match, "ret_d1")
         assert sound != stale, label
         assert line.endswith(sound), (line, sound)
+
+
+def test_a_cell_with_flat_outcomes_says_so_rather_than_shrinking_its_denominator():
+    """The win rate's denominator is the decided count, not n. Printing n alone
+    made one-in-four-out-of-six read as one in four."""
+    from earnings_research.legacy_research.publishing import _avg
+
+    rows = [{"code": "A%d" % index, "v": 0.0} for index in range(4)]
+    rows += [{"code": "B%d" % index, "v": 0.01} for index in range(2)]
+    cell = _avg(rows, lambda _row: True, "v")
+    assert "引分4" in cell
+    assert "100%" in cell
