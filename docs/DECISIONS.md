@@ -854,3 +854,27 @@ Decision:
 - **status / trial bundle スキーマをテストで検証する。** どちらもコードからもテストからも参照されておらず、`stopped` を手で足したことを何も検出しなかった。
 
 Consequences: テストは 968→997件。変異検査で生存していた D1（overall を family から外す）、D2（stability の半分を外す）、B3（`distinguishable` の補正後再計算）、C3（`_reason_groups` のガード）、C6（judge/surprise の view）、F2（公開表の起点）、F3（銘柄集約）、F10（終点0）、G1（`record_count` 回帰）、G3（非有限値）、G4（`close_*` の独立性）、I1（凍結renderer）はすべて落ちるようになった。
+
+## ERS-ADR-0048
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: end-to-end監査（生データ→集計→公開物の通し）がP1を3件返した。統計の中核は通っており（165/89の境界は3経路で同一、公開59セルと集計JSONは不一致0、留保89件を全29列・空欄含めて乱数化しても出力はバイト一致、対照実験も発火、凍結19仮説は1バイトも動いていない）、壊れていたのは**最後の一区間**だった。
+
+**P1-1** 「補正後に主張は0件」の一文が dashboard にしか届いていなかった。`findings_line()` の呼び出し元は1箇所。note は7つのコホート数値を区間つきで、**それも「本文ここから」の内側**——読者にコピーして公開せよと指示している範囲の中に——出しながら、「補正」も「Benjamini」も0回だった。weekly は結論もスコープ文も無く、cutoffをまたぐ125件を「答え合わせ」という見出しで並べ、その直下が仮説記入欄だった。このPRのDECISIONS.md自身が診断した「一箇所で直して他の経路を確認していない」形である。
+
+**P1-2** このPRが `verify-legacy-research` を赤にしていた。base `cd41261` は exit 0、HEAD は exit 1（`legacy research output mismatch: research_report.md`）。原因は、`knowledge.py` がバイト単位で再現する3ファイルに、来歴の注記を**手で貼った**こと。定義上ミスマッチになる。見えなかったのは、`checks.yml` がこのコマンドを実行しておらず、テストはフィクスチャに対して呼んでいたため。一方 `README.md` は利用者にこのコマンドの実行を案内していた。
+
+**P1-3** 「827比較」が実パイプラインの値ではなかった。`build_reports` は常に実際の254件の context view を渡すので `market_context.by_relative_dominance` に90比較が付き、**合計は917**。827は `context_views=[]` のとき、つまりどのCLIも通らない経路の値だった。4つの注記と ADR-0045 に書いてある。結論（0件）はどちらの基準でも変わらない。
+
+Decision:
+
+- **来歴の注記は生成器が出す。** `knowledge.py` の `render_research_report` / `render_digest` が `NOTICE` を含める。再生成が注記ごと再現するので、ファイルが自分についての記述とずれ得ない。`verify-legacy-research` を `checks.yml` に追加し、同じ見落としが起きないようにする。
+- **note のコピペ範囲の内側に結論とスコープを置く。** `render_note` が `aggregation` を受け取り、`findings_line` を検証メモの直上に出す。
+- **weekly の「経過観測」に断りを置く。** 「この節は一覧であって検証ではない。留保期間のレコードも含み、どの数字も多重比較補正を通っていない。」weekly は統計を出さないが、**人間が仮説を形成する場面で留保期間の結果を目の前に置いている**ことは変わらない。
+- **注記の数値を実測に合わせる。** 917（市場文脈リンクを含む実パイプライン）と明記し、827はリンク無しの値だと添える。GU/GDの反転は254件基準で **+5.8% → -0.6% / -5.3% → +0.1%**、探索165件基準で **+6.1% → -0.4% / -5.4% → +0.5%**。どちらの基準でも反転するが、基準を混ぜない。
+- **`README.md` と `SUPERSEDED.md` の「各ファイルの冒頭に注記がある」を訂正する。** 注記があるのは Markdown 6ファイルのみ。`aggregation_summary.json` は `superseded_note` キー、`research_knowledge.json` と `publishing_parity.json` は持たない。前者は凍結レジストリにSHA-256で束縛されており、1バイト足すと検証が落ちることを実測済み。
+
+Consequences: テストは 997→1000件。3つの修正はいずれも変異で落ちることを確認した（note から結論を外す→2件、weekly から断りを外す→1件、`research_report` から注記を外す→1件）。CLI 4本のうち3本が exit 0、`verify-legacy-migration` のみ exit 1 だが、これは base でも同じ理由（committed manifest に `reports_sha256` が無い）で失敗する既存の問題で、ADR-0045 の未対応事項に記載済み。

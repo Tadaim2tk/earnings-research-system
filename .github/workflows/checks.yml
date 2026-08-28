@@ -48,6 +48,16 @@ jobs:
       - name: Committed samples match their schemas
         run: python -m earnings_research.cli validate data/samples
 
+      - name: The committed research outputs still match what generates them
+        # Added because this PR turned it red and nothing noticed: stamping a
+        # provenance notice onto files knowledge.py reproduces verbatim made
+        # them mismatch by construction, while README tells the reader to run
+        # this command and the suite stayed green.
+        run: |
+          python -m earnings_research.cli verify-legacy-research \
+            --input-root data/historical_research/earnings_research_os/v1 \
+            --output-dir outputs/historical_research
+
       - name: The frozen registry still matches the research it came from
         run: |
           python -m earnings_research.cli verify-hypothesis-registry \

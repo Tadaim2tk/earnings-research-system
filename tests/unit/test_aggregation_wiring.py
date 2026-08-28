@@ -792,3 +792,30 @@ def test_a_missing_opening_price_does_not_take_the_closing_anchors_with_it():
     assert enriched["open_d1"] is None
     assert enriched["close_d5"] == pytest.approx(0.1)
     assert enriched["close_d20"] == pytest.approx(0.181818, abs=1e-5)
+
+
+def test_the_note_carries_the_correction_result_into_what_it_publishes():
+    """It reached the dashboard and stopped there. The note printed seven
+    cohort figures with intervals inside the block it tells the reader to copy
+    and publish, and the words for correction did not appear in it at all."""
+    from earnings_research.legacy_research.aggregation import _open_anchored, build_aggregation
+    from earnings_research.legacy_research.publishing import render_note
+
+    rows = [_open_anchored(row) for row in _varied_rows(60)]
+    text = render_note(rows, date(2026, 9, 1), aggregation=build_aggregation(rows, [], ""))
+    published = text[text.index("本文ここから"):]
+    assert "Benjamini-Hochberg" in published
+    assert "統計は探索対象" in published
+
+
+def test_the_weekly_listing_says_it_is_not_a_verification():
+    """It lists records on both sides of the cutoff under a heading that says
+    the answers are in, directly above the box asking the reader to write down
+    a hypothesis."""
+    from earnings_research.legacy_research.aggregation import _open_anchored
+    from earnings_research.legacy_research.publishing import render_weekly
+
+    rows = [_open_anchored(row) for row in _varied_rows(80)]
+    text = render_weekly(rows, date(2026, 9, 1))
+    assert "経過観測" in text
+    assert "多重比較補正を通っていない" in text

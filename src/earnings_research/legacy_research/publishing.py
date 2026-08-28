@@ -303,7 +303,20 @@ def render_weekly(rows, as_of: date):
         lines += ["今週の新規記録はありません。", ""]
     observed = [row for row in rows if str(as_of - timedelta(days=35)) <= row.get("date", "") < str(since) and row.get("ret_d5") not in (None, "")]
     if observed:
-        lines += [f"## 経過観測 — 先週以前の記録の答え合わせ({len(observed)}件)", "", "| 発表日 | 銘柄 | 判断(当時) | ギャップ | 翌日 | 5日 | 20日 |", "|---|---|---|---|---|---|---|"]
+        # It lists rows on both sides of the reserve cutoff under a heading
+        # that says the answers are in. No statistic is computed here, and none
+        # of these rows has been through the correction — the reader forming a
+        # hypothesis in the section directly below is looking at the reserved
+        # period, which is the one thing the reserve exists to prevent.
+        lines += [
+            f"## 経過観測 — 先週以前の記録の答え合わせ({len(observed)}件)",
+            "",
+            "この節は一覧であって検証ではない。留保期間のレコードも含み、"
+            "どの数字も多重比較補正を通っていない。",
+            "",
+            "| 発表日 | 銘柄 | 判断(当時) | ギャップ | 翌日 | 5日 | 20日 |",
+            "|---|---|---|---|---|---|---|",
+        ]
         for row in sorted(observed, key=lambda item: item.get("date", "")):
             lines.append(f"| {row.get('date','')} | {row['name']}({row['code']}) | {row.get('judge','')} | {pctf(row.get('gap'))} | {pctf(row.get('ret_d1'))} | {pctf(row.get('ret_d5'))} | {pctf(row.get('ret_d20')) if row.get('ret_d20') not in (None,'') else '記録中'} |")
         lines.append("")
@@ -311,7 +324,7 @@ def render_weekly(rows, as_of: date):
     return "\n".join(lines) + "\n"
 
 
-def render_note(rows, as_of: date):
+def render_note(rows, as_of: date, *, aggregation=None):
     # Split here rather than trusting the caller. The parameter version was
     # fail-open: forgetting it silently put the reserved third back into every
     # published figure and printed a sentence saying no reserve existed.
@@ -349,6 +362,11 @@ def render_note(rows, as_of: date):
     if insights:
         lines += [
             "## 今週時点の検証メモ(自動集計)",
+            "",
+            # Inside the block this file tells the reader to copy and publish.
+            # The dashboard said what the correction left and the note did not,
+            # so the figures below travelled without it.
+            findings_line(aggregation if aggregation is not None else build_aggregation(rows, [], "")),
             "",
             statistics_scope(split),
             "",
@@ -412,7 +430,7 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
     dashboard = render_dashboard(final_rows, f"{as_of} 00:00", aggregation=aggregation)
     dashboard = dashboard.replace("\n\n", f"\n\n{provenance}\n\n{context_line}\n\n", 1)
     weekly = render_weekly(final_rows, as_of).replace("\n\n", f"\n\n{provenance}\n\n", 1)
-    note = render_note(final_rows, as_of).replace(
+    note = render_note(final_rows, as_of, aggregation=aggregation).replace(
         "\n\n", f"\n\n{provenance}\n\n", 1
     )
     reports = {

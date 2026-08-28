@@ -330,6 +330,22 @@ def _classification_lineage(field_history, expected_record_ids):
     return by_field
 
 
+NOTICE = [
+    '> **⚠ この成果物は、統計ガードを通っていない経路から生成されています。**',
+    '>',
+    '> `knowledge.py` には留保期間の分割も、寄り付き起点のリターンも、多重比較補正も',
+    '> 入っていません（`aggregation.py` と `publishing.py` にのみ入っています）。',
+    '> したがって下の差分は、254件全部・前日終値起点・補正なしで算出されたもので、',
+    '> 統計的な所見ではありません。`potentially_favorable` /',
+    '> `potentially_unfavorable` は方向の候補であって、検証結果ではありません。',
+    '>',
+    '> とくに `reaction` を `D5` / `D20` で評価している項目は、現在のコードが',
+    '> 「分類の定義が結果に入っている」として withhold する組合せです。',
+    '> この経路の是正は ERS-ADR-0045 の未対応事項として別PRに残しています。',
+    '',
+]
+
+
 def build_research_knowledge(records, context_views, field_history, manifest):
     if manifest.get("dataset_origin") != "earnings-research-os" or manifest.get("record_mode") != "legacy_observational":
         raise ValueError("research input must be the frozen legacy observational cohort")
@@ -508,6 +524,10 @@ def render_research_report(knowledge):
     lines = [
         "# Legacy Earnings Research Knowledge",
         "",
+        # Written by the generator, not stamped on afterwards: these files are
+        # reproduced byte for byte by verify-legacy-research, so a notice added
+        # by hand is a mismatch by construction.
+        *NOTICE,
         "## 境界",
         "",
         "このレポートは旧OSの `legacy_observational` だけを記述集計した研究出力である。相関を因果、正式スコア、売買ルールとして扱わない。",
@@ -582,6 +602,7 @@ def render_digest(knowledge, title, limit):
     lines = [
         f"## {title}",
         "",
+        *NOTICE,
         f"対象はlegacy_observational {coverage['record_count']}件。"
         f"D1 {coverage['horizons']['d1']['available_count']}件（実効{coverage['horizons']['d1']['effective_unit_count']}）、"
         f"D5 {coverage['horizons']['d5']['available_count']}件（実効{coverage['horizons']['d5']['effective_unit_count']}）、"

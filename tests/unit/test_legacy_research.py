@@ -349,3 +349,18 @@ def test_the_current_reports_are_allowed_to_differ_from_the_retired_ones():
     _fields, rows = parse_csv_bytes(SOURCE.joinpath("records.csv").read_bytes())
     stamp = re.search(r"最終更新: ([0-9-]+ [0-9:]+)", published.decode("utf-8")).group(1)
     assert render_dashboard(rows, stamp).encode("utf-8") != published
+
+
+def test_the_committed_research_outputs_are_what_their_generator_produces():
+    """Stamping a provenance notice onto files knowledge.py reproduces verbatim
+    turned this command red, and nothing noticed: CI did not run it and the
+    other test calls it against a fixture. The notice comes from the generator
+    now, so the file cannot drift from what it says about itself."""
+    from earnings_research.legacy_research.knowledge import build_research_outputs
+
+    committed = ROOT / "outputs/historical_research"
+    generated = build_research_outputs(ROOT / "data/historical_research/earnings_research_os/v1")
+    for name, body in generated.items():
+        expected = body if isinstance(body, str) else body.decode("utf-8")
+        assert committed.joinpath(name).read_text(encoding="utf-8") == expected, name
+    assert "統計ガードを通っていない経路" in generated["research_report.md"]
