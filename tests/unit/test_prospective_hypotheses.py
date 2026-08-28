@@ -38,6 +38,42 @@ def observation():
     return CompletedEventObservation.model_validate_json(OBSERVATION.read_text(encoding="utf-8"))
 
 
+def usable_registry(tmp_path):
+    """The committed registry cut to the hypotheses the current rules permit,
+    with a ledger judging it — the state the pipeline requires before any
+    prospective work may be recorded.
+
+    Written from the registry rather than by hand so that a rule change which
+    condemns the remaining hypotheses too makes this fixture empty, and the
+    tests using it fail rather than silently testing nothing.
+    """
+    from earnings_research.prospective_hypotheses.source_validity import (
+        INVALID,
+        append_ledger,
+        judge,
+    )
+
+    base = registry()
+    verdicts = {item.hypothesis_id: item for item in judge(base, "2026-09-01T00:00:00+09:00")}
+    keep = [
+        item for item in base.hypotheses
+        if verdicts[item.hypothesis_id].verdict != INVALID
+    ]
+    assert keep, "no hypothesis survives the current rules; this fixture tests nothing"
+    payload = base.model_dump()
+    payload["hypotheses"] = [item.model_dump() for item in keep]
+    payload["source_candidate_count"] = len(keep)
+    directory = tmp_path / "registry"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "usable.json"
+    path.write_text(
+        HypothesisRegistry.model_validate(payload).model_dump_json(indent=2), encoding="utf-8"
+    )
+    trimmed = HypothesisRegistry.model_validate_json(path.read_text(encoding="utf-8"))
+    append_ledger(directory / "source_validity.jsonl", judge(trimmed, "2026-09-01T00:00:00+09:00"))
+    return path, len(keep)
+
+
 def test_registry_freezes_all_19_candidates_one_to_one():
     source = json.loads(KNOWLEDGE.read_text(encoding="utf-8"))["learning"]["candidates"]
     result = registry()
@@ -104,14 +140,38 @@ def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
 
 
 def test_append_only_writer_rejects_duplicate_event_and_existing_output(tmp_path):
+    path, _count = usable_registry(tmp_path)
     trials = tmp_path / "trials"
     output = trials / "event.json"
     evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
+        path, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
     )
     with pytest.raises((ValueError, FileExistsError), match="already"):
         evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+            path, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+        )
+
+
+def test_no_trial_is_recorded_against_knowledge_the_rules_condemn(tmp_path):
+    """The committed registry is seventeen-nineteenths invalid under the rules
+    as they stand, and recording trials against it would be gathering evidence
+    about hypotheses whose evidence the rules no longer support."""
+    with pytest.raises(ValueError, match="source-validity"):
+        evaluate_observation_file(
+            REGISTRY, OBSERVATION, tmp_path / "trials", tmp_path / "trials/event.json",
+            datetime(2026, 9, 30, 18, tzinfo=JST),
+        )
+
+
+def test_no_trial_is_recorded_against_knowledge_nobody_has_judged(tmp_path):
+    """Unjudged is refused too. A definition nobody has checked under the
+    current rules is the case this capability exists for."""
+    path, _count = usable_registry(tmp_path)
+    (path.parent / "source_validity.jsonl").unlink()
+    with pytest.raises(ValueError, match="source-validity"):
+        evaluate_observation_file(
+            path, OBSERVATION, tmp_path / "trials", tmp_path / "trials/event.json",
+            datetime(2026, 9, 30, 18, tzinfo=JST),
         )
 
 
@@ -192,11 +252,12 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     assert main([
         "verify-hypothesis-registry", "--knowledge", str(KNOWLEDGE), "--registry", str(REGISTRY)
     ]) == 0
+    path, count = usable_registry(tmp_path)
     trials = tmp_path / "trials"
     output = trials / "event.json"
     assert main([
         "evaluate-hypothesis-event",
-        "--registry", str(REGISTRY),
+        "--registry", str(path),
         "--observation", str(OBSERVATION),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
@@ -205,13 +266,13 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     summary = tmp_path / "status.json"
     assert main([
         "summarize-hypothesis-registry",
-        "--registry", str(REGISTRY),
+        "--registry", str(path),
         "--trials-dir", str(trials),
         "--evaluated-at", "2026-10-01T09:00:00+09:00",
         "--output", str(summary),
     ]) == 0
     result = json.loads(summary.read_text(encoding="utf-8"))
-    assert len(result["hypotheses"]) == 19
+    assert len(result["hypotheses"]) == count
     assert result["automatic_weight_change"] is False
 
 

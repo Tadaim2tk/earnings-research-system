@@ -16,6 +16,8 @@ The pairing is declared here as data so a new cohort or a new horizon has to
 say which price it starts from rather than inheriting the mistake.
 """
 
+import hashlib
+import json
 from typing import Dict, FrozenSet, Optional
 
 # What each outcome field is measured from.
@@ -100,6 +102,45 @@ def contamination(cohort_key: str, outcome_field: str) -> Optional[str]:
             "split is inside the result" % (cohort_key, anchor, outcome_field, anchor)
         )
     return None
+
+
+def canonical_rules() -> str:
+    """The rules as one deterministic string, so a change to them is nameable.
+
+    Everything that can change what ``contamination`` answers goes in, and
+    nothing else: the two anchor tables and the cohort spans. Frozen knowledge
+    is judged against a particular version of these, and without a name for the
+    version, a verdict recorded today cannot be told apart from one recorded
+    before a rule was added — which is precisely when a hypothesis that used to
+    pass stops passing.
+    """
+    return json.dumps(
+        {
+            "return_anchor": dict(sorted(RETURN_ANCHOR.items())),
+            "return_exit": dict(sorted(RETURN_EXIT.items())),
+            "cohort_span": {key: sorted(value) for key, value in sorted(COHORT_SPAN.items())},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def rules_digest() -> str:
+    """SHA-256 of the canonical rules."""
+    return hashlib.sha256(canonical_rules().encode("utf-8")).hexdigest()
+
+
+def declares(cohort_key: str) -> bool:
+    """Whether the rules have anything to say about this cohort at all.
+
+    An undeclared cohort is passed by ``contamination`` on purpose — the table
+    guards the pairings that have been established rather than pretending to
+    know every one — but "checked and sound" and "not covered" are different
+    findings, and a ledger that records them as the same number hides the
+    second.
+    """
+    return cohort_key in COHORT_SPAN
 
 
 def sound_fields(cohort_key: str, outcome_fields) -> list:

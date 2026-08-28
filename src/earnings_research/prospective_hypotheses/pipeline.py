@@ -13,6 +13,16 @@ from .models import (
     HypothesisTrialBundle,
 )
 from .registry import build_registry, load_knowledge
+from earnings_research.statistics.lookahead import rules_digest
+from .source_validity import (
+    LEDGER_NAME,
+    append_ledger,
+    is_usable,
+    judge,
+    rates,
+    read_ledger,
+    unevaluated,
+)
 
 
 def _render(model):
@@ -82,6 +92,59 @@ def verify_registry_file(knowledge_path: Path, registry_path: Path):
     return registry
 
 
+def evaluate_source_validity_file(registry_path: Path, ledger_path: Path, evaluated_at: datetime):
+    """Judge every frozen hypothesis under the rules as they stand, and append.
+
+    Deliberately a command rather than something CI does on its own: the
+    verdicts land in a file that is committed, so a change of standard shows up
+    as a diff somebody reviews. CI's job is to notice that the judgement is
+    missing, not to write it.
+    """
+    registry = HypothesisRegistry.model_validate_json(
+        Path(registry_path).read_text(encoding="utf-8")
+    )
+    ledger = read_ledger(ledger_path)
+    pending = {key for key in unevaluated(registry, ledger)}
+    verdicts = [
+        verdict
+        for verdict in judge(registry, evaluated_at.isoformat())
+        if (verdict.hypothesis_id, verdict.hypothesis_version) in pending
+    ]
+    append_ledger(ledger_path, verdicts)
+    return {
+        "appended": len(verdicts),
+        "already_judged": len(registry.hypotheses) - len(verdicts),
+        **rates(registry, read_ledger(ledger_path)),
+    }
+
+
+def verify_source_validity_file(registry_path: Path, ledger_path: Path):
+    """Refuse a registry that has not been judged under the current rules.
+
+    Two failures, and they are different. A hypothesis with no verdict under
+    the current digest means the rules moved and nobody looked again — the
+    exact situation where knowledge frozen earlier silently stops being
+    supportable. A hypothesis judged invalid and still gathering evidence means
+    somebody looked and carried on anyway.
+    """
+    registry = HypothesisRegistry.model_validate_json(
+        Path(registry_path).read_text(encoding="utf-8")
+    )
+    ledger = read_ledger(ledger_path)
+    missing = unevaluated(registry, ledger)
+    if missing:
+        raise ValueError(
+            "%d hypotheses have no source-validity verdict under the current "
+            "contamination rules (%s): %s"
+            % (
+                len(missing),
+                rules_digest()[:12],
+                ", ".join("%s v%d" % key for key in missing[:5]),
+            )
+        )
+    return {"status": "judged", **rates(registry, ledger)}
+
+
 def load_trial_bundles(trials_dir: Path):
     path = Path(trials_dir)
     if not path.exists():
@@ -92,20 +155,54 @@ def load_trial_bundles(trials_dir: Path):
     ]
 
 
+def usable_hypotheses(registry, ledger_path: Path = None):
+    """The hypotheses prospective work may still be recorded against.
+
+    Reading the ledger rather than the registry, because the registry is frozen
+    and cannot say this. A hypothesis the current rules condemn is not
+    evidence-gathering material, and neither is one nobody has judged under
+    them — an unjudged definition is exactly the case this check exists for.
+    """
+    ledger = read_ledger(ledger_path or default_ledger_path(registry))
+    refused = [
+        item
+        for item in registry.hypotheses
+        if not is_usable(item.hypothesis_id, item.hypothesis_version, ledger)
+    ]
+    return [item for item in registry.hypotheses if item not in refused], refused
+
+
+def default_ledger_path(registry) -> Path:
+    return Path("data/prospective_hypotheses") / LEDGER_NAME
+
+
 def evaluate_observation_file(
     registry_path: Path,
     observation_path: Path,
     trials_dir: Path,
     output_path: Path,
     recorded_at: datetime,
+    ledger_path: Path = None,
 ):
     registry = HypothesisRegistry.model_validate_json(Path(registry_path).read_text(encoding="utf-8"))
     observation = CompletedEventObservation.model_validate_json(
         Path(observation_path).read_text(encoding="utf-8")
     )
-    existing = load_trial_bundles(trials_dir)
-    if any(bundle.earnings_event_id == observation.earnings_event_id for bundle in existing):
-        raise ValueError("this earnings event already has an append-only hypothesis trial bundle")
+    _usable, refused = usable_hypotheses(
+        registry, ledger_path or Path(registry_path).parent / LEDGER_NAME
+    )
+    if refused:
+        # Refused rather than skipped. Quietly recording trials for the rest
+        # would leave a registry half of which is gathering evidence and half
+        # of which is not, with nothing in the output saying which.
+        raise ValueError(
+            "%d of %d hypotheses have no usable source-validity verdict under the "
+            "current contamination rules (%s); run evaluate-source-validity and "
+            "retire the invalid ones before recording more trials"
+            % (len(refused), len(registry.hypotheses), ", ".join(
+                item.hypothesis_id for item in refused[:3]
+            ) + ("…" if len(refused) > 3 else ""))
+        )
     bundle = evaluate_observation(registry, observation, recorded_at)
     _write_new(output_path, _render(bundle))
     return bundle
@@ -116,8 +213,19 @@ def summarize_trials_file(
     trials_dir: Path,
     output_path: Path,
     evaluated_at: datetime,
+    ledger_path: Path = None,
 ):
     registry = HypothesisRegistry.model_validate_json(Path(registry_path).read_text(encoding="utf-8"))
+    _usable, refused = usable_hypotheses(
+        registry, ledger_path or Path(registry_path).parent / LEDGER_NAME
+    )
+    if refused:
+        raise ValueError(
+            "%d of %d hypotheses have no usable source-validity verdict under the "
+            "current contamination rules; a status snapshot over them would read "
+            "as evidence about knowledge the rules no longer support"
+            % (len(refused), len(registry.hypotheses))
+        )
     snapshot = summarize_trials(registry, load_trial_bundles(trials_dir), evaluated_at)
     _write_new(output_path, _render(snapshot))
     return snapshot
