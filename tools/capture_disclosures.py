@@ -7,10 +7,18 @@
 
     python tools/capture_disclosures.py --days 3
 
-**既定は台帳にある銘柄だけ。** `release.tdnet.info` の robots は `Disallow: /` で、
-索引が渡したURLに限った取得は ERS-ADR-0046 で Human が明示的に承認したが、それは
-1社・四半期1本の文脈だった。全短信は1日250本で30倍になる。規模の変更は人の判断
-なので、`--all` を明示しない限り広げない。
+**取得は ERS-ADR-0033 の契約の中でしか行わない。** `release.tdnet.info` の robots は
+`Disallow: /` で、索引が渡したURLに限った取得を Human が明示的に承認したのが
+ERS-ADR-0033 である（2026-08-17、`www.release.tdnet.info` と
+`contents.xj-storage.jp` の2ホストのみ、link追跡なし）。同契約は
+`MAX_DOCUMENTS_PER_RUN = 4` も定めており、**1回の実行で4本を超えて取らない**。
+
+**この上限は1日あたりの必要数（約8本）より小さい。** 迂回はしない。上限まで取り、
+取り残した数を出して**0以外で終える**——足りていないことを成功として報告しない。
+上限を上げるなら契約の変更であり、人の判断である。
+
+**既定は台帳にある銘柄だけ。** 全短信は1日250本で30倍になる。規模の変更も人の
+判断なので、`--all` を明示しない限り広げない。
 
 保存するのは抽出テキストと sha256 まで。PDF本体は残さない
 （`raw_document_retained: false`）。採点はしない——ここは確保だけで、
@@ -28,6 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from earnings_research.document_analysis.acquisition import MAX_DOCUMENTS_PER_RUN  # noqa: E402
 from earnings_research.document_analysis.guarded_fetch import GuardedDocumentFetcher  # noqa: E402
 from earnings_research.document_analysis.pdf import extract_pdf  # noqa: E402
 from earnings_research.timing import tdnet_index as ix  # noqa: E402
@@ -38,6 +47,31 @@ UA = "EarningsResearchSystem-Research/1.0"
 # 索引は取得側の礼儀として間を置く。文書取得も同様。
 INDEX_PAUSE = 0.8
 DOCUMENT_PAUSE = 1.2
+
+
+def storage_key(code: str, stamp: str, url: str) -> str:
+    """1社が同じ日に複数の短信を出しても取りこぼさない鍵。
+
+    `<code>_<date>` だけだと、2本目が「既にある」と見なされて**黙って消える**。
+    `tdnet_index.select()` が同じ状況を `ambiguous` として扱っている以上、
+    起こりうる前提で名前を付ける。
+    """
+    return "%s_%s_%s" % (code, stamp, hashlib.sha256(url.encode("utf-8")).hexdigest()[:8])
+
+
+def outside_repository(store: Path) -> bool:
+    """コーパスがこの公開リポジトリの中を指していないか。
+
+    `--store` にリポジトリ内のパスを渡すと、第三者の開示本文が public な
+    チェックアウトに書かれる。source-eligibility 検査は
+    `data/evidence/*/bundles.jsonl` しか見ないので、別のディレクトリなら
+    素通りする。
+    """
+    try:
+        store.resolve().relative_to(ROOT.resolve())
+    except ValueError:
+        return True
+    return False
 
 
 def ledger_codes():
@@ -72,6 +106,10 @@ def main():
     args = ap.parse_args()
 
     store = Path(args.store)
+    if not outside_repository(store):
+        print("コーパスをリポジトリの中に置かない: %s" % store, file=sys.stderr)
+        print("このリポジトリは public で、開示本文は第三者の内容である。", file=sys.stderr)
+        return 2
     store.mkdir(parents=True, exist_ok=True)
     universe = None if args.all else ledger_codes()
     today = date.fromisoformat(args.today) if args.today else date.today()
@@ -80,6 +118,9 @@ def main():
 
     fetcher = GuardedDocumentFetcher()
     saved = skipped = expired = failed = 0
+    # ERS-ADR-0033 の契約。上限まで取り、残りは取り残しとして数える。
+    budget = MAX_DOCUMENTS_PER_RUN
+    left_behind = []
     for back in range(args.days):
         day = (today - timedelta(days=back)).isoformat()
         try:
@@ -104,10 +145,15 @@ def main():
 
         for code, url, item in wanted:
             stamp = (item.get("pubdate") or "")[:10] or day
-            path = store / ("%s_%s.json" % (code, stamp))
-            if path.exists():
+            path = store / ("%s.json" % storage_key(code, stamp, url))
+            legacy = store / ("%s_%s.json" % (code, stamp))
+            if path.exists() or legacy.exists():
                 skipped += 1
                 continue
+            if budget <= 0:
+                left_behind.append((code, stamp))
+                continue
+            budget -= 1
             try:
                 with fetcher.pdf(url) as pdf_path:
                     extracted = extract_pdf(pdf_path)
@@ -138,9 +184,20 @@ def main():
             saved += 1
             time.sleep(DOCUMENT_PAUSE)
 
-    print("\n確保 %d / 既存 %d / 窓の外 %d / 失敗 %d" % (saved, skipped, expired, failed))
-    # 失敗しても 0 で終える。1日取り逃しても翌日 --days が拾い直す。
-    return 0
+    print("\n確保 %d / 既存 %d / 窓の外 %d / 失敗 %d / 取り残し %d"
+          % (saved, skipped, expired, failed, len(left_behind)))
+    if left_behind:
+        print("1回の上限 %d 本を超えたので取り残した（契約は ERS-ADR-0033）:"
+              % MAX_DOCUMENTS_PER_RUN, file=sys.stderr)
+        for code, stamp in left_behind[:20]:
+            print("  %s %s" % (code, stamp), file=sys.stderr)
+        print("これらは31日の窓の中にいるうちにしか取れない。", file=sys.stderr)
+    if failed:
+        print("取得に失敗した経路がある。3日の遡りを超える停止は取り返せない。",
+              file=sys.stderr)
+    # 足りていないことを成功として報告しない。無人で走らせたとき、緑は
+    # 「全部取れた」以外を意味してはいけない。
+    return 1 if (left_behind or failed) else 0
 
 
 if __name__ == "__main__":
