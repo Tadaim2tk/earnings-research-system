@@ -131,6 +131,25 @@ def same_company(ledger_name: Optional[str], index_name: Optional[str]) -> Optio
     return a in b or b in a
 
 
+# 索引は文書URLを自前のリダイレクタで包んで返すことがある。
+#     https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/...pdf
+# 包んだまま記録すると、承認済みの発行元へ行くのに承認外のホストを経由すること
+# になる。実測で235件中116件が包まれていた。
+REDIRECTOR = re.compile(r"^https?://[^/]*yanoshin\.jp/[^?]*\?(?P<target>https?://.+)$")
+
+
+def unwrap_url(url: Optional[str]) -> Optional[str]:
+    """リダイレクタの包みを外し、発行元のURLそのものを返す。
+
+    追うのではなく外す。リダイレクトを追えば承認外のホストを一度通ることになり、
+    承認リストの意味が薄くなる。中身は最初から書いてある。
+    """
+    if not url:
+        return None
+    match = REDIRECTOR.match(url.strip())
+    return match.group("target") if match else url.strip()
+
+
 def announced_at(item: dict) -> Optional[datetime]:
     stamp = (item.get("pubdate") or "").strip()
     if not stamp:
@@ -216,7 +235,7 @@ def select(items: Sequence[dict], code: str, event_date: str,
     return Selection(
         "matched",
         announced_at=when,
-        document_url=only.get("document_url") or None,
+        document_url=unwrap_url(only.get("document_url")),
         content_sha256=digest(only),
         candidates=1,
         corrections=len(corrections),

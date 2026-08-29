@@ -212,3 +212,26 @@ def test_an_unreadable_timestamp_is_not_reported_as_a_missing_tanshin():
     assert got.status == "invalid_timestamp"
     assert got.announced_at is None
     assert ix.announced_at(broken) is None
+
+
+WRAPPED = "https://webapi.yanoshin.jp/rd.php?https://www.release.tdnet.info/inbs/1401.pdf"
+DIRECT = "https://www.release.tdnet.info/inbs/1401.pdf"
+
+
+def test_the_redirector_wrapper_is_unwrapped_not_followed():
+    """索引は文書URLを自前のリダイレクタで包むことがある（実測で235件中116件）。
+    包んだまま記録すると、承認済みの発行元へ行くのに承認外のホストを経由する。
+    追うのではなく外す——中身は最初から書いてある。"""
+    assert ix.unwrap_url(WRAPPED) == DIRECT
+    assert ix.unwrap_url(DIRECT) == DIRECT
+    assert ix.unwrap_url(None) is None
+    assert ix.unwrap_url("") is None
+    # 包みでないものを壊さない。
+    assert ix.unwrap_url("https://example.invalid/a.pdf?x=1") == "https://example.invalid/a.pdf?x=1"
+
+
+def test_a_selected_match_carries_the_publisher_url():
+    wrapped_item = dict(MITSUI, document_url=WRAPPED)
+    got = ix.select([wrapped_item], "80310", "2026-08-04")
+    assert got.status == "matched"
+    assert got.document_url == DIRECT
