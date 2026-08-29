@@ -89,6 +89,44 @@ def foreign(manifest: PopulationManifest, bundles: Sequence[EvidenceBundle]) -> 
     )
 
 
+def premature(manifest: PopulationManifest, bundles: Sequence[EvidenceBundle]) -> List[str]:
+    """Evidence read before the population it belongs to was fixed.
+
+    The property this whole capability exists for. Fixing the population first
+    only prevents selection if nothing was read first: evidence retrieved
+    before `fixed_at` could have been seen while deciding which events to
+    include, which is the retired pipeline's "eight notable companies" arriving
+    by a different route.
+
+    Nothing enforced this until a review pointed it out. The manifest checked
+    that it was not fixed before its own roster was read, and the bundles
+    checked their own internal consistency, and the one comparison between them
+    — the one that carries the guarantee — was missing.
+    """
+    return [
+        "%s was read at %s, before the population was fixed at %s"
+        % (bundle.bundle_id, bundle.retrieved_at.isoformat(), manifest.fixed_at.isoformat())
+        for bundle in bundles
+        if bundle.retrieved_at < manifest.fixed_at
+    ]
+
+
+def misattributed(manifest: PopulationManifest, bundles: Sequence[EvidenceBundle]) -> List[str]:
+    """Bundles that name a different population than the one they are read with.
+
+    Membership by `event_id` is not lineage. A stale or mistyped `manifest_id`
+    passes an event-id check whenever the two populations share an event, and
+    `verify` then reports the loaded manifest as covering evidence that belongs
+    to another one.
+    """
+    return [
+        "%s names population %s, not %s"
+        % (bundle.bundle_id, bundle.manifest_id, manifest.manifest_id)
+        for bundle in bundles
+        if bundle.manifest_id != manifest.manifest_id
+    ]
+
+
 def tampered(bundles: Sequence[EvidenceBundle]) -> List[str]:
     """Bundles whose stored text no longer hashes to the hash beside it.
 
@@ -132,6 +170,18 @@ def verify(manifest_path: Path, bundles_path: Path) -> Dict[str, object]:
         problems.append(
             "%d bundles no longer hash to their own content: %s"
             % (len(altered), ", ".join(altered[:5]))
+        )
+    early = premature(manifest, bundles)
+    if early:
+        problems.append(
+            "%d bundles were read before the population was fixed: %s"
+            % (len(early), "; ".join(early[:3]))
+        )
+    astray = misattributed(manifest, bundles)
+    if astray:
+        problems.append(
+            "%d bundles belong to another population: %s"
+            % (len(astray), "; ".join(astray[:3]))
         )
     if problems:
         raise ValueError("; ".join(problems))

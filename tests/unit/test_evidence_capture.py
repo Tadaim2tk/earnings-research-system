@@ -270,3 +270,42 @@ def test_nothing_here_extracts_a_fact_or_assigns_a_rank():
     # over it, not a category anything downstream would group on.
     assert EvidenceBundle.model_fields["content"].annotation is not None
     assert "content_sha256" in EvidenceBundle.model_fields
+
+
+def test_evidence_read_before_the_population_was_fixed_is_refused(tmp_path):
+    """The property this capability exists for, and the one it did not enforce.
+
+    Fixing the population first only prevents selection if nothing was read
+    first. Evidence retrieved before `fixed_at` could have been seen while
+    deciding which events to include — the retired pipeline's "eight notable
+    companies" arriving by another route.
+
+    The manifest checked that it was not fixed before its own roster was read,
+    and each bundle checked its own consistency. The one comparison between
+    them, which carries the guarantee, was missing until a review found it.
+    """
+    pop = manifest(included=1)
+    event_id = pop.included[0].event_id
+    early = bundle(event_id, retrieved_at=pop.fixed_at - timedelta(seconds=1))
+    with pytest.raises(ValueError, match="read before the population was fixed"):
+        verify(*written(tmp_path, pop, [early]))
+
+
+def test_evidence_read_at_the_moment_the_population_was_fixed_is_allowed(tmp_path):
+    """The boundary is inclusive: a capture that starts the instant the
+    population closes has not seen anything the population was chosen from."""
+    pop = manifest(included=1)
+    at_the_moment = bundle(pop.included[0].event_id, retrieved_at=pop.fixed_at)
+    assert verify(*written(tmp_path, pop, [at_the_moment]))["status"] == "verified"
+
+
+def test_a_bundle_naming_another_population_is_refused(tmp_path):
+    """Membership by event id is not lineage. A stale or mistyped manifest_id
+    passes an event-id check whenever two populations share an event, and the
+    capture is then certified under the wrong population."""
+    pop = manifest(included=2)
+    stray = bundle(pop.included[1].event_id).model_copy(
+        update={"manifest_id": "POP-2026-08-31"}
+    )
+    with pytest.raises(ValueError, match="belong to another population"):
+        verify(*written(tmp_path, pop, [bundle(pop.included[0].event_id), stray]))
