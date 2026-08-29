@@ -16,6 +16,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 退役済み史料の研究でだけ使う。前向き運用の経路には入らないので、
+# 本体の依存にはしない。
+research = [
+  "yfinance>=0.2,<1.0",
+]
 dev = [
   # The tests import this directly; it was reaching them only as somebody
   # else's transitive dependency, which a clean CI checkout does not have.

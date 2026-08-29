@@ -1,0 +1,40 @@
+{
+  "auto_adjust": false,
+  "days": 121,
+  "fetched_at": "2026-08-29T23:16:08.969840+09:00",
+  "requested_end": "2026-09-01",
+  "requested_start": "2026-05-01",
+  "schema_version": "regime_sessions_v1",
+  "scope": "退役済み史料の研究。baseline/lock/evidence/scoring/実売買に接続しない",
+  "series_failed": [],
+  "series_fetched": [
+    "1306.T",
+    "1343.T",
+    "BTC-USD",
+    "CL=F",
+    "DX-Y.NYB",
+    "ETH-USD",
+    "GC=F",
+    "HG=F",
+    "JPY=X",
+    "SI=F",
+    "SOL-USD",
+    "XRP-USD",
+    "^FVX",
+    "^GSPC",
+    "^IXIC",
+    "^N225",
+    "^SOX",
+    "^TNX",
+    "^TYX",
+    "^VIX"
+  ],
+  "sha256": "2d08629768c93ff1f16d3ace10de701e5c38e99888141eb2d85c4e044f32b1df",
+  "snapshot": "20260501_20260901_r1.jsonl",
+  "source": "yfinance",
+  "ticker_convention": "Yahoo Finance のシンボル表記をそのまま使う",
+  "unavailable_axes": {
+    "日経VI": "Yahoo Finance に系列が無い（^JNIV は 404）。米VIXで代理している"
+  },
+  "window": "2026-05-01 以上 2026-09-01 未満（要求値。実際の観測日は系列ごとに異なる）"
+}
