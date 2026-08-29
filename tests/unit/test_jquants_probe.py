@@ -97,15 +97,15 @@ def test_the_probe_asks_only_the_question_the_review_left_open():
     """One endpoint. A probe that swept several would be an adapter with a
     different name."""
     endpoints = {value for value in code_literals() if value.startswith("/")}
-    assert endpoints == {"/fins/statements"}, endpoints
+    assert endpoints == {"/fins/summary"}, endpoints
 
 
 def test_it_reports_a_disclosure_time_but_never_disclosure_content():
     """A timestamp is metadata. The body is what the terms restrict, and the
     probe has no reason to show one."""
     values = code_literals()
-    assert "DisclosedTime" in values and "DiscTime" in values
-    for financial in ("NetSales", "OperatingProfit", "Profit", "Equity", "content"):
+    assert "DiscTime" in values and "DiscDate" in values
+    for financial in ("Sales", "OP", "NP", "EPS", "CFO", "CashEq", "content"):
         assert financial not in values, financial
 
 
@@ -116,3 +116,13 @@ def test_the_probe_is_not_wired_into_the_package():
     assert not (ROOT / "tools/__init__.py").exists()
     for module in (ROOT / "src/earnings_research").rglob("*.py"):
         assert "jquants_probe" not in module.read_text(encoding="utf-8"), module
+
+
+def test_it_authenticates_by_key_alone():
+    """V2 takes the key in `x-api-key` and rejects the request when
+    `Authorization` rides along, so the header that must be absent is part of
+    the contract. Docstrings are stripped, which is why naming the forbidden
+    header in the prose above does not fail this."""
+    values = code_literals()
+    assert "x-api-key" in values
+    assert "Authorization" not in values
