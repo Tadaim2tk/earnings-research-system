@@ -46,7 +46,7 @@ dataset_origin: earnings-research-os / record_mode: legacy_observational / sourc
 
 ## 今週時点の検証メモ(自動集計)
 
-1667件の比較をBenjamini-Hochbergで補正し、2件が残った(方向性 2 / 裾の捕捉 0)。それ以外の数字は記述であって所見ではない。
+2237件の比較をBenjamini-Hochbergで補正し、2件が残った(方向性 2 / 裾の捕捉 0)。それ以外の数字は記述であって所見ではない。
 
 統計は探索対象 165/254件 のみ。2026-07-31以降のレコードは一覧には出るが、この節のどの数字にも入っていない。
 

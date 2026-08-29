@@ -32,7 +32,10 @@ ENTRY_FIELD = "i0p2_open"
 # again — a research question shaped by what was convenient to store.
 PRICE_OFFSETS = {
     "i0p2_open": (2, "open"),
+    "i0p3_close": (3, "close"),
+    "i0p4_close": (4, "close"),
     "i0p7_close": (7, "close"),
+    "i0p12_close": (12, "close"),
     "i0p22_close": (22, "close"),
 }
 

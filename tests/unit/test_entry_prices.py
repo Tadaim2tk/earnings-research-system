@@ -76,10 +76,27 @@ def test_the_two_axes_share_an_entry_and_differ_only_in_what_moves():
     assert prices_for(EVENT20) == ("i0p2_open", "d20_close")
     assert prices_for(PLUS5) == ("i0p2_open", "i0p7_close")
     assert prices_for(PLUS20) == ("i0p2_open", "i0p22_close")
-    assert set(COMPARISON_AXIS["duration"]) == {PLUS5, PLUS20}
-    assert {EVENT5, EVENT20} <= set(COMPARISON_AXIS["entry"])
-    # No series appears on both axes; a name that did would answer neither.
-    assert not set(COMPARISON_AXIS["entry"]) & set(COMPARISON_AXIS["duration"])
+
+    # Within the entry axis every series ends at the same close, so a
+    # difference along it is the entry and nothing else.
+    exits = {prices_for(name)[1] for name in COMPARISON_AXIS["entry"]}
+    assert exits == {"d5_close", "d20_close"}
+    for horizon in exits:
+        group = [n for n in COMPARISON_AXIS["entry"] if prices_for(n)[1] == horizon]
+        assert len({prices_for(n)[0] for n in group}) == len(group) == 3
+
+    # Within the duration axis every series starts at the same open, so a
+    # difference along it is the hold and nothing else.
+    assert {prices_for(name)[0] for name in COMPARISON_AXIS["duration"]} == {"i0p2_open"}
+    assert len(COMPARISON_AXIS["duration"]) == 6
+
+    # The axes cross, and the crossing point is a real series rather than an
+    # ambiguity: the i0+2 entry into i0+5 is also the three-session hold. An
+    # earlier form of this test forbade any overlap, which was a statement
+    # about mixing them inside one table, not about a grid having a corner.
+    shared = set(COMPARISON_AXIS["entry"]) & set(COMPARISON_AXIS["duration"])
+    assert shared == {EVENT5}
+    assert prices_for(EVENT5)[0] == "i0p2_open" and prices_for(EVENT5)[1] == "d5_close"
 
 
 def test_every_series_is_named_by_the_sessions_it_spans():

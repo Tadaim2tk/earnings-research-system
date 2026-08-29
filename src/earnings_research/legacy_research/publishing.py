@@ -22,6 +22,7 @@ from .entry_prices import (
     uncovered,
 )
 from .labels import cohort_label
+from earnings_research.statistics.lookahead import COMPARISON_AXIS
 
 # Long on purpose. "d5" meant a five-session hold from the previous close, four
 # from the first open and three from the fill, all printed in the same table.
@@ -33,12 +34,23 @@ EXIT_PLUS20 = "entry_i0p2_open__exit_i0p22_close"
 # Three entries into the same exit, then two holds from the same entry. The
 # first group answers where to get in, the second how long to stay; a table
 # that mixes them answers neither, because a difference could be either.
-ENTRY_AXIS = ("open_d20", "close_d20", EXIT_EVENT_D20)
-DURATION_AXIS = (EXIT_PLUS5, EXIT_PLUS20)
-AXIS_HEADER = (
-    "| 入口:初日寄付 | 入口:初日引け | 入口:約定 | 保有:約定+5日 | 保有:約定+20日 |"
-)
-AXIS_RULE = "|---|---|---|---|---|"
+ENTRY_AXIS = COMPARISON_AXIS["entry"][3:]      # 出口を i0+20 に固定した3系列
+DURATION_AXIS = COMPARISON_AXIS["duration"]    # 入口を i0+2 に固定した保有掃引
+# Derived from the axes rather than written out. Written out, adding four
+# holding points to the sweep left a five-column header over a nine-column row
+# and the table stopped parsing as a table.
+COLUMN_LABEL = {
+    "open_d20": "入口 i0+1寄付", "close_d20": "入口 i0+1引け",
+    "entry_i0p2_open__exit_i0p20_close": "入口 i0+2寄付",
+    "entry_i0p2_open__exit_i0p3_close": "保有1本",
+    "entry_i0p2_open__exit_i0p4_close": "保有2本",
+    "entry_i0p2_open__exit_i0p5_close": "保有3本",
+    "entry_i0p2_open__exit_i0p7_close": "保有5本",
+    "entry_i0p2_open__exit_i0p12_close": "保有10本",
+    "entry_i0p2_open__exit_i0p22_close": "保有20本",
+}
+AXIS_HEADER = "| " + " | ".join(COLUMN_LABEL[f] for f in ENTRY_AXIS + DURATION_AXIS) + " |"
+AXIS_RULE = "|---" * (len(ENTRY_AXIS) + len(DURATION_AXIS)) + "|"
 
 
 def _axes(rows, match) -> str:

@@ -54,7 +54,10 @@ RETURN_ANCHOR: Dict[str, str] = {
     # was comparing entry and duration at once and could not tell which moved.
     "entry_i0p2_open__exit_i0p5_close": "i0p2_open",
     "entry_i0p2_open__exit_i0p20_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p3_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p4_close": "i0p2_open",
     "entry_i0p2_open__exit_i0p7_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p12_close": "i0p2_open",
     "entry_i0p2_open__exit_i0p22_close": "i0p2_open",
 }
 
@@ -210,7 +213,10 @@ RETURN_EXIT: Dict[str, str] = {
     # observation and cannot be separated.
     "entry_i0p2_open__exit_i0p5_close": "d5_close",
     "entry_i0p2_open__exit_i0p20_close": "d20_close",
+    "entry_i0p2_open__exit_i0p3_close": "i0p3_close",
+    "entry_i0p2_open__exit_i0p4_close": "i0p4_close",
     "entry_i0p2_open__exit_i0p7_close": "i0p7_close",
+    "entry_i0p2_open__exit_i0p12_close": "i0p12_close",
     "entry_i0p2_open__exit_i0p22_close": "i0p22_close",
 }
 
@@ -224,8 +230,14 @@ COMPARISON_AXIS: Dict[str, str] = {
         "open_d20", "close_d20", "entry_i0p2_open__exit_i0p20_close",
     ),
     # Same entry, the duration moves — how long is it best to hold.
+    # Six points rather than two, because "how long to hold" is a shape and two
+    # points cannot show one. 1, 2, 3, 5, 10 and 20 sessions from the same entry.
     "duration": (
+        "entry_i0p2_open__exit_i0p3_close",
+        "entry_i0p2_open__exit_i0p4_close",
+        "entry_i0p2_open__exit_i0p5_close",
         "entry_i0p2_open__exit_i0p7_close",
+        "entry_i0p2_open__exit_i0p12_close",
         "entry_i0p2_open__exit_i0p22_close",
     ),
 }
