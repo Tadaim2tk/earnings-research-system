@@ -29,6 +29,8 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .models import canonical_hash
+
 Key = Tuple[str, int]
 
 
@@ -93,43 +95,128 @@ def started(key: Key, bundles: Sequence) -> bool:
     return evaluation_started_at(key, bundles) is not None
 
 
+def _bundle_registry(bundle, registries) -> Tuple[object, Optional[str]]:
+    """The registry a bundle was recorded against, or why it cannot be found.
+
+    Provenance, not inference. A bundle names the registry it was scored under
+    and carries that registry's hash, so which rules were actually applied to a
+    trial is recorded rather than reconstructed from timestamps.
+    """
+    for registry in registries:
+        if (registry.registry_id, registry.registry_version) == (
+            bundle.registry_id,
+            bundle.registry_version,
+        ):
+            if canonical_hash(registry) != bundle.registry_sha256:
+                return None, (
+                    "a trial was recorded against %s@v%d, which no longer matches the "
+                    "hash the bundle carries; the rules it was scored under cannot be "
+                    "established" % (bundle.registry_id, bundle.registry_version)
+                )
+            return registry, None
+    return None, (
+        "a trial names registry %s@v%d, which is not among the registries being "
+        "checked; the rules it was scored under cannot be established"
+        % (bundle.registry_id, bundle.registry_version)
+    )
+
+
 def rule_freeze_violations(registries: Sequence, bundles: Sequence) -> List[str]:
     """Every definition whose rules moved after it began gathering evidence.
 
-    Reads across registries rather than comparing two: a rule can be changed by
-    freezing a third registry, and a pairwise check sees only the pair it was
-    handed.
+    The rule in effect is the one the earliest trial was actually scored under,
+    read off that trial's own bundle. Comparing every registry that mentions the
+    definition instead was wrong in a way that only appeared later: a rule
+    changed and re-frozen *before* the first trial is permitted, but both
+    registries stay on disk, so the first trial to arrive afterwards turned the
+    earlier, legitimate edit into a violation — the documented path failing
+    retroactively, in standing CI, long after the change it objected to.
 
-    A definition with no trials is skipped, and that is the boundary this whole
-    module is about — not an exemption. Re-freezing before the first trial is
-    how a rule is supposed to be changed.
+    So a registry matters here only if it was frozen after the start, or if a
+    trial was recorded against it. Two ways the rules can move, and both are
+    reported:
+
+      * trials for one definition scored under registries that disagree — the
+        rules already differ across the evidence;
+      * a registry defining it with different rules, frozen after the start —
+        nothing has been recorded under it yet, and nothing should be.
+
+    Reads across every registry rather than comparing two, because a rule can
+    be changed by freezing a third.
     """
     problems: List[str] = []
-    by_key: Dict[Key, Dict[str, List[str]]] = {}
-    for registry in registries:
-        for definition in registry.hypotheses:
-            key = (definition.hypothesis_id, definition.hypothesis_version)
-            where = "%s@v%d" % (registry.registry_id, registry.registry_version)
-            by_key.setdefault(key, {}).setdefault(rule_digest(registry, definition), []).append(where)
-    for key in sorted(by_key):
-        digests = by_key[key]
-        if len(digests) == 1:
+    registry_of: Dict[int, object] = {}
+    for bundle in bundles:
+        registry, failure = _bundle_registry(bundle, registries)
+        if failure is not None:
+            if failure not in problems:
+                problems.append(failure)
             continue
+        registry_of[id(bundle)] = registry
+    if problems:
+        # Provenance could not be established for at least one trial, so no
+        # statement about which rules were in effect would mean anything.
+        return problems
+
+    keys = sorted(
+        {
+            (definition.hypothesis_id, definition.hypothesis_version)
+            for registry in registries
+            for definition in registry.hypotheses
+        }
+    )
+    for key in keys:
         since = evaluation_started_at(key, bundles)
         if since is None:
             continue
-        problems.append(
-            "%s v%d began gathering evidence at %s, and its decision rules differ "
-            "between %s; a rule that has to change needs a new hypothesis version, "
-            "which starts from no trials"
-            % (
-                key[0],
-                key[1],
-                since.isoformat(),
-                " and ".join(
-                    "%s (%s)" % (", ".join(sorted(where)), digest[:12])
-                    for digest, where in sorted(digests.items())
-                ),
+        scored = [
+            (bundle, registry_of[id(bundle)])
+            for bundle in bundles
+            if any(
+                (trial.hypothesis_id, trial.hypothesis_version) == key for trial in bundle.trials
             )
-        )
+        ]
+        first = min(scored, key=lambda pair: min(
+            trial.recorded_at for trial in pair[0].trials
+            if (trial.hypothesis_id, trial.hypothesis_version) == key
+        ))[1]
+        in_effect = _digest_for(first, key)
+        for bundle, registry in scored:
+            digest = _digest_for(registry, key)
+            if digest != in_effect:
+                problems.append(
+                    "%s v%d has trials scored under two different rules: %s@v%d (%s) and "
+                    "%s@v%d (%s)"
+                    % (
+                        key[0], key[1],
+                        first.registry_id, first.registry_version, in_effect[:12],
+                        registry.registry_id, registry.registry_version, digest[:12],
+                    )
+                )
+                break
+        for registry in registries:
+            digest = _digest_for(registry, key)
+            if digest is None or digest == in_effect:
+                continue
+            if registry.frozen_at <= since:
+                # Frozen before evidence began. Changing the rules then is how
+                # they are supposed to be changed, and this is that path.
+                continue
+            problems.append(
+                "%s v%d began gathering evidence at %s, and %s@v%d was frozen afterwards "
+                "with different decision rules (%s, was %s); a rule that has to change "
+                "needs a new hypothesis version, which starts from no trials"
+                % (
+                    key[0], key[1], since.isoformat(),
+                    registry.registry_id, registry.registry_version,
+                    digest[:12], in_effect[:12],
+                )
+            )
     return problems
+
+
+def _digest_for(registry, key: Key) -> Optional[str]:
+    for definition in registry.hypotheses:
+        if (definition.hypothesis_id, definition.hypothesis_version) == key:
+            return rule_digest(registry, definition)
+    return None

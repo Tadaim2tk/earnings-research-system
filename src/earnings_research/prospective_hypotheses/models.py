@@ -1,9 +1,25 @@
 """Contracts for frozen hypotheses, event observations, trials, and derived status."""
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+
+
+def canonical_hash(model) -> str:
+    """The identity of a frozen model, independent of how it was written out.
+
+    Lives here rather than beside its first caller because two modules need it
+    and one of them derives when a hypothesis started gathering evidence, which
+    the other imports. A second implementation of this would be a second answer
+    to "is this the registry that trial was recorded against".
+    """
+    payload = json.dumps(
+        model.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 Dimension = Literal[

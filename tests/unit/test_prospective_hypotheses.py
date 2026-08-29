@@ -471,34 +471,37 @@ def superseding(stop_rule, version=2, bump=1):
     return HypothesisRegistry.model_validate(payload)
 
 
-def test_a_successor_may_not_change_an_inherited_rule_under_the_same_version(tmp_path):
-    """Tightening is a change too.
+def test_a_successor_may_not_drop_the_stop_rule_it_inherited():
+    """Not a question about freezing, which is why it is decided here.
 
-    The old form of this check passed `maximum_revisions=0` — a stricter rule —
-    because it asked whether the successor was at least as strict. That
-    exemption is gone: a bar raised partway through is as much a departure from
-    the registered test as a bar lowered, and this comparison cannot tell a
-    principled tightening from one chosen to fit the answer.
+    A hypothesis with no abandonment condition can never be wrong, whether or
+    not it has started gathering evidence, so this holds unconditionally and
+    needs no trial record to decide.
     """
     from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
 
     frozen = superseding(stop_rule(maximum_revisions=1), version=1)
-    assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=9)))
-    assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=0)))
     assert successor_registry_problems(frozen, superseding(None))
-    # Unchanged is unchanged, whatever else the successor does.
     assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=1))) == []
 
 
-def test_a_changed_rule_is_permitted_where_the_hypothesis_version_moves_with_it():
-    """The way a rule is supposed to change: a new version, which starts from
-    no trials rather than inheriting the ones judged under the old rule."""
+def test_whether_a_rule_changed_is_not_decided_from_two_files(tmp_path):
+    """Deliberately deferred, and it was briefly decided here by mistake.
+
+    This function sees two registries and no trials, so it cannot tell a change
+    made before any evidence arrived — permitted, and how a rule is meant to be
+    corrected — from one made after. Deciding it here made the permitted path
+    impossible to merge: CI runs this on every registry change and rejected the
+    pre-start edit that `verify-rule-freeze` explicitly allows.
+
+    Both directions are listed so that restoring either verdict fails.
+    """
     from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
 
     frozen = superseding(stop_rule(maximum_revisions=1), version=1)
-    assert successor_registry_problems(
-        frozen, superseding(stop_rule(maximum_revisions=9), bump=2)
-    ) == []
+    for changed in (stop_rule(maximum_revisions=9), stop_rule(maximum_revisions=0)):
+        assert successor_registry_problems(frozen, superseding(changed)) == []
+        assert successor_registry_problems(frozen, superseding(changed, bump=2)) == []
 
 
 def _written(tmp_path, name, registry):
@@ -507,25 +510,28 @@ def _written(tmp_path, name, registry):
     return path
 
 
-def test_the_cli_refuses_a_successor_that_changes_a_rule_in_place(tmp_path, capsys):
-    """The check a version bump has to pass, reachable from CI."""
+def test_the_cli_refuses_a_successor_that_drops_a_rule_and_permits_one_that_changes_it(
+    tmp_path, capsys
+):
+    """The check a version bump has to pass, reachable from CI.
+
+    The permitted case is in here on purpose: a rule change has to exit 0 from
+    this command, because CI runs it on every registry change and a pre-start
+    correction would otherwise be unmergeable.
+    """
     earlier = _written(tmp_path, "v1.json", superseding(stop_rule(maximum_revisions=1), version=1))
-    widened = _written(tmp_path, "v2.json", superseding(stop_rule(maximum_revisions=9)))
-    tightened = _written(tmp_path, "v2b.json", superseding(stop_rule(maximum_revisions=0)))
-    bumped = _written(
-        tmp_path, "v2c.json", superseding(stop_rule(maximum_revisions=9), bump=2)
-    )
-    for path in (widened, tightened):
-        assert main([
-            "verify-successor-registry",
-            "--previous-registry", str(earlier),
-            "--registry", str(path),
-        ]) == 1
-        assert "changes the stop rule" in capsys.readouterr().err
+    dropped = _written(tmp_path, "v2.json", superseding(None))
+    changed = _written(tmp_path, "v2b.json", superseding(stop_rule(maximum_revisions=9)))
     assert main([
         "verify-successor-registry",
         "--previous-registry", str(earlier),
-        "--registry", str(bumped),
+        "--registry", str(dropped),
+    ]) == 1
+    assert "drops the stop rule" in capsys.readouterr().err
+    assert main([
+        "verify-successor-registry",
+        "--previous-registry", str(earlier),
+        "--registry", str(changed),
     ]) == 0
 
 

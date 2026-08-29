@@ -9,6 +9,7 @@ from earnings_research.statistics.stability import assess
 
 from .freeze import evaluation_started_at
 from .models import (
+    canonical_hash,
     CompletedEventObservation,
     HypothesisRegistry,
     HypothesisStatus,
@@ -16,11 +17,6 @@ from .models import (
     HypothesisTrial,
     HypothesisTrialBundle,
 )
-
-
-def canonical_hash(model) -> str:
-    payload = json.dumps(model.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _feature(observation, definition):
@@ -200,13 +196,23 @@ def _halves_reversed(definition, target, comparator):
 def successor_registry_problems(previous, current):
     """Report every way a successor registry retires what it inherited.
 
-    Changing a condition is the obvious way, and the criterion is change, not
-    loosening: a bar raised partway through is as much a departure from the
-    registered test as a bar lowered. Dropping the hypothesis entirely is the
-    larger way and was passing silently — a successor keeping one of nineteen
-    definitions, or renaming every identifier so that nothing matched, was
-    reported as having only tightened. So is comparing against an unrelated
-    registry, which the version check alone cannot catch.
+    Three things, all decidable from two files: an unrelated registry, a
+    version that went backwards, and a definition — or its stop rule — that
+    quietly disappeared. Dropping the hypothesis was passing silently before: a
+    successor keeping one of nineteen definitions, or renaming every identifier
+    so that nothing matched, was reported as having only tightened.
+
+    Whether a rule *changed* is not decided here, and briefly was. This
+    function sees two registries and no trials, so it cannot tell a change made
+    before any evidence arrived — which is permitted, and is how a rule is
+    meant to be corrected — from one made after. Judging it here made the
+    permitted path impossible to merge: CI runs this on every registry change,
+    and it rejected the pre-start edit that `verify-rule-freeze` explicitly
+    allows. The trial-aware check owns that question.
+
+    Dropping a stop rule stays here, and unconditionally, because it is not a
+    question about freezing. A hypothesis with no abandonment condition is one
+    that can never be wrong, whether or not it has started.
     """
     problems = []
     if previous.registry_id != current.registry_id:
@@ -236,18 +242,6 @@ def successor_registry_problems(previous, current):
             problems.append(
                 "%s v%d drops the stop rule frozen in v%d"
                 % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
-            )
-        elif current_rule != was and item.hypothesis_version == before.hypothesis_version:
-            # Not "relaxes" — any change at all, and only where the version did
-            # not move. A rule that has to change gets a new hypothesis version
-            # so its trials start from zero; changing one in place leaves
-            # earlier trials scored against a rule that no longer exists. The
-            # tightening exemption that used to sit here let exactly that
-            # happen, on the argument that a stricter bar is a safe one.
-            problems.append(
-                "%s v%d changes the stop rule frozen under the same version; a "
-                "changed rule needs a new hypothesis version"
-                % (item.hypothesis_id, item.hypothesis_version)
             )
     return problems
 
