@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Sequence
 
-from .models import EvidenceBundle, PopulationManifest, sha256_text
+from .models import EvidenceBundle, PopulationManifest
 
 MANIFEST_NAME = "population.json"
 BUNDLES_NAME = "bundles.jsonl"
@@ -127,19 +127,19 @@ def misattributed(manifest: PopulationManifest, bundles: Sequence[EvidenceBundle
     ]
 
 
-def tampered(bundles: Sequence[EvidenceBundle]) -> List[str]:
-    """Bundles whose stored text no longer hashes to the hash beside it.
+def unhashed(bundles: Sequence[EvidenceBundle]) -> List[str]:
+    """Captured bundles that carry no hash of what they captured.
 
-    The model validator checks this when a bundle is built. This checks it
-    again over what is on disk, which is the case that matters: the file is the
-    thing a future model reads, and it is edited by whatever touches the file.
+    This used to compare a stored body against its own hash. There is no body
+    in the public record any more — it lives in a private store, because this
+    repository is public and the terms do not permit redistribution — so what
+    can be checked here is that the tie to it exists at all. A captured row
+    with no hash cannot be matched to any body later.
     """
     return [
         bundle.bundle_id
         for bundle in bundles
-        if bundle.capture_status == "captured"
-        and bundle.content is not None
-        and bundle.content_sha256 != sha256_text(bundle.content)
+        if bundle.capture_status == "captured" and not bundle.content_sha256
     ]
 
 
@@ -165,10 +165,10 @@ def verify(manifest_path: Path, bundles_path: Path) -> Dict[str, object]:
             "%d bundles are for events outside the fixed population: %s"
             % (len(outside), ", ".join(outside[:5]))
         )
-    altered = tampered(bundles)
+    altered = unhashed(bundles)
     if altered:
         problems.append(
-            "%d bundles no longer hash to their own content: %s"
+            "%d captured bundles carry no hash of what they captured: %s"
             % (len(altered), ", ".join(altered[:5]))
         )
     early = premature(manifest, bundles)

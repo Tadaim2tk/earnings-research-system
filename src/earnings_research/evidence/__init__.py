@@ -2,7 +2,9 @@
 
 from .models import (
     CAPTURE_STATUSES,
+    EvidenceBody,
     EvidenceBundle,
+    body_matches,
     EventRef,
     ExcludedEvent,
     PopulationManifest,
@@ -10,7 +12,9 @@ from .models import (
 
 __all__ = [
     "CAPTURE_STATUSES",
+    "EvidenceBody",
     "EvidenceBundle",
+    "body_matches",
     "EventRef",
     "ExcludedEvent",
     "PopulationManifest",
