@@ -23,6 +23,15 @@ AUTHORIZED_DOCUMENT_HOSTS = frozenset({"www.release.tdnet.info", "contents.xj-st
 # not become a burst of requests.
 MAX_DOCUMENTS_PER_RUN = 4
 
+# 日々の掃き出しで1回に回る**開示の数**。上の定数とは別の問いに答えている——
+# あちらは「1つの開示に対する handoff が壊れていないか」で、こちらは「1回の
+# 実行でいくつの開示を見るか」である。最初はあちらを流用したが、それだと
+# 上限を上げたときに handoff の壊れ検査まで緩む。
+#
+# 台帳の248社では、決算の多い日で8〜9社が同じ日に出す。20 はそれに余裕を持たせた
+# 値で、1.2秒間隔なら25秒ぶんの取得にあたる。Human承認: 2026-08-30。
+MAX_DOCUMENTS_PER_SWEEP = 20
+
 # A refusal is an instruction, not a transient error. Retrying it is what turns
 # one unwelcome request into a pattern.
 REFUSAL_STATUSES = frozenset({401, 403, 429, 451})
