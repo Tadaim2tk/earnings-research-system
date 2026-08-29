@@ -7,9 +7,12 @@
 # 止めるには:
 #   launchctl bootout gui/$(id -u)/com.ers.capture-disclosures
 set -u
-REPO=/Users/maruyamayuuki/.ers-corpus/repo
-LOG=/Users/maruyamayuuki/.ers-corpus/capture.log
-PY=/Users/maruyamayuuki/opt/anaconda3/bin/python
+# 既定は実運用の置き場。差し替えられるのは、終了コードの伝わり方を実際に走らせて
+# 確かめるためで、そこが黙って壊れると launchd は失敗を成功として記録する。
+REPO=${ERS_REPO:-/Users/maruyamayuuki/.ers-corpus/repo}
+LOG=${ERS_LOG:-/Users/maruyamayuuki/.ers-corpus/capture.log}
+PY=${ERS_PYTHON:-/Users/maruyamayuuki/opt/anaconda3/bin/python}
+CAPTURE=${ERS_CAPTURE:-$REPO/tools/capture_disclosures.py}
 
 # ログが太りすぎたら頭を落とす。無人で回るので、放っておくと際限なく伸びる。
 if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 2000000 ]; then
@@ -22,6 +25,14 @@ fi
   # 更新に失敗しても走らせる。取り逃しのほうが取り返しがつかない。
   git pull -q 2>&1 || echo "  (git pull 失敗。手元の版で続行)"
   echo "  repo $(git rev-parse --short HEAD)"
-  PYTHONPATH="$REPO/src" "$PY" "$REPO/tools/capture_disclosures.py" --days 3
-  echo "  exit=$?"
+  PYTHONPATH="$REPO/src" "$PY" "$CAPTURE" --days 3
+  # `status` は zsh の読み取り専用変数（`$?` の別名）なので使えない。代入は
+  # 黙って失敗し、直したつもりで直っていない状態になる。
+  captured=$?
+  echo "  exit=$captured"
 } >> "$LOG" 2>&1
+
+# **中括弧の終了コードは最後のコマンド（echo）のものになる。** そのままだと、
+# 取り残しや失敗があっても launchd は成功として記録し、31日で消える開示が
+# 取られないまま誰にも見えない。取得側の状態をそのまま返す。
+exit ${captured:-1}
