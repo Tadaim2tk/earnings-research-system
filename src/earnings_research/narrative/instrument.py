@@ -44,21 +44,33 @@ MAX_TOKENS = 300
 # 測定器としては切る。
 ENABLE_THINKING = False
 
+# **明確化のつもりの一文が測定を壊した。** 「無ければ空配列」を足した版
+# （`5f986834218c05b5`）を同じ103件に当てたところ、追い風が0件の文書が 21/74 から
+# **51/74** へ増え、平均件数が 1.85 → 1.41 へ落ちた。旧版で理由を挙げていた32件が
+# 0件になり、逆は2件だけだった。方向の項目（`sales_direction` 100%、
+# `profit_direction` 99%）は動かず、**理由の列挙だけが壊れた**。
+# スキーマを丁寧に書いたつもりが、モデルを空の答えへ寄せていた。
+# プロンプトを版に含めてある理由が、そのまま実演された形である。
 PROMPT = """次は日本企業の決算短信の「経営成績に関する説明」です。書かれている
 ことだけを抜き出してください。書かれていないことは推測せず "不明" とすること。
 
 以下のJSONだけを出力（前置き・説明・コードフェンス不要）:
 {"sales_direction":"増加|減少|横ばい|不明",
  "profit_direction":"増加|減少|横ばい|不明",
- "tailwinds":["会社が挙げた追い風を原文の語で、最大6件。無ければ空配列"],
- "headwinds":["会社が挙げた逆風を原文の語で、最大6件。無ければ空配列"],
+ "tailwinds":["会社が挙げた追い風を原文の語で、最大6件"],
+ "headwinds":["会社が挙げた逆風を原文の語で、最大6件"],
  "one_off":"有|無|不明",
  "outlook_mention":"上方|下方|据置|言及なし"}"""
 
 DIRECTIONS = ("増加", "減少", "横ばい", "不明")
 PRESENCE = ("有", "無", "不明")
 OUTLOOK = ("上方", "下方", "据置", "言及なし")
-MAX_REASONS = 6
+# **反復を潰すのは重複排除の仕事で、件数上限の仕事ではない。** 上限6で落ちた5件を
+# 実際に見たところ、4件は 8〜10 個の別々の逆風（中東情勢／物価上昇／インフレ再燃…）
+# を挙げた正当な列挙で、暴走していたのは1件だけだった——「黒字化」が3回繰り返され
+# ていた。上限だけで両方を捌こうとすると、正当な列挙を捨てるか暴走を通すかになる。
+# 重複を先に落とし、そのうえで緩めの上限を置く。
+MAX_REASONS = 10
 
 FIELDS: Dict[str, Tuple[str, ...]] = {
     "sales_direction": DIRECTIONS,
@@ -130,7 +142,12 @@ def parse(output: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
             return None, "%s が配列ではない" % name
         if any(not isinstance(v, str) for v in value):
             return None, "%s に文字列でない要素がある" % name
-        items = [v.strip() for v in value if v.strip()]
+        seen, items = set(), []
+        for raw in value:
+            item = raw.strip()
+            if item and item not in seen:
+                seen.add(item)
+                items.append(item)
         if len(items) > MAX_REASONS:
             return None, "%s が %d 件を超えている" % (name, MAX_REASONS)
         facts[name] = items
