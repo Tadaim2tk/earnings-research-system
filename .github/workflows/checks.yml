@@ -132,6 +132,79 @@ jobs:
             --registry-dir data/prospective_hypotheses \
             --trials-dir data/prospective_hypotheses/trials
 
+      - name: Every committed evidence capture still holds what it captured
+        # Zero captures today: the population source and the evidence source
+        # are both external and neither has had its terms reviewed, so nothing
+        # is fetched yet. The step is here first because what it protects is
+        # lost by the day — a disclosure page is replaced, and the text a model
+        # read is not recoverable from the verdict it produced.
+        #
+        # Two halves. The first verifies each capture as it stands: a
+        # population event nobody attempted, a bundle for an event outside that
+        # population, evidence read before the population was fixed, a bundle
+        # naming another population, content that no longer hashes to its own
+        # digest.
+        #
+        # The second compares against the base commit, because the first half
+        # can only see what is in this checkout. A PR that deleted a capture
+        # directory outright made the loop verify zero captures and pass, and
+        # one that rewrote old ledger rows while recomputing their hashes
+        # passed too — self-consistent, and no longer what was captured. So an
+        # existing population must still be there and byte-identical, and an
+        # existing ledger may only have lines appended after the ones it had.
+        run: |
+          set -euo pipefail
+          verified=0
+          for manifest in $(find data/evidence -name population.json | sort); do
+            echo "verifying $(dirname "$manifest")"
+            python -m earnings_research.cli verify-evidence-capture \
+              --manifest "$manifest" \
+              --bundles "$(dirname "$manifest")/bundles.jsonl"
+            verified=$((verified + 1))
+          done
+          echo "verified $verified evidence captures"
+
+          base='${{ github.event.pull_request.base.sha }}'
+          if [ -z "$base" ]; then
+            base=$(git rev-parse --verify --quiet 'HEAD~1^{commit}' || true)
+          fi
+          if [ -z "$base" ]; then
+            echo "no predecessor commit to compare against"
+            exit 0
+          fi
+          git cat-file -e "$base^{commit}"
+          workdir=$(mktemp -d)
+          kept=0
+          for path in $(git ls-tree -r --name-only "$base" -- data/evidence/ | sort); do
+            case "$path" in
+              */population.json)
+                if [ ! -f "$path" ]; then
+                  echo "::error::$path existed in the base and is gone; a fixed population cannot be removed"
+                  exit 1
+                fi
+                git show "$base:$path" > "$workdir/base_population.json"
+                if ! cmp -s "$workdir/base_population.json" "$path"; then
+                  echo "::error::$path changed; a fixed population cannot be rewritten"
+                  exit 1
+                fi
+                kept=$((kept + 1))
+                ;;
+              */bundles.jsonl)
+                if [ ! -f "$path" ]; then
+                  echo "::error::$path existed in the base and is gone; the ledger is append-only"
+                  exit 1
+                fi
+                git show "$base:$path" > "$workdir/base_bundles.jsonl"
+                lines=$(wc -l < "$workdir/base_bundles.jsonl")
+                if ! head -n "$lines" "$path" | cmp -s - "$workdir/base_bundles.jsonl"; then
+                  echo "::error::$path no longer starts with the lines it had; the ledger is append-only"
+                  exit 1
+                fi
+                ;;
+            esac
+          done
+          echo "carried $kept populations forward unchanged"
+
       - name: A successor registry retires nothing it inherited
         # Runs when the registry directory moved. A successor is by definition
         # a NEW file — the frozen one is never edited — so looking it up in the

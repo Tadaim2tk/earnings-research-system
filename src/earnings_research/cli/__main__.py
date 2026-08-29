@@ -24,6 +24,7 @@ from earnings_research.earnings_evaluation import (
 from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
+from earnings_research.evidence.store import verify as verify_evidence_capture
 from earnings_research.legacy_research import (
     migrate_legacy_os,
     rebuild_reports,
@@ -322,6 +323,13 @@ def main(argv=None) -> int:
     stop_rule_parser.add_argument("--previous-registry", required=True, type=Path)
     stop_rule_parser.add_argument("--registry", required=True, type=Path)
 
+    evidence_parser = subparsers.add_parser(
+        "verify-evidence-capture",
+        help="Refuse a capture that lost a property it cannot get back.",
+    )
+    evidence_parser.add_argument("--manifest", required=True, type=Path)
+    evidence_parser.add_argument("--bundles", required=True, type=Path)
+
     rule_freeze_parser = subparsers.add_parser(
         "verify-rule-freeze",
         help="Refuse a decision rule changed after its hypothesis began gathering evidence.",
@@ -609,6 +617,15 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError, KeyError) as exc:
             print("Source validity verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-evidence-capture":
+        try:
+            print(json.dumps(verify_evidence_capture(args.manifest, args.bundles),
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Evidence capture verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "verify-rule-freeze":
