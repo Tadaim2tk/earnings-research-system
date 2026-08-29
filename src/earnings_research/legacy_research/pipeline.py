@@ -8,7 +8,14 @@ from datetime import date
 from pathlib import Path
 
 from .importer import build_import, write_atomic_tree
-from .publishing import build_reports, reporting_date, write_reports
+from .publishing import (
+    ENTRY_MANIFEST,
+    ENTRY_PRICES,
+    build_reports,
+    reporting_date,
+    with_entry_prices,
+    write_reports,
+)
 
 
 def migrate_legacy_os(
@@ -21,11 +28,15 @@ def migrate_legacy_os(
     reports_output: Path,
     migration_recorded_at: str,
     as_of_date: date,
+    entry_prices: Path = ENTRY_PRICES,
+    entry_manifest: Path = ENTRY_MANIFEST,
 ):
     files, manifest, records, context_views = build_import(
         source_repo, source_commit, source_run_id, tso_repo, tso_commit, migration_recorded_at
     )
-    raw_rows = [record["raw_record"] for record in records]
+    raw_rows = with_entry_prices(
+        [record["raw_record"] for record in records], entry_prices, entry_manifest
+    )
     # The reports produced here are verified afterwards against the same
     # reports rebuilt from the committed migration, and that rebuild derives
     # its as-of from the record. A caller supplying a different one produced

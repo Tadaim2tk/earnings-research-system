@@ -91,6 +91,49 @@ def source_rows(wrong_name=False):
     return rows
 
 
+def fixture_sessions(tmp_path):
+    """A sessions file covering exactly the fixture's events.
+
+    Required, not optional: the rebuild refuses a price file that does not
+    account for every event in the record, because a truncated one would
+    publish smaller denominators as though the observations had not occurred.
+    """
+    import hashlib
+
+    rows = source_rows()
+    sessions = []
+    for index, row in enumerate(rows):
+        opening = 100 + (index * 3) % 11
+        sessions.append({
+            "schema_version": "legacy_event_sessions_v1",
+            "code": row["code"], "event_date": row["date"], "status": "ok",
+            "ticker": row["code"] + ".T", "source": "fixture", "auto_adjust": False,
+            "fetched_at": "2026-08-29T00:00:00+09:00", "first_offset": 0,
+            "sessions": [
+                {"offset": offset, "date": row["date"],
+                 "open": round(opening * (1 + offset / 100), 4),
+                 "close": round(opening * (1 + offset / 100 + 0.002), 4)}
+                for offset in (0, 1, 2, 5, 7, 20, 22)
+            ],
+            "derived": {},
+        })
+    directory = tmp_path / "prices"
+    directory.mkdir(parents=True, exist_ok=True)
+    prices = directory / "sessions.jsonl"
+    prices.write_text(
+        "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in sessions),
+        encoding="utf-8",
+    )
+    manifest = directory / "manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": "legacy_event_sessions_manifest_v1",
+        "source": "fixture", "event_count": len(sessions), "priced_count": len(sessions),
+        "sha256": hashlib.sha256(prices.read_bytes()).hexdigest(),
+        "accepted_discrepancies": [],
+    }, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return prices, manifest
+
+
 def fixture_as_of():
     """The last day these fixture rows cover.
 
@@ -187,7 +230,7 @@ def test_lossless_import_keeps_raw_history_and_context(tmp_path):
     reports = tmp_path / "reports"
     result = migrate_legacy_os(
         source, source_commit, "source-run-1", tso, tso_commit, output, reports,
-        "2026-08-26T08:00:00+09:00", fixture_as_of(),
+        "2026-08-26T08:00:00+09:00", fixture_as_of(), *fixture_sessions(tmp_path),
     )
     expected = len(source_rows())
     assert result["record_count"] == expected
@@ -221,7 +264,8 @@ def test_same_source_is_idempotent_but_changed_output_is_not_overwritten(tmp_pat
     output = tmp_path / "migration"
     kwargs = dict(source_repo=source, source_commit=source_commit, source_run_id="source-run-1", tso_repo=tso, tso_commit=tso_commit,
                   output_root=output, reports_output=tmp_path / "reports",
-                  migration_recorded_at="2026-08-26T08:00:00+09:00", as_of_date=fixture_as_of())
+                  migration_recorded_at="2026-08-26T08:00:00+09:00", as_of_date=fixture_as_of(),
+                      entry_prices=fixture_sessions(tmp_path)[0], entry_manifest=fixture_sessions(tmp_path)[1])
     migrate_legacy_os(**kwargs)
     migrate_legacy_os(**kwargs)
     (output / "legacy_records.jsonl").write_text("tampered\n", encoding="utf-8")
@@ -290,6 +334,8 @@ def test_cli_completes_one_integrated_migration(tmp_path):
         "--tso-repo", str(tso), "--tso-commit", tso_commit, "--output-root", str(output),
         "--reports-output", str(reports), "--migration-recorded-at", "2026-08-26T08:00:00+09:00",
         "--as-of-date", fixture_as_of().isoformat(),
+        "--entry-prices", str(fixture_sessions(tmp_path)[0]),
+        "--entry-manifest", str(fixture_sessions(tmp_path)[1]),
     ]) == 0
     assert json.loads((output / "migration_manifest.json").read_text(encoding="utf-8"))["prospective_records_created"] == 0
     assert main([
@@ -303,7 +349,7 @@ def test_verifier_rejects_tampered_committed_data(tmp_path):
     output = tmp_path / "migration"
     reports = tmp_path / "reports"
     migrate_legacy_os(source, source_commit, "source-run-1", tso, tso_commit, output, reports,
-                      "2026-08-26T08:00:00+09:00", fixture_as_of())
+                      "2026-08-26T08:00:00+09:00", fixture_as_of(), *fixture_sessions(tmp_path))
     with (output / "legacy_records.jsonl").open("a", encoding="utf-8") as handle:
         handle.write("{}\n")
     with pytest.raises(ValueError, match="hash mismatch"):
@@ -316,7 +362,7 @@ def test_verifier_rejects_tampered_report_outputs(tmp_path):
     output = tmp_path / "migration"
     reports = tmp_path / "reports"
     migrate_legacy_os(source, source_commit, "source-run-1", tso, tso_commit, output, reports,
-                      "2026-08-26T08:00:00+09:00", fixture_as_of())
+                      "2026-08-26T08:00:00+09:00", fixture_as_of(), *fixture_sessions(tmp_path))
     verify_legacy_migration(output, reports)
     (reports / "dashboard.md").write_text("tampered dashboard\n", encoding="utf-8")
     with pytest.raises(ValueError, match="legacy report output hash mismatch: dashboard.md"):
@@ -329,7 +375,7 @@ def test_verifier_rejects_tampered_publishing_parity(tmp_path):
     output = tmp_path / "migration"
     reports = tmp_path / "reports"
     migrate_legacy_os(source, source_commit, "source-run-1", tso, tso_commit, output, reports,
-                      "2026-08-26T08:00:00+09:00", fixture_as_of())
+                      "2026-08-26T08:00:00+09:00", fixture_as_of(), *fixture_sessions(tmp_path))
     parity_path = reports / "publishing_parity.json"
     tampered = json.loads(parity_path.read_text(encoding="utf-8"))
     for item in tampered["outputs"].values():
@@ -550,6 +596,8 @@ def test_a_migration_as_of_that_disagrees_with_the_record_is_refused(tmp_path, c
         "--output-root", str(tmp_path / "out"), "--reports-output", str(tmp_path / "rep"),
         "--migration-recorded-at", "2026-08-26T08:00:00+09:00",
         "--as-of-date", (fixture_as_of() + _td(days=3)).isoformat(),
+        "--entry-prices", str(fixture_sessions(tmp_path)[0]),
+        "--entry-manifest", str(fixture_sessions(tmp_path)[1]),
     ]
     assert main(args) == 1
     assert "does not match the last day the record covers" in capsys.readouterr().err
@@ -568,5 +616,7 @@ def test_a_migration_and_a_rebuild_produce_the_same_reports(tmp_path):
         "--tso-repo", str(tso), "--tso-commit", tso_commit, "--output-root", str(output),
         "--reports-output", str(reports), "--migration-recorded-at", "2026-08-26T08:00:00+09:00",
         "--as-of-date", fixture_as_of().isoformat(),
+        "--entry-prices", str(fixture_sessions(tmp_path)[0]),
+        "--entry-manifest", str(fixture_sessions(tmp_path)[1]),
     ]) == 0
-    assert verify_reports(output, reports)["status"] == "verified"
+    assert verify_reports(output, reports, *fixture_sessions(tmp_path))["status"] == "verified"

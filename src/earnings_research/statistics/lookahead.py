@@ -31,6 +31,34 @@ RETURN_ANCHOR: Dict[str, str] = {
     "open_d20": "next_open",
     "close_d5": "next_close",
     "close_d20": "next_close",
+    # Named by session offset, and deliberately not by what those sessions are
+    # supposed to mean.
+    #
+    # An earlier draft called these `decision_d1_close__entry_d2_open__…`, on
+    # the reasoning that the disclosure lands after i0's close, i0+1 reacts,
+    # the reaction is read off its close and the order fills at i0+2's open.
+    # LEGACY_OS_INTEGRATION.md says the record cannot support that: there is no
+    # announcement session, and `date` may be a before-open, intraday or
+    # after-close event. Under a before-open disclosure, i0+1 is not the first
+    # reacting session and i0+2's open is simply a delayed entry.
+    #
+    # So the names say what is certain — which sessions the two prices come
+    # from — and nothing about which of them is "the fill after the news".
+    # That reading is an assumption, recorded in ERS-ADR-0058, and it is what
+    # would let these be called execution returns once announcement times exist
+    # to stratify on.
+    #
+    # The horizon is written as an offset for the same reason. "d5" alone meant
+    # a five-session hold from the previous close, four from the first open and
+    # three from i0+2, all printed in one table, so a reader comparing anchors
+    # was comparing entry and duration at once and could not tell which moved.
+    "entry_i0p2_open__exit_i0p5_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p20_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p3_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p4_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p7_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p12_close": "i0p2_open",
+    "entry_i0p2_open__exit_i0p22_close": "i0p2_open",
 }
 
 # What each cohort variable is derived from. A cohort split on the gap is
@@ -174,7 +202,56 @@ RETURN_EXIT: Dict[str, str] = {
     "open_d20": "d20_close",
     "close_d5": "d5_close",
     "close_d20": "d20_close",
+    # Two exits from the same entry, on purpose. i0+5 and i0+20 are the points
+    # the record was built around, which is what makes the entry comparison work
+    # — same exit, only the entry moves. i0+7 and i0+22 are five and twenty
+    # sessions from i0+2, which is what a position actually holds — same entry,
+    # only the duration moves.
+    #
+    # Keeping both is the point. With only the first pair, "the ranking orders
+    # at this entry" and "the ranking orders over a three-session hold" are one
+    # observation and cannot be separated.
+    "entry_i0p2_open__exit_i0p5_close": "d5_close",
+    "entry_i0p2_open__exit_i0p20_close": "d20_close",
+    "entry_i0p2_open__exit_i0p3_close": "i0p3_close",
+    "entry_i0p2_open__exit_i0p4_close": "i0p4_close",
+    "entry_i0p2_open__exit_i0p7_close": "i0p7_close",
+    "entry_i0p2_open__exit_i0p12_close": "i0p12_close",
+    "entry_i0p2_open__exit_i0p22_close": "i0p22_close",
 }
+
+
+# What each series compares, so the two questions stay apart. A view that mixes
+# them answers neither: a difference could be the entry or the duration.
+COMPARISON_AXIS: Dict[str, str] = {
+    # Same exit, the entry moves — which session to get in on.
+    "entry": (
+        "open_d5", "close_d5", "entry_i0p2_open__exit_i0p5_close",
+        "open_d20", "close_d20", "entry_i0p2_open__exit_i0p20_close",
+    ),
+    # Same entry, the duration moves — how long is it best to hold.
+    # Six points rather than two, because "how long to hold" is a shape and two
+    # points cannot show one. 1, 2, 3, 5, 10 and 20 sessions from the same entry.
+    "duration": (
+        "entry_i0p2_open__exit_i0p3_close",
+        "entry_i0p2_open__exit_i0p4_close",
+        "entry_i0p2_open__exit_i0p5_close",
+        "entry_i0p2_open__exit_i0p7_close",
+        "entry_i0p2_open__exit_i0p12_close",
+        "entry_i0p2_open__exit_i0p22_close",
+    ),
+}
+
+
+# The fields a row does not arrive with and has to be given. The source CSV
+# carries the previous-close returns as columns; everything else is derived
+# from the price pair declared above. Read off RETURN_ANCHOR rather than listed
+# again, because a list beside a table is a second place to forget: the entry
+# anchor was added to the table and the aggregation went on computing the five
+# fields it had been written with, reporting the new one as absent everywhere.
+DERIVED_FIELDS = tuple(
+    field for field, anchor in RETURN_ANCHOR.items() if anchor != "prev_close"
+)
 
 
 def prices_for(outcome_field: str) -> tuple:

@@ -59,6 +59,13 @@ from earnings_research.monitoring.operational_cli import (
 from earnings_research.validation.validator import load_spec, validate_dataset, validate_file
 
 
+def _entry_paths(args):
+    """The fetched-session paths for this call, defaulted to the committed ones."""
+    from earnings_research.legacy_research.publishing import ENTRY_MANIFEST, ENTRY_PRICES
+
+    return (args.entry_prices or ENTRY_PRICES, args.entry_manifest or ENTRY_MANIFEST)
+
+
 def main(argv=None) -> int:
     """Run the CLI."""
     parser = argparse.ArgumentParser(prog="python -m earnings_research.cli")
@@ -233,6 +240,11 @@ def main(argv=None) -> int:
     legacy_parser.add_argument("--reports-output", required=True, type=Path)
     legacy_parser.add_argument("--migration-recorded-at", required=True)
     legacy_parser.add_argument("--as-of-date", required=True, type=date.fromisoformat)
+    # Where the fetched sessions live. Defaulted rather than required, because
+    # every real run uses the committed file; a test or a re-fetch under review
+    # needs to point somewhere else without editing a module constant.
+    legacy_parser.add_argument("--entry-prices", type=Path, default=None)
+    legacy_parser.add_argument("--entry-manifest", type=Path, default=None)
 
     legacy_verify_parser = subparsers.add_parser(
         "verify-legacy-migration",
@@ -261,6 +273,8 @@ def main(argv=None) -> int:
     )
     reports_parser.add_argument("--input-root", required=True, type=Path)
     reports_parser.add_argument("--output-dir", required=True, type=Path)
+    reports_parser.add_argument("--entry-prices", type=Path, default=None)
+    reports_parser.add_argument("--entry-manifest", type=Path, default=None)
 
     reports_verify_parser = subparsers.add_parser(
         "verify-legacy-reports",
@@ -268,6 +282,8 @@ def main(argv=None) -> int:
     )
     reports_verify_parser.add_argument("--input-root", required=True, type=Path)
     reports_verify_parser.add_argument("--output-dir", required=True, type=Path)
+    reports_verify_parser.add_argument("--entry-prices", type=Path, default=None)
+    reports_verify_parser.add_argument("--entry-manifest", type=Path, default=None)
 
     hypothesis_registry_parser = subparsers.add_parser(
         "build-hypothesis-registry",
@@ -487,6 +503,8 @@ def main(argv=None) -> int:
                 reports_output=args.reports_output,
                 migration_recorded_at=args.migration_recorded_at,
                 as_of_date=args.as_of_date,
+                **({"entry_prices": args.entry_prices} if args.entry_prices else {}),
+                **({"entry_manifest": args.entry_manifest} if args.entry_manifest else {}),
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
@@ -514,7 +532,7 @@ def main(argv=None) -> int:
             return 1
     if args.command == "rebuild-legacy-reports":
         try:
-            reports = rebuild_reports(args.input_root)
+            reports = rebuild_reports(args.input_root, *_entry_paths(args))
             write_reports(args.output_dir, reports)
             print(json.dumps({"status": "written", "reports": sorted(reports)},
                              ensure_ascii=False, sort_keys=True))
@@ -525,7 +543,7 @@ def main(argv=None) -> int:
             return 1
     if args.command == "verify-legacy-reports":
         try:
-            print(json.dumps(verify_reports(args.input_root, args.output_dir),
+            print(json.dumps(verify_reports(args.input_root, args.output_dir, *_entry_paths(args)),
                              ensure_ascii=False, sort_keys=True))
             return 0
         except (OSError, ValueError, RuntimeError, KeyError) as exc:
