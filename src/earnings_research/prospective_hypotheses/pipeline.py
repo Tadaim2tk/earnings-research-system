@@ -6,12 +6,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .evaluator import evaluate_observation, stop_rule_relaxations, summarize_trials
+from .evaluator import evaluate_observation, successor_registry_problems, summarize_trials
 from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
     HypothesisTrialBundle,
 )
+from .freeze import evaluation_started_at, rule_freeze_violations
 from .registry import build_registry, load_knowledge
 from earnings_research.statistics.lookahead import rules_digest
 from .source_validity import (
@@ -53,13 +54,20 @@ def build_registry_file(knowledge_path: Path, output_path: Path, frozen_at: date
     return registry
 
 
-def verify_stop_rules_only_tightened(previous_path: Path, current_path: Path):
-    """Refuse a successor registry that widened any inherited stop rule.
+def verify_successor_registry(previous_path: Path, current_path: Path):
+    """Refuse a successor registry that quietly retires what it inherited.
 
     Separate from registry verification because that call re-derives the file
     from the frozen research and so only ever sees one version. This is the
     check a version bump has to pass, and it is a command rather than an
     argument so CI can require it on any change to the registry directory.
+
+    It no longer asks whether a rule was tightened or loosened. Any change to
+    a stop rule under an unchanged hypothesis version is refused, because a
+    rule that moves under trials already recorded scores those trials against
+    a rule that no longer exists. Whether trials actually exist is a question
+    about the record, not about two files, and `verify-rule-freeze` is what
+    asks it.
     """
     previous = HypothesisRegistry.model_validate_json(
         Path(previous_path).read_text(encoding="utf-8")
@@ -67,7 +75,7 @@ def verify_stop_rules_only_tightened(previous_path: Path, current_path: Path):
     current = HypothesisRegistry.model_validate_json(
         Path(current_path).read_text(encoding="utf-8")
     )
-    problems = stop_rule_relaxations(previous, current)
+    problems = successor_registry_problems(previous, current)
     if problems:
         raise ValueError("; ".join(problems))
     return current
@@ -143,6 +151,49 @@ def verify_source_validity_file(registry_path: Path, ledger_path: Path):
             )
         )
     return {"status": "judged", **rates(registry, ledger)}
+
+
+def verify_rule_freeze_files(registry_dir: Path, trials_dir: Path):
+    """Refuse any definition whose decision rules moved after evidence began.
+
+    Reads every registry in the directory rather than a named pair: a rule can
+    be changed by freezing a third registry, and a pairwise check sees only the
+    pair it was handed. Finding no registry is an error — a renamed directory
+    must not turn this into a check that passes because it looked at nothing.
+    """
+    registries = []
+    for path in sorted(Path(registry_dir).glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not {"registry_id", "hypotheses"} <= set(payload):
+            continue
+        registries.append(HypothesisRegistry.model_validate(payload))
+    if not registries:
+        raise ValueError("no hypothesis registry found under %s" % registry_dir)
+    bundles = load_trial_bundles(trials_dir)
+    problems = rule_freeze_violations(registries, bundles)
+    if problems:
+        raise ValueError("; ".join(problems))
+    started = {}
+    for registry in registries:
+        for definition in registry.hypotheses:
+            key = (definition.hypothesis_id, definition.hypothesis_version)
+            since = evaluation_started_at(key, bundles)
+            if since is not None:
+                started["%s v%d" % key] = since.isoformat()
+    return {
+        "status": "rules_frozen",
+        "registries": len(registries),
+        # Whether the directory is there at all, not just how many bundles were
+        # in it. A mistyped path returns zero bundles and every rule reads as
+        # still changeable, which is the same shape of silence as a check that
+        # verified one hard-coded registry while a second went unjudged.
+        "trials_dir_present": Path(trials_dir).exists(),
+        "trial_bundles": len(bundles),
+        # Named rather than counted. "0 started" and "12 frozen definitions,
+        # none of which has ever received a trial" read the same as a number
+        # and mean different things to whoever is looking at CI.
+        "evaluation_started": dict(sorted(started.items())),
+    }
 
 
 def load_trial_bundles(trials_dir: Path):

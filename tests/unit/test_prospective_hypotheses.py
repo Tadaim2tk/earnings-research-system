@@ -360,16 +360,16 @@ def test_a_stop_rule_states_every_term_and_refuses_unknown_ones():
         stop_rule(stop_when_halves_reversed=False)
 
 
-def test_a_stop_rule_may_be_tightened_but_never_relaxed():
-    """Otherwise a hypothesis is never wrong, only awaiting one more condition."""
-    from earnings_research.prospective_hypotheses.models import StopRule
+def test_a_stop_rule_carries_no_notion_of_being_strict_enough():
+    """`at_least_as_strict_as` is gone, and nothing may put it back.
 
-    frozen = stop_rule()
-    assert stop_rule(maximum_revisions=1).at_least_as_strict_as(frozen)
-    assert stop_rule(stop_below_reserved_effect_ratio=0.8).at_least_as_strict_as(frozen)
-    assert not stop_rule(maximum_revisions=99).at_least_as_strict_as(frozen)
-    assert not stop_rule(stop_below_reserved_effect_ratio=0.1).at_least_as_strict_as(frozen)
-    assert not stop_rule(stop_when_halves_reverse=False).at_least_as_strict_as(frozen)
+    It licensed changing a rule partway through, on the argument that a
+    stricter bar is a safe one. It is not: "the bar went up and it still
+    passed" is a different experiment from the one registered, and this
+    comparison cannot tell that apart from a bar moved to fit the answer. Once
+    trials exist a rule is fixed outright — see tests/unit/test_freeze.py.
+    """
+    assert not hasattr(stop_rule(), "at_least_as_strict_as")
 
 
 def stopping_definition(**changes):
@@ -449,13 +449,18 @@ def test_a_stop_rule_a_version_does_carry_is_frozen_with_it():
     assert strict.model_dump()["stop_rule"]["maximum_revisions"] == 1
 
 
-def superseding(stop_rule, version=2):
-    """A successor registry carrying one hypothesis at a bumped version."""
+def superseding(stop_rule, version=2, bump=1):
+    """A successor registry carrying one hypothesis.
+
+    `bump` is how far the hypothesis version moves, because that is now the
+    thing under test: a changed rule is permitted only where the version moved
+    with it.
+    """
     from earnings_research.prospective_hypotheses.models import HypothesisRegistry
 
     base = registry()
     definition = base.hypotheses[0].model_copy(deep=True)
-    definition.hypothesis_version += 1
+    definition.hypothesis_version += bump
     definition.assessment_rule = definition.assessment_rule.model_copy(
         update={"stop_rule": stop_rule}
     )
@@ -466,15 +471,34 @@ def superseding(stop_rule, version=2):
     return HypothesisRegistry.model_validate(payload)
 
 
-def test_a_successor_registry_cannot_relax_the_conditions_it_inherited(tmp_path):
-    """A registry holds one version per hypothesis, so the widening would land here."""
-    from earnings_research.prospective_hypotheses.evaluator import stop_rule_relaxations
-    from earnings_research.prospective_hypotheses.models import StopRule
+def test_a_successor_may_not_change_an_inherited_rule_under_the_same_version(tmp_path):
+    """Tightening is a change too.
+
+    The old form of this check passed `maximum_revisions=0` — a stricter rule —
+    because it asked whether the successor was at least as strict. That
+    exemption is gone: a bar raised partway through is as much a departure from
+    the registered test as a bar lowered, and this comparison cannot tell a
+    principled tightening from one chosen to fit the answer.
+    """
+    from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
 
     frozen = superseding(stop_rule(maximum_revisions=1), version=1)
-    assert stop_rule_relaxations(frozen, superseding(stop_rule(maximum_revisions=0))) == []
-    assert stop_rule_relaxations(frozen, superseding(stop_rule(maximum_revisions=9)))
-    assert stop_rule_relaxations(frozen, superseding(None))
+    assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=9)))
+    assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=0)))
+    assert successor_registry_problems(frozen, superseding(None))
+    # Unchanged is unchanged, whatever else the successor does.
+    assert successor_registry_problems(frozen, superseding(stop_rule(maximum_revisions=1))) == []
+
+
+def test_a_changed_rule_is_permitted_where_the_hypothesis_version_moves_with_it():
+    """The way a rule is supposed to change: a new version, which starts from
+    no trials rather than inheriting the ones judged under the old rule."""
+    from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
+
+    frozen = superseding(stop_rule(maximum_revisions=1), version=1)
+    assert successor_registry_problems(
+        frozen, superseding(stop_rule(maximum_revisions=9), bump=2)
+    ) == []
 
 
 def _written(tmp_path, name, registry):
@@ -483,43 +507,45 @@ def _written(tmp_path, name, registry):
     return path
 
 
-def test_the_cli_refuses_a_successor_that_widens_its_stop_rule(tmp_path, capsys):
+def test_the_cli_refuses_a_successor_that_changes_a_rule_in_place(tmp_path, capsys):
     """The check a version bump has to pass, reachable from CI."""
-    from earnings_research.prospective_hypotheses.models import StopRule
-
     earlier = _written(tmp_path, "v1.json", superseding(stop_rule(maximum_revisions=1), version=1))
     widened = _written(tmp_path, "v2.json", superseding(stop_rule(maximum_revisions=9)))
     tightened = _written(tmp_path, "v2b.json", superseding(stop_rule(maximum_revisions=0)))
+    bumped = _written(
+        tmp_path, "v2c.json", superseding(stop_rule(maximum_revisions=9), bump=2)
+    )
+    for path in (widened, tightened):
+        assert main([
+            "verify-successor-registry",
+            "--previous-registry", str(earlier),
+            "--registry", str(path),
+        ]) == 1
+        assert "changes the stop rule" in capsys.readouterr().err
     assert main([
-        "verify-stop-rule-tightening",
+        "verify-successor-registry",
         "--previous-registry", str(earlier),
-        "--registry", str(widened),
-    ]) == 1
-    assert "relaxes the stop rule" in capsys.readouterr().err
-    assert main([
-        "verify-stop-rule-tightening",
-        "--previous-registry", str(earlier),
-        "--registry", str(tightened),
+        "--registry", str(bumped),
     ]) == 0
 
 
 def test_a_successor_may_not_quietly_drop_an_inherited_stop_rule(tmp_path):
     from earnings_research.prospective_hypotheses.models import StopRule
-    from earnings_research.prospective_hypotheses.pipeline import verify_stop_rules_only_tightened
+    from earnings_research.prospective_hypotheses.pipeline import verify_successor_registry
 
     earlier = _written(tmp_path, "v1.json", superseding(stop_rule(), version=1))
     dropped = _written(tmp_path, "v2.json", superseding(None))
     with pytest.raises(ValueError, match="drops the stop rule"):
-        verify_stop_rules_only_tightened(earlier, dropped)
+        verify_successor_registry(earlier, dropped)
 
 
 def test_a_registry_that_is_not_a_successor_is_refused(tmp_path):
     from earnings_research.prospective_hypotheses.models import StopRule
-    from earnings_research.prospective_hypotheses.pipeline import verify_stop_rules_only_tightened
+    from earnings_research.prospective_hypotheses.pipeline import verify_successor_registry
 
     same = superseding(stop_rule(), version=1)
     with pytest.raises(ValueError, match="earlier registry_version"):
-        verify_stop_rules_only_tightened(
+        verify_successor_registry(
             _written(tmp_path, "a.json", same), _written(tmp_path, "b.json", same)
         )
 
@@ -660,7 +686,7 @@ def test_the_frozen_registry_hashes_to_a_value_recorded_outside_the_code():
 def test_a_successor_cannot_drop_the_hypotheses_whose_rules_it_inherited():
     """Deleting a definition retires its stop rule, which is the largest
     relaxation available, and it was being reported as tightening."""
-    from earnings_research.prospective_hypotheses.evaluator import stop_rule_relaxations
+    from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
     from earnings_research.prospective_hypotheses.models import HypothesisRegistry
 
     previous = superseding(stop_rule(), version=1)
@@ -668,19 +694,19 @@ def test_a_successor_cannot_drop_the_hypotheses_whose_rules_it_inherited():
     replaced["registry_version"] = 2
     # A successor that keeps a hypothesis, but not the one that carried a rule.
     replaced["hypotheses"][0]["hypothesis_id"] = "LRH-SOMETHING-NEW"
-    problems = stop_rule_relaxations(previous, HypothesisRegistry.model_validate(replaced))
+    problems = successor_registry_problems(previous, HypothesisRegistry.model_validate(replaced))
     assert any("was dropped" in problem for problem in problems)
 
 
 def test_an_unrelated_registry_is_not_a_successor():
     """Only the version numbers were compared, so a registry sharing no
     identifiers at all passed by having a larger number."""
-    from earnings_research.prospective_hypotheses.evaluator import stop_rule_relaxations
+    from earnings_research.prospective_hypotheses.evaluator import successor_registry_problems
 
     previous = superseding(stop_rule(), version=1)
     stranger = superseding(stop_rule(stop_when_halves_reverse=False), version=9)
     stranger.registry_id = "SOMETHING-ELSE"
-    problems = stop_rule_relaxations(previous, stranger)
+    problems = successor_registry_problems(previous, stranger)
     assert any("is not a successor" in problem for problem in problems)
 
 

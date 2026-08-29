@@ -37,8 +37,14 @@ class StopRule(BaseModel):
 
     Without this, a hypothesis is never wrong — it is only ever awaiting more
     data or one more condition. The conditions are frozen with the definition
-    precisely because they are easy to relax once the numbers are in, and a
-    later version may only tighten them.
+    precisely because they are easy to relax once the numbers are in.
+
+    There used to be an `at_least_as_strict_as` here, permitting a successor to
+    tighten what it inherited. It is gone. Tightening is still a change made in
+    sight of the result, and a test whose bar moved partway through is not the
+    test that was registered — whether the bar went up or down. Once trials
+    exist the rule is fixed outright; changing it means a new hypothesis
+    version, from no trials. `freeze.py` is where that is enforced.
     """
 
     # No defaults, and no unknown keys. With defaults, a frozen registry that
@@ -58,14 +64,6 @@ class StopRule(BaseModel):
     # Revisions are how a dead hypothesis stays alive. After this many the
     # question has to be asked again from scratch, not patched.
     maximum_revisions: int = Field(ge=0)
-
-    def at_least_as_strict_as(self, earlier: "StopRule") -> bool:
-        """A later version may tighten these, never loosen them."""
-        return (
-            (self.stop_when_halves_reverse or not earlier.stop_when_halves_reverse)
-            and self.stop_below_reserved_effect_ratio >= earlier.stop_below_reserved_effect_ratio
-            and self.maximum_revisions <= earlier.maximum_revisions
-        )
 
 
 class AssessmentRule(BaseModel):
@@ -327,6 +325,12 @@ class HypothesisStatus(BaseModel):
     prospective_positive_rate_effect: Optional[float]
     distinct_event_quarters: int = Field(ge=0)
     last_evaluated_at: Optional[datetime]
+    # When this definition began gathering evidence, and so when its stop and
+    # promotion rules stopped being changeable. Reported here because a reader
+    # deciding whether a rule may still move needs it, but it is derived from
+    # the trials on every snapshot and never read back in — a stored copy could
+    # be edited to a later date and unfreeze the rules behind it.
+    evaluation_started_at: Optional[datetime] = None
     production_review_eligible: Literal[False] = False
     # Why this hypothesis is finished under its own frozen stop rule, or None
     # while it stays open. Versions carrying no stop rule are always None.

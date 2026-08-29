@@ -37,7 +37,8 @@ from earnings_research.prospective_hypotheses import (
     evaluate_source_validity_file,
     verify_registry_file,
     verify_source_validity_file,
-    verify_stop_rules_only_tightened,
+    verify_rule_freeze_files,
+    verify_successor_registry,
 )
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
@@ -282,11 +283,18 @@ def main(argv=None) -> int:
     source_validity_verify_parser.add_argument("--ledger", required=True, type=Path)
 
     stop_rule_parser = subparsers.add_parser(
-        "verify-stop-rule-tightening",
+        "verify-successor-registry",
         help="Refuse a successor registry that widened an inherited stop rule.",
     )
     stop_rule_parser.add_argument("--previous-registry", required=True, type=Path)
     stop_rule_parser.add_argument("--registry", required=True, type=Path)
+
+    rule_freeze_parser = subparsers.add_parser(
+        "verify-rule-freeze",
+        help="Refuse a decision rule changed after its hypothesis began gathering evidence.",
+    )
+    rule_freeze_parser.add_argument("--registry-dir", required=True, type=Path)
+    rule_freeze_parser.add_argument("--trials-dir", required=True, type=Path)
 
     hypothesis_evaluate_parser = subparsers.add_parser(
         "evaluate-hypothesis-event",
@@ -548,17 +556,28 @@ def main(argv=None) -> int:
             print("Source validity verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
-    if args.command == "verify-stop-rule-tightening":
+    if args.command == "verify-rule-freeze":
         try:
-            registry = verify_stop_rules_only_tightened(args.previous_registry, args.registry)
+            print(json.dumps(
+                verify_rule_freeze_files(args.registry_dir, args.trials_dir),
+                ensure_ascii=False, sort_keys=True,
+            ))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Decision rule freeze verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-successor-registry":
+        try:
+            registry = verify_successor_registry(args.previous_registry, args.registry)
             print(json.dumps({
                 "registry_id": registry.registry_id,
                 "registry_version": registry.registry_version,
-                "status": "stop_rules_only_tightened",
+                "status": "successor_retires_nothing",
             }, ensure_ascii=False, sort_keys=True))
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
-            print("Stop rule verification failed:", file=sys.stderr)
+            print("Successor registry verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "evaluate-hypothesis-event":

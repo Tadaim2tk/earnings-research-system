@@ -101,7 +101,24 @@ jobs:
           done
           echo "verified $verified registries"
 
-      - name: A successor registry only tightens its stop rules
+      - name: No decision rule changed after its hypothesis began gathering evidence
+        # A stop rule says when a hypothesis is finished; a promotion rule says
+        # when it has earned a production change. Once trials exist, neither
+        # may move — tightening included, because a bar raised partway through
+        # is still a bar moved in sight of the result.
+        #
+        # There are no committed trials yet, so today this passes over an empty
+        # record. It is here now because that is the moment it costs nothing:
+        # the first trial to land is the one that fixes a rule, and a check
+        # added afterwards would be added with something already to lose. The
+        # logic itself is exercised against a synthetic registry in
+        # tests/unit/test_freeze.py, which CI runs above.
+        run: |
+          python -m earnings_research.cli verify-rule-freeze \
+            --registry-dir data/prospective_hypotheses \
+            --trials-dir data/prospective_hypotheses/trials
+
+      - name: A successor registry retires nothing it inherited
         # Runs when the registry directory moved. A successor is by definition
         # a NEW file — the frozen one is never edited — so looking it up in the
         # base commit finds nothing, and the earlier form skipped exactly the
@@ -156,7 +173,7 @@ jobs:
               continue
             fi
             echo "comparing $path (v$version) against $id v$best from the base"
-            python -m earnings_research.cli verify-stop-rule-tightening \
+            python -m earnings_research.cli verify-successor-registry \
               --previous-registry "$previous" --registry "$path"
             checked=$((checked + 1))
           done

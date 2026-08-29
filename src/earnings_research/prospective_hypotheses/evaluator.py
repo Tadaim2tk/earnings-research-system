@@ -7,6 +7,7 @@ from statistics import fmean
 
 from earnings_research.statistics.stability import assess
 
+from .freeze import evaluation_started_at
 from .models import (
     CompletedEventObservation,
     HypothesisRegistry,
@@ -196,13 +197,15 @@ def _halves_reversed(definition, target, comparator):
     return (first > 0) != (second > 0)
 
 
-def stop_rule_relaxations(previous, current):
-    """Report every way a successor registry loosened what it inherited.
+def successor_registry_problems(previous, current):
+    """Report every way a successor registry retires what it inherited.
 
-    Widening a condition is the obvious way. Dropping the hypothesis entirely
-    is the larger one and was passing silently: a successor keeping one of
-    nineteen definitions, or renaming every identifier so that nothing matched,
-    was reported as having only tightened. So is comparing against an unrelated
+    Changing a condition is the obvious way, and the criterion is change, not
+    loosening: a bar raised partway through is as much a departure from the
+    registered test as a bar lowered. Dropping the hypothesis entirely is the
+    larger way and was passing silently — a successor keeping one of nineteen
+    definitions, or renaming every identifier so that nothing matched, was
+    reported as having only tightened. So is comparing against an unrelated
     registry, which the version check alone cannot catch.
     """
     problems = []
@@ -234,10 +237,17 @@ def stop_rule_relaxations(previous, current):
                 "%s v%d drops the stop rule frozen in v%d"
                 % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
             )
-        elif not current_rule.at_least_as_strict_as(was):
+        elif current_rule != was and item.hypothesis_version == before.hypothesis_version:
+            # Not "relaxes" — any change at all, and only where the version did
+            # not move. A rule that has to change gets a new hypothesis version
+            # so its trials start from zero; changing one in place leaves
+            # earlier trials scored against a rule that no longer exists. The
+            # tightening exemption that used to sit here let exactly that
+            # happen, on the argument that a stricter bar is a safe one.
             problems.append(
-                "%s v%d relaxes the stop rule frozen in v%d"
-                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
+                "%s v%d changes the stop rule frozen under the same version; a "
+                "changed rule needs a new hypothesis version"
+                % (item.hypothesis_id, item.hypothesis_version)
             )
     return problems
 
@@ -332,6 +342,12 @@ def summarize_trials(registry, bundles, evaluated_at):
             prospective_positive_rate_effect=_rounded(target_rate - comparator_rate) if target and comparator else None,
             distinct_event_quarters=len({item.event_quarter for item in items}),
             last_evaluated_at=max((item.recorded_at for item in items), default=None),
+            # The same derivation the freeze check uses, called rather than
+            # repeated: two copies of "when did this start" is exactly the
+            # second source of truth this design exists to avoid.
+            evaluation_started_at=evaluation_started_at(
+                (definition.hypothesis_id, definition.hypothesis_version), bundles
+            ),
             production_review_eligible=False,
             stop_reason=stop_reason,
             stop_conditions_evaluated=evaluated,
