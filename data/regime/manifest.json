@@ -1,0 +1,35 @@
+{
+  "days": 121,
+  "end": "2026-09-01",
+  "retrieved_at": "2026-08-29T22:42:08.268992+09:00",
+  "schema_version": "regime_daily_v1",
+  "scope": "retired-record research only; not connected to baseline/lock/evidence/scoring",
+  "series_failed": [],
+  "series_fetched": [
+    "1306.T",
+    "1343.T",
+    "BTC-USD",
+    "CL=F",
+    "DX-Y.NYB",
+    "ETH-USD",
+    "GC=F",
+    "HG=F",
+    "JPY=X",
+    "SI=F",
+    "SOL-USD",
+    "XRP-USD",
+    "^FVX",
+    "^GSPC",
+    "^IXIC",
+    "^N225",
+    "^SOX",
+    "^TNX",
+    "^TYX",
+    "^VIX"
+  ],
+  "source": "yfinance",
+  "start": "2026-05-01",
+  "unavailable_axes": {
+    "日経VI": "Yahoo Finance に系列が無い（^JNIV は 404）。米VIXで代理している"
+  }
+}
