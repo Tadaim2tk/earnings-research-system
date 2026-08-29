@@ -26,7 +26,10 @@ from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
 from earnings_research.legacy_research import (
     migrate_legacy_os,
+    rebuild_reports,
     verify_legacy_migration,
+    verify_reports,
+    write_reports,
     verify_research_outputs,
     write_research_outputs,
 )
@@ -251,6 +254,20 @@ def main(argv=None) -> int:
     )
     legacy_research_verify_parser.add_argument("--input-root", required=True, type=Path)
     legacy_research_verify_parser.add_argument("--output-dir", required=True, type=Path)
+
+    reports_parser = subparsers.add_parser(
+        "rebuild-legacy-reports",
+        help="Regenerate the published reports from the committed migration alone.",
+    )
+    reports_parser.add_argument("--input-root", required=True, type=Path)
+    reports_parser.add_argument("--output-dir", required=True, type=Path)
+
+    reports_verify_parser = subparsers.add_parser(
+        "verify-legacy-reports",
+        help="Refuse committed reports the current code would not produce.",
+    )
+    reports_verify_parser.add_argument("--input-root", required=True, type=Path)
+    reports_verify_parser.add_argument("--output-dir", required=True, type=Path)
 
     hypothesis_registry_parser = subparsers.add_parser(
         "build-hypothesis-registry",
@@ -493,6 +510,26 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Legacy research analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "rebuild-legacy-reports":
+        try:
+            reports = rebuild_reports(args.input_root)
+            write_reports(args.output_dir, reports)
+            print(json.dumps({"status": "written", "reports": sorted(reports)},
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Legacy report rebuild failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-legacy-reports":
+        try:
+            print(json.dumps(verify_reports(args.input_root, args.output_dir),
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Legacy report verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "verify-legacy-research":

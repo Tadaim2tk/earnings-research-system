@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from .importer import build_import, write_atomic_tree
-from .publishing import build_reports, write_reports
+from .publishing import build_reports, reporting_date, write_reports
 
 
 def migrate_legacy_os(
@@ -26,6 +26,20 @@ def migrate_legacy_os(
         source_repo, source_commit, source_run_id, tso_repo, tso_commit, migration_recorded_at
     )
     raw_rows = [record["raw_record"] for record in records]
+    # The reports produced here are verified afterwards against the same
+    # reports rebuilt from the committed migration, and that rebuild derives
+    # its as-of from the record. A caller supplying a different one produced
+    # files that failed their own verification on the next run, and rebuilding
+    # them moved the weekly reporting window without saying so. Refused rather
+    # than quietly overridden: the caller stated a date, and being told it
+    # disagrees with the record is more use than having it replaced.
+    derived = reporting_date(raw_rows)
+    if as_of_date != derived:
+        raise ValueError(
+            "--as-of-date %s does not match the last day the record covers (%s); "
+            "the published reports are verified against a date derived from the "
+            "record, so the two have to agree" % (as_of_date, derived)
+        )
     source_outputs, reports, parity = build_reports(
         Path(source_repo), manifest["frozen_source_commit"], raw_rows, context_views, as_of_date
     )

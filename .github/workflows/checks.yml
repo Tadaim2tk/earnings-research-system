@@ -58,6 +58,20 @@ jobs:
             --input-root data/historical_research/earnings_research_os/v1 \
             --output-dir outputs/historical_research
 
+      - name: The published reports still match what the current code produces
+        # The reports a reader actually opens — dashboard, weekly, note draft,
+        # aggregation summary. They used to be generated only by
+        # migrate-legacy-os, which needs the retired repository and a TSO
+        # checkout at pinned commits; CI has neither, so nothing checked them.
+        # They sat committed for weeks describing a pipeline that had already
+        # been replaced, carrying figures measured from the previous close
+        # while the code measured from the open. This rebuilds them from the
+        # committed, hash-checked migration alone and refuses a mismatch.
+        run: |
+          python -m earnings_research.cli verify-legacy-reports \
+            --input-root data/historical_research/earnings_research_os/v1 \
+            --output-dir outputs/historical_research
+
       - name: The frozen registry still matches the research it came from
         run: |
           python -m earnings_research.cli verify-hypothesis-registry \
