@@ -26,6 +26,18 @@ from earnings_research.narrative.section import (
 )
 
 MODEL = "mlx-community/Qwen3-8B-4bit"
+# **リポジトリ名は可変である。** 同じ名前が別の重みやトークナイザに解決されても
+# 名前を hash する限り版は動かない——「重みが固定されているから再現できる」という
+# この層の前提が、そこで崩れる。解決済みの commit を固定する。
+MODEL_REVISION = "545dc4251c05440727734bcd94334791f6ab0192"
+# 生成側が変われば同じ重みでも出力が変わりうる。チャットテンプレートの適用も
+# トークナイザの版に依存する。版に含める。
+RUNTIME = {
+    "mlx-lm": "0.29.1",
+    "mlx": "0.29.3",
+    "transformers": "4.57.6",
+    "tokenizers": "0.22.2",
+}
 TEMPERATURE = 0.0
 MAX_TOKENS = 300
 # 思考モードは既定で入り、生成長を全部そこに使って答えに到達しないことがある。
@@ -38,15 +50,15 @@ PROMPT = """次は日本企業の決算短信の「経営成績に関する説�
 以下のJSONだけを出力（前置き・説明・コードフェンス不要）:
 {"sales_direction":"増加|減少|横ばい|不明",
  "profit_direction":"増加|減少|横ばい|不明",
- "tailwinds":["会社が挙げた追い風を原文の語で、最大4件"],
- "headwinds":["会社が挙げた逆風を原文の語で、最大4件"],
+ "tailwinds":["会社が挙げた追い風を原文の語で、最大6件。無ければ空配列"],
+ "headwinds":["会社が挙げた逆風を原文の語で、最大6件。無ければ空配列"],
  "one_off":"有|無|不明",
  "outlook_mention":"上方|下方|据置|言及なし"}"""
 
 DIRECTIONS = ("増加", "減少", "横ばい", "不明")
 PRESENCE = ("有", "無", "不明")
 OUTLOOK = ("上方", "下方", "据置", "言及なし")
-MAX_REASONS = 4
+MAX_REASONS = 6
 
 FIELDS: Dict[str, Tuple[str, ...]] = {
     "sales_direction": DIRECTIONS,
@@ -64,6 +76,8 @@ def instrument_version() -> str:
     """この測定器の版。どれか一つでも変われば別物になる。"""
     material = json.dumps({
         "model": MODEL,
+        "model_revision": MODEL_REVISION,
+        "runtime": RUNTIME,
         "prompt": PROMPT,
         "fields": {k: list(v) for k, v in sorted(FIELDS.items())},
         "lists": list(LISTS),
@@ -106,10 +120,17 @@ def parse(output: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
             return None, "%s が語彙の外: %r" % (name, value)
         facts[name] = value
     for name in LISTS:
-        value = payload.get(name, [])
+        # 欠けた鍵を空配列に読み替えない。**答えなかったことと「無かった」ことは
+        # 別である。** 既定値で埋めると、モデルが黙った場合が「理由を挙げな
+        # かった」という観測として記録される。
+        if name not in payload:
+            return None, "%s が無い" % name
+        value = payload[name]
         if not isinstance(value, list):
             return None, "%s が配列ではない" % name
-        items = [str(v).strip() for v in value if str(v).strip()]
+        if any(not isinstance(v, str) for v in value):
+            return None, "%s に文字列でない要素がある" % name
+        items = [v.strip() for v in value if v.strip()]
         if len(items) > MAX_REASONS:
             return None, "%s が %d 件を超えている" % (name, MAX_REASONS)
         facts[name] = items

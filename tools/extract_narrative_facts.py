@@ -8,9 +8,12 @@
 
     ~/.venvs/ers-llm/bin/python tools/extract_narrative_facts.py
 
-**版が変われば取り直す。** 出力に `instrument_version` を書き、一致するものだけ
-飛ばす。プロンプトや温度を変えたのに古い採点が残っていると、標本の途中で意味が
-変わる——それを避けるために版を digest にしてある。
+**版ごとに別のディレクトリへ書く。** 版が変わったときに同じ場所へ上書きすると、
+前の測定とその `extracted_at` が消える。版を変えて取り直すことは想定された運用
+なので、消す方に倒さない。
+
+**固定した revision と runtime が実際に一致するかを検査する。** 宣言だけ置いて
+実行時に確かめないと、別の重みで測ったものが同じ版を名乗って記録に入る。
 
 **評価はしない。** ここは Extracted Facts で、点にするのは Evaluation Policy の
 仕事である。
@@ -33,6 +36,25 @@ DOCUMENTS = Path.home() / ".ers-corpus/documents"
 FACTS = Path.home() / ".ers-corpus/facts"
 
 
+def runtime_mismatch():
+    """固定した runtime と実際の版の食い違い。
+
+    生成側が変われば同じ重みでも出力が変わりうる。宣言だけ置いて確かめないと、
+    別の runtime で測ったものが同じ版を名乗って記録に入る。
+    """
+    from importlib.metadata import PackageNotFoundError, version
+    out = []
+    for package, pinned in sorted(I.RUNTIME.items()):
+        try:
+            found = version(package)
+        except PackageNotFoundError:
+            out.append("%s 無し（固定は %s）" % (package, pinned))
+            continue
+        if found != pinned:
+            out.append("%s %s（固定は %s）" % (package, found, pinned))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--documents", default=str(DOCUMENTS))
@@ -41,14 +63,22 @@ def main():
     args = ap.parse_args()
 
     documents = sorted(Path(args.documents).glob("*.json"))
-    out = Path(args.facts)
+    # 版ごとに分ける。前の測定を消さない。
+    out = Path(args.facts) / I.INSTRUMENT_VERSION
     out.mkdir(parents=True, exist_ok=True)
     print("測定器 %s / 文書 %d件" % (I.INSTRUMENT_VERSION, len(documents)), flush=True)
+
+    mismatched = runtime_mismatch()
+    if mismatched:
+        print("固定した runtime と違う: %s" % ", ".join(mismatched), file=sys.stderr)
+        print("この版を名乗って測ってはいけない。", file=sys.stderr)
+        return 2
 
     from mlx_lm import generate, load
     from mlx_lm.sample_utils import make_sampler
 
-    model, tokeniser = load(I.MODEL)
+    # 重みを commit で固定する。リポジトリ名だけでは中身が変わりうる。
+    model, tokeniser = load(I.MODEL, revision=I.MODEL_REVISION)
     sampler = make_sampler(temp=I.TEMPERATURE)
 
     done = skipped = no_section = unreadable = 0

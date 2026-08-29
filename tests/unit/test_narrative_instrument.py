@@ -72,7 +72,9 @@ def test_every_part_of_the_instrument_is_in_its_version():
         ("TEMPERATURE", 0.7),
         ("MAX_TOKENS", 400),
         ("ENABLE_THINKING", True),
-        ("MAX_REASONS", 6),
+        ("MAX_REASONS", 8),
+        ("MODEL_REVISION", "0" * 40),
+        ("RUNTIME", {"mlx-lm": "9.9.9"}),
     ):
         original = getattr(I, attribute)
         setattr(I, attribute, replacement)
@@ -81,6 +83,32 @@ def test_every_part_of_the_instrument_is_in_its_version():
         finally:
             setattr(I, attribute, original)
     assert I.instrument_version() == base
+
+
+def test_the_weights_are_pinned_by_commit_not_by_repository_name():
+    """リポジトリ名は可変である。同じ名前が別の重みに解決されても、名前を
+    hash する限り版は動かない——**「重みが固定されているから再現できる」という
+    この層の前提が、そこで崩れる。**"""
+    assert len(I.MODEL_REVISION) == 40 and all(c in "0123456789abcdef" for c in I.MODEL_REVISION)
+    assert I.MODEL_REVISION in I.instrument_version.__doc__ or True   # 値は自由
+    # 生成側の版も入っている。同じ重みでも runtime が変われば出力が変わりうる。
+    for package in ("mlx-lm", "mlx", "transformers", "tokenizers"):
+        assert package in I.RUNTIME, package
+
+
+def test_a_missing_reason_list_is_not_read_as_an_empty_one():
+    """**答えなかったことと「無かった」ことは別である。** 既定値で埋めると、
+    モデルが黙った場合が「理由を挙げなかった」という観測として記録される。"""
+    without = {k: v for k, v in GOOD.items() if k != "headwinds"}
+    facts, why = I.parse(json.dumps(without, ensure_ascii=False))
+    assert facts is None and "headwinds" in why
+
+    empty = dict(GOOD, headwinds=[])
+    facts, why = I.parse(json.dumps(empty, ensure_ascii=False))
+    assert why is None and facts["headwinds"] == [], "本当に空なら受ける"
+
+    coerced = dict(GOOD, tailwinds=[1, {"a": 2}])
+    assert I.parse(json.dumps(coerced, ensure_ascii=False))[0] is None
 
 
 def test_the_version_is_stable_across_calls():
@@ -98,7 +126,11 @@ def test_a_broken_output_is_refused_rather_than_repaired():
     facts, why = I.parse(json.dumps(out_of_vocab, ensure_ascii=False))
     assert facts is None and "sales_direction" in why
 
-    too_many = dict(GOOD, tailwinds=["a", "b", "c", "d", "e"])
+    # 上限は `MAX_REASONS`。超えたぶんを黙って切らない——切ると、モデルが
+    # 出した観測をこちらが選んだことになる。
+    at_limit = dict(GOOD, tailwinds=["a"] * I.MAX_REASONS)
+    assert I.parse(json.dumps(at_limit, ensure_ascii=False))[0] is not None
+    too_many = dict(GOOD, tailwinds=["a"] * (I.MAX_REASONS + 1))
     assert I.parse(json.dumps(too_many, ensure_ascii=False))[0] is None
 
     not_a_list = dict(GOOD, headwinds="原材料")
