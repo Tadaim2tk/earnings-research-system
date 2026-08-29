@@ -64,6 +64,43 @@ jobs:
             --knowledge outputs/historical_research/research_knowledge.json \
             --registry data/prospective_hypotheses/legacy_research_v1.json
 
+      - name: Frozen knowledge has been judged under the current contamination rules
+        # Fails when the rules moved and nobody looked again, which is the
+        # moment knowledge frozen earlier silently stops being supportable. It
+        # does not write the ledger: the verdicts are produced by
+        # evaluate-source-validity and committed, so a change of standard
+        # arrives as a diff somebody reviews rather than as a file CI rewrote.
+        #
+        # Every registry in the directory, not one named path. Naming
+        # legacy_research_v1.json meant a v2 could be frozen, never judged, and
+        # merge with this step green — the standing check not covering the
+        # newly frozen knowledge it exists for. Finding none is an error too:
+        # a rename must not turn this step into a no-op that still reports
+        # success.
+        run: |
+          set -euo pipefail
+          registries=$(python - <<'PY'
+          import json, pathlib
+          for path in sorted(pathlib.Path("data/prospective_hypotheses").glob("*.json")):
+              data = json.loads(path.read_text(encoding="utf-8"))
+              if {"registry_id", "hypotheses"} <= set(data):
+                  print(path)
+          PY
+          )
+          if [ -z "$registries" ]; then
+            echo "::error::no hypothesis registry found under data/prospective_hypotheses/"
+            exit 1
+          fi
+          verified=0
+          for path in $registries; do
+            echo "verifying $path"
+            python -m earnings_research.cli verify-source-validity \
+              --registry "$path" \
+              --ledger data/prospective_hypotheses/source_validity.jsonl
+            verified=$((verified + 1))
+          done
+          echo "verified $verified registries"
+
       - name: A successor registry only tightens its stop rules
         # Runs when the registry directory moved. A successor is by definition
         # a NEW file — the frozen one is never edited — so looking it up in the

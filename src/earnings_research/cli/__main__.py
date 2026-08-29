@@ -34,7 +34,9 @@ from earnings_research.prospective_hypotheses import (
     build_registry_file,
     evaluate_observation_file,
     summarize_trials_file,
+    evaluate_source_validity_file,
     verify_registry_file,
+    verify_source_validity_file,
     verify_stop_rules_only_tightened,
 )
 
@@ -263,6 +265,21 @@ def main(argv=None) -> int:
     )
     hypothesis_verify_parser.add_argument("--knowledge", required=True, type=Path)
     hypothesis_verify_parser.add_argument("--registry", required=True, type=Path)
+
+    source_validity_parser = subparsers.add_parser(
+        "evaluate-source-validity",
+        help="Judge every frozen hypothesis under the current contamination rules.",
+    )
+    source_validity_parser.add_argument("--registry", required=True, type=Path)
+    source_validity_parser.add_argument("--ledger", required=True, type=Path)
+    source_validity_parser.add_argument("--evaluated-at", required=True)
+
+    source_validity_verify_parser = subparsers.add_parser(
+        "verify-source-validity",
+        help="Refuse a registry not judged under the current contamination rules.",
+    )
+    source_validity_verify_parser.add_argument("--registry", required=True, type=Path)
+    source_validity_verify_parser.add_argument("--ledger", required=True, type=Path)
 
     stop_rule_parser = subparsers.add_parser(
         "verify-stop-rule-tightening",
@@ -507,6 +524,28 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Hypothesis registry verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "evaluate-source-validity":
+        try:
+            result = evaluate_source_validity_file(
+                args.registry, args.ledger, datetime.fromisoformat(args.evaluated_at)
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Source validity evaluation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-source-validity":
+        try:
+            print(json.dumps(
+                verify_source_validity_file(args.registry, args.ledger),
+                ensure_ascii=False, sort_keys=True,
+            ))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Source validity verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "verify-stop-rule-tightening":

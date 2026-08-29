@@ -17,6 +17,7 @@ from earnings_research.prospective_hypotheses.models import (
     HypothesisTrialBundle,
 )
 from earnings_research.prospective_hypotheses.pipeline import (
+    _write_new,
     build_registry_file,
     evaluate_observation_file,
     verify_registry_file,
@@ -36,6 +37,63 @@ def registry():
 
 def observation():
     return CompletedEventObservation.model_validate_json(OBSERVATION.read_text(encoding="utf-8"))
+
+
+def usable_registry(tmp_path):
+    """A registry the gate permits, with a ledger saying so.
+
+    The ledger is written by hand here rather than by `judge`, because under
+    the rules as they stand no frozen hypothesis is affirmatively valid: every
+    one of them is scored on a previous-close return, and every cohort the
+    rules cover is fixed after that close. That is the finding, not a fixture
+    problem — see test_no_frozen_hypothesis_is_currently_affirmatively_valid.
+    What these tests need is the recording path, and what the recording path
+    asks for is a ledger that clears the hypothesis.
+    """
+    from earnings_research.prospective_hypotheses.source_validity import (
+        VALID,
+        Verdict,
+        append_ledger,
+        source_fields_digest,
+    )
+    from earnings_research.statistics.lookahead import rules_digest
+
+    base = registry()
+    keep = base.hypotheses[:3]
+    payload = base.model_dump()
+    payload["hypotheses"] = [item.model_dump() for item in keep]
+    payload["source_candidate_count"] = len(keep)
+    directory = tmp_path / "registry"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "usable.json"
+    path.write_text(
+        HypothesisRegistry.model_validate(payload).model_dump_json(indent=2), encoding="utf-8"
+    )
+    append_ledger(directory / "source_validity.jsonl", [
+        Verdict(
+            hypothesis_id=item.hypothesis_id, hypothesis_version=item.hypothesis_version,
+            registry_id=base.registry_id, registry_version=base.registry_version,
+            dimension=item.dimension, evaluation_horizon=item.evaluation_horizon,
+            source_field="open_d5", verdict=VALID, reason=None,
+            contamination_rules_sha256=rules_digest(),
+            source_fields_sha256=source_fields_digest(),
+            evaluated_at="2026-09-01T00:00:00+09:00",
+        )
+        for item in keep
+    ])
+    return path, len(keep)
+
+
+def test_no_frozen_hypothesis_is_currently_affirmatively_valid():
+    """Every one is scored on a previous-close return, and every cohort the
+    rules cover is fixed after that close. Nothing in this registry may gather
+    prospective evidence until a registry is frozen from research that does not
+    measure from there."""
+    from earnings_research.prospective_hypotheses.source_validity import VALID, judge
+
+    verdicts = judge(registry(), "2026-09-01T00:00:00+09:00")
+    assert verdicts
+    assert not [item for item in verdicts if item.verdict == VALID]
 
 
 def test_registry_freezes_all_19_candidates_one_to_one():
@@ -103,15 +161,63 @@ def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
     assert any(reason == "evaluation horizon has not matured" for reason in bundle.ineligible_hypotheses.values())
 
 
-def test_append_only_writer_rejects_duplicate_event_and_existing_output(tmp_path):
+def test_the_same_event_may_not_be_recorded_twice_under_another_name(tmp_path):
+    """Written to a different output path on purpose.
+
+    The earlier form of this test reused one path and accepted either error, so
+    `_write_new` refusing the filename satisfied it and the event-level scan it
+    was named for could be — and was — deleted without the suite noticing. The
+    scan is what protects an append-only record: a second bundle for one event
+    is what `summarize_trials` afterwards fails on.
+    """
+    path, _count = usable_registry(tmp_path)
+    trials = tmp_path / "trials"
+    evaluate_observation_file(
+        path, OBSERVATION, trials, trials / "first.json", datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    with pytest.raises(ValueError, match="already has an append-only hypothesis trial bundle"):
+        evaluate_observation_file(
+            path, OBSERVATION, trials, trials / "second.json",
+            datetime(2026, 9, 30, 19, tzinfo=JST),
+        )
+    assert sorted(item.name for item in trials.glob("*.json")) == ["first.json"]
+
+
+def test_an_existing_output_file_is_never_overwritten(tmp_path):
+    """The other half of what one test used to claim: the writer refuses the
+    filename even where the event-level scan has nothing to say."""
+    path, _count = usable_registry(tmp_path)
     trials = tmp_path / "trials"
     output = trials / "event.json"
     evaluate_observation_file(
-        REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
+        path, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
     )
-    with pytest.raises((ValueError, FileExistsError), match="already"):
+    before = output.read_text(encoding="utf-8")
+    with pytest.raises(FileExistsError, match="append-only output already exists"):
+        _write_new(output, "{}\n")
+    assert output.read_text(encoding="utf-8") == before
+
+
+def test_no_trial_is_recorded_against_knowledge_the_rules_condemn(tmp_path):
+    """The committed registry is seventeen-nineteenths invalid under the rules
+    as they stand, and recording trials against it would be gathering evidence
+    about hypotheses whose evidence the rules no longer support."""
+    with pytest.raises(ValueError, match="source-validity"):
         evaluate_observation_file(
-            REGISTRY, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
+            REGISTRY, OBSERVATION, tmp_path / "trials", tmp_path / "trials/event.json",
+            datetime(2026, 9, 30, 18, tzinfo=JST),
+        )
+
+
+def test_no_trial_is_recorded_against_knowledge_nobody_has_judged(tmp_path):
+    """Unjudged is refused too. A definition nobody has checked under the
+    current rules is the case this capability exists for."""
+    path, _count = usable_registry(tmp_path)
+    (path.parent / "source_validity.jsonl").unlink()
+    with pytest.raises(ValueError, match="source-validity"):
+        evaluate_observation_file(
+            path, OBSERVATION, tmp_path / "trials", tmp_path / "trials/event.json",
+            datetime(2026, 9, 30, 18, tzinfo=JST),
         )
 
 
@@ -192,11 +298,12 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     assert main([
         "verify-hypothesis-registry", "--knowledge", str(KNOWLEDGE), "--registry", str(REGISTRY)
     ]) == 0
+    path, count = usable_registry(tmp_path)
     trials = tmp_path / "trials"
     output = trials / "event.json"
     assert main([
         "evaluate-hypothesis-event",
-        "--registry", str(REGISTRY),
+        "--registry", str(path),
         "--observation", str(OBSERVATION),
         "--trials-dir", str(trials),
         "--recorded-at", "2026-09-30T18:00:00+09:00",
@@ -205,13 +312,13 @@ def test_cli_verifies_registry_and_builds_append_only_outputs(tmp_path):
     summary = tmp_path / "status.json"
     assert main([
         "summarize-hypothesis-registry",
-        "--registry", str(REGISTRY),
+        "--registry", str(path),
         "--trials-dir", str(trials),
         "--evaluated-at", "2026-10-01T09:00:00+09:00",
         "--output", str(summary),
     ]) == 0
     result = json.loads(summary.read_text(encoding="utf-8"))
-    assert len(result["hypotheses"]) == 19
+    assert len(result["hypotheses"]) == count
     assert result["automatic_weight_change"] is False
 
 

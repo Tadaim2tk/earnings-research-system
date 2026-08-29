@@ -954,3 +954,136 @@ Consequences: テストは 1015→1013件（部分文字列テスト3件を削�
 **規約1の違反を、規約1を実装するコードが3回犯した**ことになる。最終的な形は、鍵を「文書のどこにあるか」ではなく**公開図表の書式のセルを持つ行のまとまり**そのものに掛ける: 文書全体を走査し、見出しの深さを問わず、自分の見出しを持たない図表ブロックは `None` として拒否する。`#`〜`####` の全レベル、見出し無し、節の外、記号入り見出し、空行なし、列数違い、`_avg` 直呼び——監査人が別途作った7種を含めて、いずれも落ちることを実測した。件数だけの「手動レビュー結果の集計」は図表の書式を持たないので誤検出しない。
 
 将来的には、公開テーブルの registry を production 側に置き、そこから coverage matrix を自動生成して、各セルに少なくとも1本の mutation-sensitive なテストがあることを機械的に確かめる形まで持っていく。
+
+## ERS-ADR-0051
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: PR #57 で獲得したのは「発見済みの種類の誤りを再発させにくくする能力」であって、「過去の誤りを自分で発見する能力」ではなかった。8件の汚染仮説を見つけたのは外部監査であり、システム自身ではない。
+
+そして汚染表は #57 の中だけで2回growした。最初は `reaction` のみ、次に `rank` / `narrative` / `reason_code` / `judge` / `surprise` が加わった。**表が伸びるたび、過去に凍結した仮説が遡って無効になり得る。** これを一回限りの監査として済ませると、次に表が伸びた時点で腐る。
+
+Decision: 凍結知識の有効性を、現在の検証規則で**常設で再審査する**能力を作る。
+
+- **凍結レジストリは一切変更しない。** `definition_status` は `research_knowledge.json` にSHA-256で束縛されたファイルの中にあり、1バイト足すと `verify-hypothesis-registry` が落ちる（#57で実測済み）。有効性は別の台帳に置く。
+- **汚染規則を正準化してSHA-256を取る。** `RETURN_ANCHOR` / `RETURN_EXIT` / `COHORT_SPAN` を、キー順・集合の要素順に依存しない形で1本の文字列にし、そのハッシュを規則のバージョンとする。これが無いと「今日の invalid」と「まだ存在しなかった規則による invalid」を区別できず、後者こそが**システムが自分の過去の仕事を現在の基準で不合格と判定した**という記録になる。
+- **`source_validity.jsonl` は追記専用の判定履歴**であって最新状態ファイルではない。規則ハッシュが変わるたび同じ仮説を再判定し、両方の行が残る。書き換えれば、基準が動いた時点の唯一の証拠が消える。
+- **effective status は台帳から導出する。** `(hypothesis_id, version)` に対する、現在の規則ハッシュ下での最新判定。人が二度書く二段階にしない — 無効化を記録したのに反映を忘れる状態が構造的に作れなくなる。
+- **判定は3値。** `invalid`（規則が汚染と名指し）/ `valid`（規則が対象を扱っていて健全）/ **`undeclared`（規則がその次元について何も言っていない）**。`contamination()` は未知のコホートを意図的に通すが、「検査して健全」と「対象外」を同じ数字にすると後者が隠れる。
+- **invalid または未判定の仮説には prospective 評価を通さない。** `evaluate-hypothesis-event` と `summarize-hypothesis-registry` が拒否する。一部だけ記録すると、レジストリの半分が証拠を集めていて半分が集めていない状態が、出力のどこにも書かれないまま生じる。
+- **CIは台帳を書き換えない。** 「規則が変わったのに最新規則で全仮説が評価されていない」を fail にするだけ。再走査は `evaluate-source-validity` で明示的に行い、生成物をcommitする。変更内容がPR diffとして監査できる。
+
+Consequences: 初回の再評価結果は **invalid 17 / undeclared 2 / valid 0**、遡及無効化率 **0.8947**。
+
+**この数字は8/19ではない。** 8は `reaction` だけを数えた監査時点の値で、その後 `rank` / `judge` が汚染表に入った分が反映されていなかった。想定値に合わせず、常設検査の実装から独立に再計算した結果が17である。内訳は reaction 8 / rank 6 / judge 3。
+
+残る2件は `dollar_environment` で、当初 `COHORT_SPAN` に載っていないため `undeclared` とした。**この判断は誤りで、結果監査が撤回させた（ERS-ADR-0052）。**
+
+KPIは2つ出す。`retroactive_invalidation_rate`（過去の負債。規則を足すたび上がる）と、レジストリ凍結ごとの `invalidation_rate`（後のレジストリが前のレジストリと同じ誤りを繰り返していれば見える）。前者だけを見ると、**規則を二度と足さないことで数字が改善する**——それは誰も望まない結果である。
+
+本ADRの範囲は source validity のみ。trial開始後の rule immutability は Capability 1.5 として分ける。
+
+## ERS-ADR-0052
+
+Date: 2026-08-28
+
+Status: Accepted
+
+Context: ERS-ADR-0051 は `dollar_environment` の2件を `undeclared` に留めた。「スコアは point-in-time だが、三分位の境界が全254件から計算されている。これはアンカーとは別種の先読みであり、汚染表を拡張するかは規則側の判断」という理由だった。
+
+結果監査は**事実関係を3点とも裏付けたうえで、結論が誤りだと判定した**。
+
+- スコアが point-in-time であることは正しい。`usable_from_utc` は254/254件で採点起点より前（リード 中央値 7.26時間）。
+- しかしラベルはスコアではない。**スコアが記録全体のどの三分位に入るか**であり、境界は全254件から計算される。スコアは 49.55〜50.49 の31の離散値に密集し、境界の幅は 0.09。
+- **純粋な反実仮想**: 2026-06-26 の 7630（score 49.96、ラベル `middle`）について、**その行自身の入力を一切変えず**、後日の215件のスコアだけを ±0.10 動かすと、ラベルは `weak` と `strong` に動く。後日を全削除すると `strong`。**3値すべてに動く。**
+- 到着順に計算し直すと **40/252件（15.9%）**がラベルを変える。
+- 境界確定に必要な最後のスコアが使えるのは 2026-08-21。最古のイベントは 2026-06-10 で、**そのラベルは記述対象の72日後まで確定しない**。`prev_close` / `next_open` / `next_close` / `d5_close` / `d20_close` の**どのアンカーでも入手不可能**。
+
+加えて、実害が測定された。`is_usable` は `INVALID` だけを弾いていたため、`undeclared` の2件は prospective 証拠収集のゲートを**通過した**。ADR-0051 自身が「invalid または未判定の仮説には prospective 評価を通さない」と書いた条件が、この2件について機能していなかった。
+
+Decision:
+
+- **`dollar_environment` と `volatility_environment` を `COHORT_SPAN` に加える。** span は `frozenset(RETURN_ANCHOR.values())` — つまり**すべてのアンカー**。ラベルがどのアンカーでも入手できないという事実を、そのまま表現する。列挙ではなく導出にしてあるので、アンカーが増えれば自動的に含まれる。`volatility_environment` は同じ機構で、19仮説では未使用だが同じ債務を持つ（29/226 が不一致）。
+- **`is_usable` は `valid` のみを通す。** `undeclared` は「規則が何も言っていない」であって許可ではない。「まだ見ていない」を「進めてよい」として扱ったことが、先読みが実測された2件を通した原因である。
+- **ADR-0051 の用語を訂正する。** 「TSOスナップショットは前日終値より前に使用可能」と書いたが、実データでは `normalized_prices.legacy_date_close == raw.prev_close` であり、`prev_close` は**当日の終値**である（`lookahead.py` の docstring の方が正しい）。
+
+Consequences: 規則が変わったので digest が `3d7c2657` から `b8138a74` へ動き、19件すべてが未判定になった。再走査して追記した結果、**invalid 19 / undeclared 0 / valid 0**、遡及無効化率 **1.0**。台帳には両方の規則バージョンの判定が残っている（38行）。これは仕組みが設計どおり動いた最初の実例である: 規則が伸びた → 過去の判定が無効になった → 再審査が要求された → 履歴が残った。
+
+**現在、prospective 証拠を集められる凍結仮説は1件も無い。** 19件すべてが前日終値起点のリターンで採点されており、規則が扱うどのコホートもその終値より後に確定するため、`valid` は構造的に到達不能である。これは不具合ではなく結論であり、テストで固定した（`test_no_frozen_hypothesis_is_currently_affirmatively_valid`）。汚染を除去した研究から新しいレジストリを凍結するまで、このレジストリは証拠収集に使えない。
+
+監査の結果として: 規則が**過剰に**汚染判定している次元は見つからなかった。`reaction` / `rank` / `judge` / `narrative` / `surprise` / `rc1-3` はいずれも、`field_history.jsonl` 上で254/254件が当日15:00 JST より後（最短でも4.94時間後）に確定しており、`{prev_close}` は正当。`reaction` の変更時刻は `next_open` / `next_close` と同一分布で、`{prev_close, next_open}` も正当。
+
+## ERS-ADR-0053
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Context: 実装監査は ADR-0051 の主張を8項目すべて実行で確認し、**P1なしの Pass** を返した。ハッシュは実質変更8種すべてで動き、台帳は追記専用で、両方のtrialコマンドが拒否し、CIは台帳を1バイトも触らず、規則を伸ばすと落ちる。fail-closed も確認された（台帳がディレクトリ→例外、壊れた行→例外、いずれもexit 1）。
+
+しかし**拘束しているのはコードであってテストではない**箇所が23あった。常設能力として腐る形なので閉じる。
+
+とくに重い2件:
+
+- **digest が `PYTHONHASHSEED` 依存になり得た。** `canonical_rules` の `sorted(value)` を外すと、4シードで3つの異なる digest が出る（実測）。2台のマシンが「標準が動いたか」で食い違う。順序独立を主張していたテストは `sort_keys=True` が既に処理するキー順しか入れ替えておらず、**唯一非決定的な frozenset の要素順を試験していなかった**。
+- **`summarize_trials_file` の拒否が完全に無拘束。** `evaluate_observation_file` 側は4変異すべてが落ちるのに、こちらは同じ4変異すべてが生存。ADRが名指す2つの拒否点の片方が無試験だった。
+
+Decision:
+
+- **標準に `HORIZONS` を含める。** `source_field_for` はこの写像を読んで「どの対で判定するか」を決めるので、規則と同じく標準の一部である。外に置いたままだと `d5` を `ret_d5` から `open_d5` に変えたとき19件中4件の判定が変わるのに digest が動かず、**再走査が発火しない**。台帳に `source_fields_sha256` を追加し、`effective_status` は両方の digest で照合する。旧行はこのフィールドを持たないので、どの現行標準に対しても stale になる — 写像が記録の一部でなかった時点で書かれた行なので、それが正しい。
+- **時刻は datetime として比較する。** 文字列比較では `+00:00` の後発が `+09:00` の先発に負け、台帳が古い方の判定を報告する（実測）。同着は追記順で後の行が勝つと明記する。
+- **KPIのレジストリ別集計を台帳から直接行う。** `effective_status` は仮説単位なので、同じ定義を持つ2つの freeze がそこで潰れ、片方のバケツが消えていた。これは「後のレジストリが同じ誤りを繰り返していれば見える」という設計目的そのものを壊す。
+- **ゲートの docstring を実装に合わせる。** 「未判定」と「invalidのまま証拠を集めている」の2つを拒否すると書いていたが、この関数は引数にtrialを持たず後者を構造的に見られない。拒否しているのはtrialコマンド側である。
+- テストを追加して、監査が挙げた生存変異を殺す: `sorted` の除去、`summarize` の拒否の無効化、標準からの `HORIZONS` 除外、KPIの分子・分母・3つの件数の取り違え、CIステップの削除、時刻比較の文字列化、`declares` が別の表を読む場合。
+
+Consequences: 標準が動いたので台帳は3世代になった（57行）。`rules=3d7c2657 fields=なし` が invalid 17 / undeclared 2、`rules=b8138a74 fields=なし` が invalid 19、`rules=b8138a74 fields=8f532e41` が invalid 19。テストは 1036→1046。
+
+監査が指摘した恒真・自己参照テストも直した。とくに `test_the_two_rates_answer_different_questions` は**期待値を関数自身の出力から計算**しており、実質 `round(x,6)==x` の恒等式だった。KPIの数値は台帳から独立に数え直して固定する形に置き換えた。`valid` は committed registry に1件も無いため、その経路は合成ケースでしか試験できない — 片側だけの試験になっていたので、規則を一時的に緩めて `valid` に到達させるテストを足した。
+
+---
+
+## ERS-ADR-0054
+
+Title: 判定の単位は「定義」ではなく「freeze」— および、私が削除した重複ガードの復元
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Context: PR #59 の Codex レビューが3件を指摘し、3件とも実在した。
+
+**P1 — 重複イベントガードの消失。** `evaluate_observation_file` に source-validity ゲートを追加した際、既存の
+
+```python
+existing = load_trial_bundles(trials_dir)
+if any(bundle.earnings_event_id == observation.earnings_event_id for bundle in existing):
+    raise ValueError(...)
+```
+
+を**置き換えてしまった**。`trials_dir` は未使用引数になり、`_write_new` が守るのは出力**パス名**だけになった。同じイベントを別名で書けば追記専用の記録に2つ目の bundle が入り、後続の `summarize_trials` が重複同一性検査で落ちる。
+
+1046本のテストが緑のままだった理由が本質的である。`test_append_only_writer_rejects_duplicate_event_and_existing_output` は名前で2つの性質を主張しながら、**同一の出力パスに2回書いていた**。`pytest.raises((ValueError, FileExistsError), match="already")` は、イベント走査の `already has an append-only...` でも、パス名拒否の `append-only output already exists` でも通る。ガードを消しても通る形の試験だった。
+
+**P2 — 判定の keying が freeze を見ていない。** `effective_status` は `(hypothesis_id, hypothesis_version)` で鍵を作る。後継レジストリが同じ定義を同じ version のまま引き継ぐと、`unevaluated` は前レジストリの行で満たされたと見なし、新しい freeze には判定が1行も追記されない。`rates` のレジストリ別バケツにも現れない — 「後のレジストリが同じ誤りを繰り返していれば見える」という設計目的が、その場合に限って機能しない。
+
+ADR-0053 でこの潰れ自体は認識しており、`rates` の中だけを台帳直読みに直していた。**症状を1経路で塞ぎ、原因を残した。** これは前回の監査が診断した失敗形そのものである。
+
+**P2 — CIが1本のレジストリしか検証していない。** ステップが `legacy_research_v1.json` を直書きしていたため、v2 を凍結して一度も判定せずに merge しても、このステップは v1 について緑のままになる。新しく凍結された知識を守るための常設検査が、まさにその場合に効かない。
+
+Decision:
+
+- **重複イベント走査を復元する。** パス名ではなくイベントで走査する。テストは2本に分け、重複側は**別の出力パス**に書いて `_write_new` が発火し得ないようにし、メッセージを個別に照合する。ガードを削除する変異でこのテストが落ちることを実測で確認した。
+- **判定の単位を freeze に統一する。** `_latest(ledger, key_of)` を1本置き、`effective_status`（定義単位）と `effective_status_by_freeze`（freeze単位）を同じ走査から作る。`unevaluated` / `is_usable` / `rates` の3経路すべてを freeze 単位に切り替える。1経路だけ直すのは今回の指摘の原因そのものなので採らない。
+  - `is_usable` は `(registry_id, registry_version, hypothesis_id, hypothesis_version, ledger)` を必須引数にした。省略可能にすると、引数を渡し忘れた呼び出しが**通ってしまう**方向に倒れる。
+  - 定義単位の `effective_status` は残す。「この定義は現行標準でどう判定されているか」は依然として有効な問いであり、「この freeze は判定済みか」とは別の問いである。
+- **CIは data/prospective_hypotheses/ 配下の全レジストリを検証する。** レジストリが1本も見つからない場合も error にする。改名でステップが no-op になり、それでも成功を報告する状態を作らないため。加えて同じ性質を pytest 側にも置いた（`test_every_registry_in_the_repository_has_been_judged`）— YAMLは走らせ忘れられるが、テストは常設検査の一部として走る。
+
+Consequences: テストは 1046→1050。判定結果は変わらない（19/19 invalid、retroactive rate 1.0、`b8138a74` / `8f532e41`）。keying の変更は committed ledger に対して恒等である — 単一レジストリしか無いため。**変わったのは、2本目のレジストリが凍結された瞬間の挙動である。**
+
+実測で確認した3経路:
+
+- 未判定の後継レジストリ（v2）を置くと CI ステップが exit 1
+- レジストリが1本も無いと exit 1
+- `unevaluated` / `is_usable` を定義単位に戻す変異で、それぞれ対応するテストが落ちる
