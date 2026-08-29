@@ -132,6 +132,29 @@ jobs:
             --registry-dir data/prospective_hypotheses \
             --trials-dir data/prospective_hypotheses/trials
 
+      - name: Every committed evidence capture still holds what it captured
+        # Zero captures today: the population source and the evidence source
+        # are both external and neither has had its terms reviewed, so nothing
+        # is fetched yet. The step is here first because what it protects is
+        # lost by the day — a disclosure page is replaced, and the text a model
+        # read is not recoverable from the verdict it produced.
+        #
+        # Each capture is one directory: a population fixed before any fetch,
+        # and an append-only bundle ledger. The check refuses a population
+        # event nobody attempted, a bundle for an event outside that
+        # population, and content that no longer hashes to its own digest.
+        run: |
+          set -euo pipefail
+          verified=0
+          for manifest in $(find data/evidence -name population.json | sort); do
+            echo "verifying $(dirname "$manifest")"
+            python -m earnings_research.cli verify-evidence-capture \
+              --manifest "$manifest" \
+              --bundles "$(dirname "$manifest")/bundles.jsonl"
+            verified=$((verified + 1))
+          done
+          echo "verified $verified evidence captures"
+
       - name: A successor registry retires nothing it inherited
         # Runs when the registry directory moved. A successor is by definition
         # a NEW file — the frozen one is never edited — so looking it up in the
