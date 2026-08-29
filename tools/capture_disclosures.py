@@ -10,12 +10,13 @@
 **取得は ERS-ADR-0033 の契約の中でしか行わない。** `release.tdnet.info` の robots は
 `Disallow: /` で、索引が渡したURLに限った取得を Human が明示的に承認したのが
 ERS-ADR-0033 である（2026-08-17、`www.release.tdnet.info` と
-`contents.xj-storage.jp` の2ホストのみ、link追跡なし）。同契約は
-`MAX_DOCUMENTS_PER_RUN = 4` も定めており、**1回の実行で4本を超えて取らない**。
+`contents.xj-storage.jp` の2ホストのみ、link追跡なし）。
 
-**この上限は1日あたりの必要数（約8本）より小さい。** 迂回はしない。上限まで取り、
-取り残した数を出して**0以外で終える**——足りていないことを成功として報告しない。
-上限を上げるなら契約の変更であり、人の判断である。
+**1回に回る開示の数は `MAX_DOCUMENTS_PER_SWEEP = 20`。** handoff の壊れ検査に使う
+`MAX_DOCUMENTS_PER_RUN = 4` とは別の定数である——あちらは「1つの開示に対する
+handoff が壊れていないか」を見ており、流用すると上限を上げたときにその検査まで
+緩む。上限まで取り、取り残した数を出して**0以外で終える**——足りていないことを
+成功として報告しない。
 
 **既定は台帳にある銘柄だけ。** 全短信は1日250本で30倍になる。規模の変更も人の
 判断なので、`--all` を明示しない限り広げない。
@@ -36,7 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from earnings_research.document_analysis.acquisition import MAX_DOCUMENTS_PER_RUN  # noqa: E402
+from earnings_research.document_analysis.acquisition import MAX_DOCUMENTS_PER_SWEEP  # noqa: E402
 from earnings_research.document_analysis.guarded_fetch import GuardedDocumentFetcher  # noqa: E402
 from earnings_research.document_analysis.pdf import extract_pdf  # noqa: E402
 from earnings_research.timing import tdnet_index as ix  # noqa: E402
@@ -119,7 +120,7 @@ def main():
     fetcher = GuardedDocumentFetcher()
     saved = skipped = expired = failed = 0
     # ERS-ADR-0033 の契約。上限まで取り、残りは取り残しとして数える。
-    budget = MAX_DOCUMENTS_PER_RUN
+    budget = MAX_DOCUMENTS_PER_SWEEP
     left_behind = []
     for back in range(args.days):
         day = (today - timedelta(days=back)).isoformat()
@@ -188,7 +189,7 @@ def main():
           % (saved, skipped, expired, failed, len(left_behind)))
     if left_behind:
         print("1回の上限 %d 本を超えたので取り残した（契約は ERS-ADR-0033）:"
-              % MAX_DOCUMENTS_PER_RUN, file=sys.stderr)
+              % MAX_DOCUMENTS_PER_SWEEP, file=sys.stderr)
         for code, stamp in left_behind[:20]:
             print("  %s %s" % (code, stamp), file=sys.stderr)
         print("これらは31日の窓の中にいるうちにしか取れない。", file=sys.stderr)

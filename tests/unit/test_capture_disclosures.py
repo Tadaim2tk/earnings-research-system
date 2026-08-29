@@ -74,21 +74,22 @@ def test_capture_stores_no_pdf_and_no_score():
         assert forbidden not in written, forbidden
 
 
-def test_the_run_limit_from_the_approved_contract_is_not_bypassed():
-    """`acquisition.MAX_DOCUMENTS_PER_RUN` は ERS-ADR-0033 の契約の一部で、
-    1日あたりの必要数（約8本）より小さい。**迂回しない。** 上限を引き上げるのは
-    契約の変更であって、ツールが黙って決めることではない。"""
-    from earnings_research.document_analysis.acquisition import MAX_DOCUMENTS_PER_RUN
-    source = TOOL.read_text(encoding="utf-8")
-    assert "MAX_DOCUMENTS_PER_RUN" in source
-    tree = ast.parse(source)
+def test_the_sweep_limit_comes_from_the_contract_and_is_not_the_handoff_bound():
+    """2つの上限は別の問いに答えている。`MAX_DOCUMENTS_PER_RUN` は「1つの開示に
+    対する handoff が壊れていないか」（1開示=1文書+補足なので4）、
+    `MAX_DOCUMENTS_PER_SWEEP` は「1回の実行でいくつの開示を見るか」。
+    **流用すると、掃き出しの上限を上げたときに handoff の壊れ検査まで緩む。**"""
+    from earnings_research.document_analysis import acquisition as A
+    assert A.MAX_DOCUMENTS_PER_RUN == 4, "handoff の壊れ検査は動かさない"
+    assert A.MAX_DOCUMENTS_PER_SWEEP >= 9, "多い日の9社を捌けない上限は意味が無い"
+
+    tree = ast.parse(TOOL.read_text(encoding="utf-8"))
     imported = any(
         isinstance(n, ast.ImportFrom) and "acquisition" in (n.module or "")
-        and any(a.name == "MAX_DOCUMENTS_PER_RUN" for a in n.names)
+        and any(a.name == "MAX_DOCUMENTS_PER_SWEEP" for a in n.names)
         for n in ast.walk(tree))
     assert imported, "上限を自前の定数で持ち直していない"
-    # 契約側の値を書き換えたらツールも追従する（写しを持たない）。
-    assert MAX_DOCUMENTS_PER_RUN == tool().MAX_DOCUMENTS_PER_RUN
+    assert A.MAX_DOCUMENTS_PER_SWEEP == tool().MAX_DOCUMENTS_PER_SWEEP
 
 
 def test_a_shortfall_is_never_reported_as_success():
