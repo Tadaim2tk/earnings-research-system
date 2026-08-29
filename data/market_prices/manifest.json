@@ -18,8 +18,17 @@
     }
   ],
   "auto_adjust": false,
-  "checked_points": 1146,
   "event_count": 254,
+  "events_reaching_offset": {
+    "2": 246,
+    "20": 163,
+    "21": 155,
+    "22": 147,
+    "26": 123,
+    "41": 49,
+    "5": 245,
+    "7": 243
+  },
   "events_without_a_session": [
     {
       "code": "…",
@@ -54,12 +63,11 @@
       "event_date": "2026-08-04"
     }
   ],
-  "fetched_at": "2026-08-29T14:43:30+09:00",
-  "matching_points": 1144,
+  "fetched_at": "2026-08-29T15:12:55+09:00",
   "priced_count": 246,
-  "schema_version": "legacy_event_entry_price_manifest_v1",
-  "session_index": "i0 = the announcement date's session; the entry price is i0+2's open",
-  "sha256": "6ba2121c0e8d23d07ca1103c3bd81a183d4f3ae41bab56abab692783e04c947c",
+  "schema_version": "legacy_event_sessions_manifest_v1",
+  "sha256": "50feaab493afb6b322ea12844268eee9723818414842923a32e4e182ed6bc603",
   "source": "yfinance",
-  "ticker_convention": "{code}.T"
+  "ticker_convention": "{code}.T",
+  "window": "i0-1 through i0+45, where i0 is the announcement date's session"
 }

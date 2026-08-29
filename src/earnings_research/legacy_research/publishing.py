@@ -14,6 +14,30 @@ from earnings_research.statistics.lookahead import prices_for
 from .aggregation import build_aggregation
 from .entry_prices import accepted, attach as attach_entry_prices, by_event, digest as entry_digest, disagreements, read as read_entry_prices
 from .labels import cohort_label
+
+# Long on purpose. "d5" meant a five-session hold from the previous close, four
+# from the first open and three from the fill, all printed in the same table.
+EXIT_EVENT_D5 = "decision_d1_close__entry_d2_open__exit_event_d5_close"
+EXIT_EVENT_D20 = "decision_d1_close__entry_d2_open__exit_event_d20_close"
+EXIT_PLUS5 = "decision_d1_close__entry_d2_open__exit_entry_plus5_close"
+EXIT_PLUS20 = "decision_d1_close__entry_d2_open__exit_entry_plus20_close"
+
+# Three entries into the same exit, then two holds from the same entry. The
+# first group answers where to get in, the second how long to stay; a table
+# that mixes them answers neither, because a difference could be either.
+ENTRY_AXIS = ("open_d20", "close_d20", EXIT_EVENT_D20)
+DURATION_AXIS = (EXIT_PLUS5, EXIT_PLUS20)
+AXIS_HEADER = (
+    "| 入口:初日寄付 | 入口:初日引け | 入口:約定 | 保有:約定+5日 | 保有:約定+20日 |"
+)
+AXIS_RULE = "|---|---|---|---|---|"
+
+
+def _axes(rows, match) -> str:
+    """One row's five cells: three entries into i0+20, two holds from the fill."""
+    return " | ".join(
+        _anchored(rows, match, field) for field in ENTRY_AXIS + DURATION_AXIS
+    )
 from .legacy_parity import (
     render_dashboard_as_retired,
     render_note_as_retired,
@@ -226,61 +250,63 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "翌日終値(i0+1)起点も同様に、反応分類を決めるまさにその値段で約定する",
               "前提になる。約定起点だけが、どのラベルよりも後に存在する価格である。",
               "",
-              "出口は発表から5営業日後・20営業日後の引けに固定しているので、起点を",
-              "変えても比べられる。動くのは入口だけ。",
+              "表は二つに分かれている。**出口固定**は発表から5・20営業日後の引けに",
+              "出口を固定してあるので、起点を変えても比べられる — 動くのは入口だけで、",
+              "答えるのは「いつ入るのがよいか」。**保有固定**は約定から5・20営業日",
+              "持った場合で、入口は同じまま出口だけが動く — 答えるのは「何日持つのが",
+              "よいか」。",
+              "",
+              "この二つを混ぜると、差が入口のせいか保有期間のせいか区別できなくなる。",
+              "発表起点の「5日」は、前日終値からなら5営業日、初日の寄り付きからなら",
+              "4営業日、約定からなら3営業日で、同じ表に並べると別物を比べることになる。",
               "",
               "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
-              "| ランク | 約定→5日 | 約定→20日 |", "|---|---|---|"]
+              "| ランク " + AXIS_HEADER, "|---" + AXIS_RULE]
     for rank in RANKS:
         match = lambda row, rank=rank: cohort_label(row.get("rank")) == rank
         lines.append(
-            f"| {rank} | {_anchored(counted, match, 'entry_d5')} | "
-            f"{_anchored(counted, match, 'entry_d20')} |"
+            f"| {rank} | {_axes(counted, match)} |"
         )
-    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 約定→20日 |", "|---|---|"]
+    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ " + AXIS_HEADER, "|---" + AXIS_RULE]
     for narrative in NARRATIVES:
         match = lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative
-        lines.append(f"| {narrative} | {_anchored(counted, match, 'entry_d20')} |")
-    lines += ["", "### 判断別 リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
+        lines.append(f"| {narrative} | {_axes(counted, match)} |")
+    lines += ["", "### 判断別 リターン(仮説: 見送りは防御か機会損失か)", "| 判断 " + AXIS_HEADER, "|---" + AXIS_RULE]
     for judge in JUDGES:
         match = lambda row, judge=judge: cohort_label(row.get("judge")) == judge
         lines.append(
-            f"| {judge} | {_anchored(counted, match, 'entry_d5')} | "
-            f"{_anchored(counted, match, 'entry_d20')} |"
+            f"| {judge} | {_axes(counted, match)} |"
         )
     lines += ["", "### 初動分類別 リターン(仮説: 初動ギャップは持続するか)", "",
               "この群は**ギャップで分けている**ので、前日終値起点で見ると分類に使った",
               "当のギャップを測り直すことになり、必ず「GUは強い」と出る。",
               "",
-              "| 初動 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
+              "| 初動 " + AXIS_HEADER, "|---" + AXIS_RULE]
     for value in ("GU", "フラット", "GD"):
         match = lambda row, value=value: cohort_label(row.get("shodo")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
-            f"{_anchored(counted, match, 'entry_d20')} |"
+            f"| {value} | {_axes(counted, match)} |"
         )
     lines += ["", "### 反応分類別 リターン(仮説: 初日の値動きパターンに持続性はあるか)", "",
               "この分類は初日の引けで確定する。約定起点はその後に存在する価格なので、",
               "分類と結果が1本も重ならない。翌日終値起点だと、分類を決めるその値段で",
               "約定する前提になっていた。",
               "",
-              "| 分類 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
+              "| 分類 " + AXIS_HEADER, "|---" + AXIS_RULE]
     for value in ("GU継続", "GU失速", "GD反発", "GD継続"):
         match = lambda row, value=value: cohort_label(row.get("reaction")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
-            f"{_anchored(counted, match, 'entry_d20')} |"
+            f"| {value} | {_axes(counted, match)} |"
         )
     lines += ["", "### AIサプライズ評価 × 実際の市場反応(自己較正)", "",
               "元はギャップで較正していたが、ギャップは寄り付きで起きるのでどちら向きにも",
               "取引できず、しかもサプライズ評価自体が大引け後に付く。",
               "",
-              "| サプライズ | 約定→5日 | 約定→20日 |", "|---|---|---|"]
+              "| サプライズ " + AXIS_HEADER, "|---" + AXIS_RULE]
     for value in SURPRISES:
         match = lambda row, value=value: cohort_label(row.get("surprise")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
-            f"{_anchored(counted, match, 'entry_d20')} |"
+            f"| {value} | {_axes(counted, match)} |"
         )
     # A section titled 集計 three lines under a sentence promising the reserved
     # rows enter no aggregate. Empty today because no result column is filled,
@@ -350,7 +376,7 @@ def render_note(rows, as_of: date, *, aggregation=None):
         # publishing the uncorrected number.
         figures = _anchored(
             counted, lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative,
-            "entry_d20",
+            EXIT_EVENT_D20,
         )
         if figures != "-":
             insights.append(f"ナラティブ「{narrative}」の約定から20日 勝率/中央値/平均: {figures}")
@@ -358,7 +384,7 @@ def render_note(rows, as_of: date, *, aggregation=None):
         # Split on the first day's own move, which is settled at that day's
         # close — strictly before the price this return starts from.
         figures = _anchored(
-            counted, lambda row, reaction=reaction: cohort_label(row.get("reaction")) == reaction, "entry_d5"
+            counted, lambda row, reaction=reaction: cohort_label(row.get("reaction")) == reaction, EXIT_EVENT_D5
         )
         if figures != "-":
             insights.append(f"初日「{reaction}」の約定からの5日 勝率/中央値/平均: {figures}")
@@ -488,7 +514,7 @@ def write_reports(output_dir: Path, reports: dict[str, bytes]):
 # recorded it. Kept beside the repository root rather than inside the migration
 # tree: that tree is reproduced byte for byte from the retired repository and a
 # file it never held does not belong in it.
-ENTRY_PRICES = Path("data/market_prices/legacy_event_entry_price.jsonl")
+ENTRY_PRICES = Path("data/market_prices/legacy_event_sessions.jsonl")
 ENTRY_MANIFEST = Path("data/market_prices/manifest.json")
 
 

@@ -23,8 +23,18 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-SCHEMA_VERSION = "legacy_event_entry_price_v1"
+SCHEMA_VERSION = "legacy_event_sessions_v1"
 ENTRY_FIELD = "entry_open"
+
+# Which session each price column comes from, counting the announcement day as
+# i0. Written as offsets rather than as five named fetches, because the first
+# pass stored named prices and adding one series meant fetching all 254 events
+# again — a research question shaped by what was convenient to store.
+PRICE_OFFSETS = {
+    "entry_open": (2, "open"),
+    "entry_plus5_close": (7, "close"),
+    "entry_plus20_close": (22, "close"),
+}
 
 Key = Tuple[str, str]
 
@@ -44,36 +54,47 @@ def digest(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def by_event(rows) -> Dict[Key, float]:
-    """The entry price per event, skipping the events that have none.
+def by_event(rows) -> Dict[Key, Dict[str, float]]:
+    """Every price column each event can supply, read off its sessions.
 
-    A row without one is kept in the file rather than dropped, so the count of
-    events with no fill price stays visible instead of being inferred from a
-    gap between two totals.
+    A row with no sessions is kept in the file rather than dropped, so the
+    count of events with no fill price stays visible instead of being inferred
+    from a gap between two totals. An event whose window ends before an offset
+    simply has no value at that offset — a twenty-session hold from the fill
+    runs past the record's end for the most recent events, and that is an
+    absence, not a zero.
     """
-    prices = {}
+    prices: Dict[Key, Dict[str, float]] = {}
     for row in rows:
         if row.get("status") != "ok":
             continue
-        value = row.get(ENTRY_FIELD)
-        if value is None:
-            continue
-        prices[(row["code"], row["event_date"])] = float(value)
+        sessions = {item["offset"]: item for item in row.get("sessions", [])}
+        values = {}
+        for name, (offset, which) in PRICE_OFFSETS.items():
+            session = sessions.get(offset)
+            if session and session.get(which) is not None:
+                values[name] = float(session[which])
+        if values:
+            prices[(row["code"], row["event_date"])] = values
     return prices
 
 
-def attach(records, prices: Dict[Key, float]) -> List[dict]:
-    """Put the entry price on each record, as a price column like the others.
+def attach(records, prices: Dict[Key, Dict[str, float]]) -> List[dict]:
+    """Put the fetched prices on each record, as columns like the others.
 
-    The aggregation reads its prices off the row by the name the declaration
-    table gives, so once this key is there the new anchor needs no special
-    case anywhere downstream.
+    The aggregation reads prices off the row by the name the declaration table
+    gives, so once these keys are there a new series needs no special case
+    anywhere downstream. Every key is always present — empty where there is no
+    price — because a missing key raises where a missing price should simply
+    produce no return.
     """
     out = []
     for record in records:
         merged = dict(record)
-        value = prices.get((record.get("code"), record.get("date")))
-        merged[ENTRY_FIELD] = "" if value is None else value
+        found = prices.get((record.get("code"), record.get("date")), {})
+        for name in PRICE_OFFSETS:
+            value = found.get(name)
+            merged[name] = "" if value is None else value
         out.append(merged)
     return out
 

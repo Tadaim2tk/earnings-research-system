@@ -25,11 +25,17 @@ from earnings_research.legacy_research.entry_prices import (
 from earnings_research.legacy_research.publishing import ENTRY_MANIFEST, ENTRY_PRICES, with_entry_prices
 from earnings_research.statistics.lookahead import (
     COHORT_SPAN,
+    COMPARISON_AXIS,
     DERIVED_FIELDS,
     RETURN_ANCHOR,
     contamination,
     prices_for,
 )
+
+EVENT5 = "decision_d1_close__entry_d2_open__exit_event_d5_close"
+EVENT20 = "decision_d1_close__entry_d2_open__exit_event_d20_close"
+PLUS5 = "decision_d1_close__entry_d2_open__exit_entry_plus5_close"
+PLUS20 = "decision_d1_close__entry_d2_open__exit_entry_plus20_close"
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORDS = ROOT / "data/historical_research/earnings_research_os/v1/source/records.csv"
@@ -51,11 +57,37 @@ def test_the_fill_price_is_the_open_after_the_session_the_label_is_read_at():
     where scoring the same cohort from next_close means entering at the print
     that decides it.
     """
-    assert prices_for("entry_d5") == ("entry_open", "d5_close")
-    assert prices_for("entry_d20") == ("entry_open", "d20_close")
-    for cohort in ("rank", "narrative", "judge", "surprise", "shodo", "reaction"):
-        assert contamination(cohort, "entry_d5") is None, cohort
-        assert contamination(cohort, "entry_d20") is None, cohort
+    for name in (EVENT5, EVENT20, PLUS5, PLUS20):
+        assert prices_for(name)[0] == "entry_open", name
+        for cohort in ("rank", "narrative", "judge", "surprise", "shodo", "reaction"):
+            assert contamination(cohort, name) is None, (cohort, name)
+
+
+def test_the_two_axes_share_an_entry_and_differ_only_in_what_moves():
+    """The whole reason both exist.
+
+    With only the exit-fixed pair, "the ranking orders at the fill price" and
+    "the ranking orders over a three-session hold" are one observation. The
+    entry is identical across all four series, so a difference within the
+    exit-fixed pair is the entry and a difference within the holding-fixed pair
+    is the duration.
+    """
+    assert prices_for(EVENT5) == ("entry_open", "d5_close")
+    assert prices_for(EVENT20) == ("entry_open", "d20_close")
+    assert prices_for(PLUS5) == ("entry_open", "entry_plus5_close")
+    assert prices_for(PLUS20) == ("entry_open", "entry_plus20_close")
+    assert set(COMPARISON_AXIS["duration"]) == {PLUS5, PLUS20}
+    assert {EVENT5, EVENT20} <= set(COMPARISON_AXIS["entry"])
+    # No series appears on both axes; a name that did would answer neither.
+    assert not set(COMPARISON_AXIS["entry"]) & set(COMPARISON_AXIS["duration"])
+
+
+def test_no_series_is_named_only_by_its_horizon():
+    """`d5` meant a five-session hold from the previous close, four from the
+    first open and three from the fill, printed in the same table. A reader
+    comparing them was comparing entry and duration at once."""
+    for name in (EVENT5, EVENT20, PLUS5, PLUS20):
+        assert name.startswith("decision_") and "__entry_" in name and "__exit_" in name
 
 
 def test_a_label_fixed_after_every_price_is_still_refused():
@@ -64,7 +96,8 @@ def test_a_label_fixed_after_every_price_is_still_refused():
     a price extends it without anybody remembering to."""
     for cohort in ("dollar_environment", "volatility_environment"):
         assert "entry_open" in COHORT_SPAN[cohort]
-        assert contamination(cohort, "entry_d5") is not None
+        assert contamination(cohort, EVENT5) is not None
+        assert contamination(cohort, PLUS20) is not None
 
 
 def test_the_field_lists_come_from_the_declaration_and_not_from_a_copy():
@@ -75,7 +108,8 @@ def test_the_field_lists_come_from_the_declaration_and_not_from_a_copy():
 
     assert set(RETURN_FIELDS) == set(RETURN_ANCHOR)
     assert set(DERIVED_FIELDS) == {f for f, a in RETURN_ANCHOR.items() if a != "prev_close"}
-    assert "entry_d5" in DERIVED_FIELDS and "entry_d20" in DERIVED_FIELDS
+    for name in (EVENT5, EVENT20, PLUS5, PLUS20):
+        assert name in DERIVED_FIELDS, name
 
 
 def test_the_fetch_reproduces_every_price_the_record_already_holds():

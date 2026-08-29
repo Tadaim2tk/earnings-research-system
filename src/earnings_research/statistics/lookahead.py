@@ -31,19 +31,26 @@ RETURN_ANCHOR: Dict[str, str] = {
     "open_d20": "next_open",
     "close_d5": "next_close",
     "close_d20": "next_close",
-    # The price an order actually gets. The disclosure lands after the close,
-    # the first session reacts, the reaction is read off that session's close,
-    # and the order fills at the next open — session i0+2, counting the
-    # announcement day as i0. Every other anchor here is a price the record
+    # The price an order actually gets. The disclosure lands after i0's close,
+    # the first session reacts, the reaction is read off i0+1's close, and the
+    # order fills at i0+2's open. Every other anchor here is a price the record
     # happened to carry; this is the one a decision is executed at.
     #
     # It is also the only anchor no label reaches. A reaction cohort is fixed
-    # at the first session's close, which is strictly before this price exists,
-    # so the split and the result share no bar at all — where scoring the same
-    # cohort from next_close means entering at the very price that decides the
-    # label.
-    "entry_d5": "entry_open",
-    "entry_d20": "entry_open",
+    # at the first session's close, strictly before this price exists, so the
+    # split and the result share no bar at all — where scoring the same cohort
+    # from next_close means entering at the very price that decides the label.
+    #
+    # Named for all three moments, because "d5" alone meant different things in
+    # different rows of the same table: from the previous close it was a
+    # five-session hold, from the first open four, from the fill three. A
+    # reader comparing them across anchors was comparing entry AND duration and
+    # could not tell which had moved. These names say which is which, at the
+    # cost of being long.
+    "decision_d1_close__entry_d2_open__exit_event_d5_close": "entry_open",
+    "decision_d1_close__entry_d2_open__exit_event_d20_close": "entry_open",
+    "decision_d1_close__entry_d2_open__exit_entry_plus5_close": "entry_open",
+    "decision_d1_close__entry_d2_open__exit_entry_plus20_close": "entry_open",
 }
 
 # What each cohort variable is derived from. A cohort split on the gap is
@@ -187,8 +194,35 @@ RETURN_EXIT: Dict[str, str] = {
     "open_d20": "d20_close",
     "close_d5": "d5_close",
     "close_d20": "d20_close",
-    "entry_d5": "d5_close",
-    "entry_d20": "d20_close",
+    # Two exits from the same fill, on purpose. One holds to a fixed point after
+    # the announcement, which is what the record was built around and what makes
+    # the entry comparison work — same exit, only the entry moves. The other
+    # holds a fixed number of sessions from the fill, which is what a position
+    # actually does — same entry, only the duration moves.
+    #
+    # Keeping both is the point. With only the first, "the ranking orders at the
+    # fill price" and "the ranking orders over a three-session hold" are the same
+    # observation and cannot be separated.
+    "decision_d1_close__entry_d2_open__exit_event_d5_close": "d5_close",
+    "decision_d1_close__entry_d2_open__exit_event_d20_close": "d20_close",
+    "decision_d1_close__entry_d2_open__exit_entry_plus5_close": "entry_plus5_close",
+    "decision_d1_close__entry_d2_open__exit_entry_plus20_close": "entry_plus20_close",
+}
+
+
+# What each series compares, so the two questions stay apart. A view that mixes
+# them answers neither: a difference could be the entry or the duration.
+COMPARISON_AXIS: Dict[str, str] = {
+    # Same exit, the entry moves — where is it best to get in.
+    "entry": (
+        "open_d5", "close_d5", "decision_d1_close__entry_d2_open__exit_event_d5_close",
+        "open_d20", "close_d20", "decision_d1_close__entry_d2_open__exit_event_d20_close",
+    ),
+    # Same entry, the duration moves — how long is it best to hold.
+    "duration": (
+        "decision_d1_close__entry_d2_open__exit_entry_plus5_close",
+        "decision_d1_close__entry_d2_open__exit_entry_plus20_close",
+    ),
 }
 
 
