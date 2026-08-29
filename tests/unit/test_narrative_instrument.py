@@ -152,3 +152,25 @@ def test_the_instrument_extracts_facts_and_does_not_score():
         assert judgement not in fields, judgement
     facts, _ = I.parse(json.dumps(GOOD, ensure_ascii=False))
     assert set(facts) == fields
+
+
+def test_the_prompt_does_not_invite_the_empty_answer():
+    """実測: 「無ければ空配列」を足した版（`5f986834218c05b5`）を同じ103件に
+    当てると、追い風が0件の文書が 21/74 → **51/74** に増え、平均件数が
+    1.85 → 1.41 に落ちた。旧版で理由を挙げていた32件が0件になり、逆は2件。
+    方向の項目は動かず（売上100%・利益99%）、**理由の列挙だけが壊れた**。
+
+    スキーマを丁寧に書いたつもりがモデルを空の答えへ寄せていた。文言を戻した
+    ことをここで固定する——同じ「明確化」をまた入れないため。"""
+    assert "無ければ空配列" not in I.PROMPT
+    assert "空配列" not in I.PROMPT
+
+
+def test_the_direction_vocabulary_stayed_closed():
+    """方向は版をまたいで安定していた（売上100%・利益99%）。語彙を開くと
+    その安定が失われるので、閉じたままにする。"""
+    assert I.DIRECTIONS == ("増加", "減少", "横ばい", "不明")
+    assert "不明" in I.DIRECTIONS, "答えられないことを言える語が要る"
+    for vocabulary in I.FIELDS.values():
+        assert len(vocabulary) == len(set(vocabulary))
+        assert all(isinstance(v, str) and v for v in vocabulary)
