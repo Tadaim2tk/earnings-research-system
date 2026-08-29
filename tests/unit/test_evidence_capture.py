@@ -15,9 +15,11 @@ from pydantic import ValidationError
 from earnings_research.evidence import (
     CAPTURE_STATUSES,
     EventRef,
+    EvidenceBody,
     EvidenceBundle,
     ExcludedEvent,
     PopulationManifest,
+    body_matches,
 )
 from earnings_research.evidence.models import sha256_text
 from earnings_research.evidence.store import (
@@ -71,10 +73,16 @@ def bundle(event_id, status="captured", text="決算短信の本文", **changes)
         "fetch_implementation": "fixture/1",
     }
     if status == "captured":
-        payload["content"] = text
         payload["content_sha256"] = sha256_text(text)
     payload.update(changes)
     return EvidenceBundle(**payload)
+
+
+def body(event_id, text="決算短信の本文"):
+    """What goes to the private store, never to this repository."""
+    return EvidenceBody(
+        bundle_id="EB-%s-1" % event_id, content=text, content_sha256=sha256_text(text)
+    )
 
 
 def written(tmp_path, pop=None, bundles=()):
@@ -130,33 +138,56 @@ def test_a_population_cannot_be_fixed_before_its_source_was_read():
 
 # --- a bundle says what happened to it --------------------------------------
 
-def test_a_captured_bundle_hashes_the_text_it_carries():
-    item = bundle("EV-2026-09-01-001")
-    assert item.content_sha256 == sha256_text(item.content)
-    payload = item.model_dump(mode="json")
-    payload["content"] = payload["content"] + "…改変"
+def test_the_public_record_has_nowhere_to_put_a_body():
+    """A rule saying "do not commit the body" is a rule somebody has to keep.
+    A record with no field for one keeps it by construction.
+
+    This repository is public, and the terms that permit fetching a disclosure
+    for one's own analysis do not permit redistributing it — so a body
+    committed here would be redistributed the moment it landed, contract or
+    not.
+    """
+    assert "content" not in EvidenceBundle.model_fields
+    assert "content_sha256" in EvidenceBundle.model_fields
+    with pytest.raises(ValidationError):
+        EvidenceBundle.model_validate(
+            {**bundle("EV-2026-09-01-001").model_dump(mode="json"), "content": "本文"}
+        )
+
+
+def test_a_captured_bundle_carries_the_hash_that_ties_it_to_its_body():
+    item, text = bundle("EV-2026-09-01-001"), "決算短信の本文"
+    assert item.content_sha256 == sha256_text(text)
+    assert body_matches(item, body("EV-2026-09-01-001"))
+    # A body from elsewhere, or one that was edited, does not match.
+    assert not body_matches(item, body("EV-2026-09-01-001", "書き換えられた本文"))
+    assert not body_matches(item, body("EV-2026-09-01-002"))
+
+
+def test_a_body_that_does_not_hash_to_its_own_digest_is_refused():
     with pytest.raises(ValidationError, match="does not hash the content"):
-        EvidenceBundle.model_validate(payload)
+        EvidenceBody(
+            bundle_id="EB-1", content="本文", content_sha256=sha256_text("違う本文")
+        )
 
 
 @pytest.mark.parametrize("status", [s for s in CAPTURE_STATUSES if s != "captured"])
-def test_a_bundle_that_was_not_captured_carries_nothing_in_place_of_it(status):
-    """An empty string or a placeholder would read downstream as a source that
-    said nothing, which is a different fact from a source nobody could read.
-    The status is how the absence stays visible."""
+def test_a_bundle_that_was_not_captured_claims_no_body(status):
+    """A hash would claim a body exists in the private store, and downstream
+    that reads as a source that was read — a different fact from a source
+    nobody could read. The status is how the absence stays visible."""
     item = bundle("EV-2026-09-01-001", status=status)
-    assert item.content is None and item.content_sha256 is None
+    assert item.content_sha256 is None
     payload = item.model_dump(mode="json")
-    payload["content"] = ""
-    with pytest.raises(ValidationError, match="carries no content"):
+    payload["content_sha256"] = sha256_text("何か")
+    with pytest.raises(ValidationError, match="no body to hash"):
         EvidenceBundle.model_validate(payload)
 
 
-def test_a_captured_bundle_must_actually_carry_something():
+def test_a_captured_bundle_must_say_what_it_captured():
     payload = bundle("EV-2026-09-01-001").model_dump(mode="json")
-    payload["content"] = None
     payload["content_sha256"] = None
-    with pytest.raises(ValidationError, match="has to carry what it captured"):
+    with pytest.raises(ValidationError, match="hash of what it captured"):
         EvidenceBundle.model_validate(payload)
 
 
@@ -179,15 +210,15 @@ def test_reading_a_source_twice_keeps_both_reads(tmp_path):
     """A re-read is a second observation, not a correction of the first. A page
     that changed between two reads is itself a fact about the evidence."""
     path = tmp_path / "bundles.jsonl"
-    first = bundle("EV-2026-09-01-001", text="初回の本文")
-    append_bundles(path, [first])
+    append_bundles(path, [bundle("EV-2026-09-01-001", text="初回の本文")])
     later = bundle("EV-2026-09-01-001", text="差し替え後の本文",
                    retrieved_at=DAY + timedelta(days=1))
-    later = later.model_copy(update={"bundle_id": "EB-EV-2026-09-01-001-2"})
-    append_bundles(path, [later])
+    append_bundles(path, [later.model_copy(update={"bundle_id": "EB-EV-2026-09-01-001-2"})])
     stored = read_bundles(path)
     assert len(stored) == 2
-    assert {b.content for b in stored} == {"初回の本文", "差し替え後の本文"}
+    # The hashes differ, which is how the change is visible without either text
+    # ever being committed.
+    assert stored[0].content_sha256 != stored[1].content_sha256
     assert stored[0].bundle_id != stored[1].bundle_id
 
 
@@ -234,18 +265,21 @@ def test_evidence_for_an_event_outside_the_population_is_refused(tmp_path):
         verify(*written(tmp_path, pop, bundles))
 
 
-def test_content_edited_on_disk_is_refused(tmp_path):
+def test_a_captured_row_with_its_hash_stripped_on_disk_is_refused(tmp_path):
     """The model validator checks this when a bundle is built. This is the case
-    that matters: the file is what a future model reads."""
+    that matters: the file is what a future reader has, and it is edited by
+    whatever touches the file. Without the hash the row can never be matched to
+    a body in the private store.
+    """
     pop = manifest(included=1)
     manifest_path, bundles_path = written(tmp_path, pop, [bundle(pop.included[0].event_id)])
     rows = [json.loads(line) for line in bundles_path.read_text(encoding="utf-8").splitlines()]
-    rows[0]["content"] = "書き換えられた本文"
+    rows[0].pop("content_sha256")
     bundles_path.write_text(
         "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows),
         encoding="utf-8",
     )
-    with pytest.raises(ValidationError, match="does not hash the content"):
+    with pytest.raises(ValidationError, match="hash of what it captured"):
         verify(manifest_path, bundles_path)
 
 
@@ -263,12 +297,12 @@ def test_nothing_here_extracts_a_fact_or_assigns_a_rank():
     """
     fields = set(EvidenceBundle.model_fields) | set(PopulationManifest.model_fields)
     fields |= set(EventRef.model_fields) | set(ExcludedEvent.model_fields)
+    fields |= set(EvidenceBody.model_fields)
     for forbidden in ("rank", "surprise", "judge", "narrative", "reason_codes",
                       "score", "grade", "model", "prompt", "extracted"):
         assert not any(forbidden in name for name in fields), (forbidden, sorted(fields))
     # And the one field that could smuggle a verdict in is text with a hash
     # over it, not a category anything downstream would group on.
-    assert EvidenceBundle.model_fields["content"].annotation is not None
     assert "content_sha256" in EvidenceBundle.model_fields
 
 

@@ -116,12 +116,17 @@ def test_every_status_is_one_the_review_defines():
 
 def test_being_a_candidate_is_not_being_approved():
     """`approved_candidate` means the terms and the capability fit and a
-    contract-and-cost decision is still open. It unlocks nothing."""
+    contract-and-cost decision is still open. It unlocks nothing.
+
+    Stated as a property of the status rather than of today's table. Requiring
+    a candidate row to exist would fail CI the moment the last one is promoted
+    to `approved` — the outcome the document plans for — so the test would have
+    blocked the very step it was written to protect.
+    """
     assert "approved_candidate" not in APPROVED
-    candidates = [c for c in candidate_rows() if status_of(c) == "approved_candidate"]
-    assert candidates, "the table has no candidate to check this against"
-    for cells in candidates:
-        assert (cells[0].strip("` "), cells[1].strip("` ")) not in approved_uses()
+    for cells in candidate_rows():
+        if status_of(cells) == "approved_candidate":
+            assert (cells[0].strip("` "), cells[1].strip("` ")) not in approved_uses()
 
 
 def test_every_use_is_reviewed_separately_for_every_source():
@@ -210,3 +215,42 @@ def test_the_review_records_where_the_body_may_and_may_not_live():
     body = section()
     for claim in ("public", "private store", "再配信"):
         assert claim in body, claim
+
+
+def test_the_terms_that_drive_the_design_can_be_reproduced():
+    """A licensing conclusion with no citation cannot be re-checked.
+
+    These conclusions decide where a disclosure body may live, so an auditor —
+    or the next person to promote a candidate — has to be able to read the same
+    pages. Terms change; a conclusion with no retrieval date cannot be told
+    apart from one that was true last year.
+    """
+    body = section()
+    assert "### 参照した公開情報" in body
+    start = body.index("### 参照した公開情報")
+    end = body.index("\n### ", start + 1)
+    citations = [line for line in body[start:end].splitlines() if line.startswith("| ")]
+    # header, rule, and one row per source
+    assert len(citations) >= 5, citations
+    for line in citations[2:]:
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        assert cells[1], line          # 参照
+        assert "2026-" in cells[2], line   # 取得日
+        assert cells[3], line          # 読み取ったこと
+
+
+def test_promotion_is_gated_on_re_reading_those_pages():
+    """Written into the document rather than left as a habit: the check above
+    proves the citations exist, and this proves the document says they must be
+    taken again before anything is promoted."""
+    body = section()
+    assert "取り直して差分を確認する" in body
+
+
+def test_what_is_still_unknown_is_named_rather_than_left_blank():
+    """One question decides whether the free path exists at all, and the
+    document has to say which one it is."""
+    body = section()
+    assert "### 未確定のまま残っていること" in body
+    assert "DisclosedTime" in body
+    assert "予定は確認ではない" in body

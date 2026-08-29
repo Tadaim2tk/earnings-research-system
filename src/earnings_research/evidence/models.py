@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SCHEMA_POPULATION = "evidence_population_manifest_v1"
 SCHEMA_BUNDLE = "evidence_bundle_v1"
+SCHEMA_BODY = "evidence_body_v1"
 
 # What happened when this source was fetched. Every one of these is a recorded
 # outcome; none of them is a reason to quietly put something else in its place.
@@ -123,13 +124,45 @@ class PopulationManifest(BaseModel):
         return [item.event_id for item in self.included]
 
 
-class EvidenceBundle(BaseModel):
-    """One source, as it was when it was read.
+class EvidenceBody(BaseModel):
+    """The text itself, which lives outside this repository.
 
-    `content_sha256` is over `content`, so the stored text can be shown to be
-    the text that was hashed. Together with `retrieved_at` that is what lets a
-    model years from now read the same thing rather than whatever the URL says
-    by then — most of these pages are replaced, and some stop existing.
+    Kept apart because this repository is public and the terms that permit
+    fetching a disclosure for one's own analysis do not permit redistributing
+    it. A body committed here would be redistributed the moment it landed, and
+    a contract would not make that allowed.
+
+    The split costs nothing that matters: `content_sha256` travels in the
+    public record, so a body read again years from now can be shown to be the
+    same text without the text ever being published.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["evidence_body_v1"] = SCHEMA_BODY
+    bundle_id: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_body(self):
+        if self.content_sha256 != sha256_text(self.content):
+            raise ValueError("content_sha256 does not hash the content beside it")
+        return self
+
+
+class EvidenceBundle(BaseModel):
+    """One source, as it was when it was read — everything except the text.
+
+    There is no `content` field, and that is the point. A rule saying "do not
+    commit the body" is a rule somebody has to keep; a record with nowhere to
+    put a body keeps it by construction. The body goes to a private store as an
+    `EvidenceBody`, and `content_sha256` here is what ties the two together.
+
+    An earlier version carried the text and was committed to a public
+    repository. The terms permit accumulating disclosures for one's own
+    analysis and not redistributing them, so that design could not be used even
+    under a contract.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -143,7 +176,8 @@ class EvidenceBundle(BaseModel):
     published_at: Optional[datetime] = None
     retrieved_at: datetime
     capture_status: CaptureStatus
-    content: Optional[str] = None
+    # The hash of the body, not the body. Present exactly when something was
+    # captured, so the record still says what was read without carrying it.
     content_sha256: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # How this source came to be fetched at all. A URL with no discovery
     # provenance cannot be re-derived, and the order matters: a model reading
@@ -161,16 +195,32 @@ class EvidenceBundle(BaseModel):
         if self.published_at is not None and self.published_at.tzinfo is None:
             raise ValueError("published_at must include timezone")
         if self.capture_status == "captured":
-            if not self.content:
-                raise ValueError("a captured bundle has to carry what it captured")
-            if self.content_sha256 != sha256_text(self.content):
-                raise ValueError("content_sha256 does not hash the content beside it")
-        else:
-            # Absence is recorded as absence. An empty string or a placeholder
-            # here would read downstream as a source that said nothing, which
-            # is a different fact from a source nobody could read.
-            if self.content is not None or self.content_sha256 is not None:
+            if not self.content_sha256:
                 raise ValueError(
-                    "a bundle that was not captured carries no content; its status is the record"
+                    "a captured bundle has to carry the hash of what it captured, "
+                    "which is what ties it to the body in the private store"
+                )
+        else:
+            # Absence is recorded as absence. A hash here would claim a body
+            # exists somewhere, and downstream that reads as a source that was
+            # read — a different fact from a source nobody could read.
+            if self.content_sha256 is not None:
+                raise ValueError(
+                    "a bundle that was not captured has no body to hash; its status is the record"
                 )
         return self
+
+
+def body_matches(bundle: EvidenceBundle, body: EvidenceBody) -> bool:
+    """Whether a body from the private store is the one this record describes.
+
+    Checked where the two meet rather than assumed. The public half can be
+    verified on its own — that is the whole point of keeping the hash — but a
+    body handed back later is only the right one if it hashes to what the
+    record already said.
+    """
+    return (
+        bundle.bundle_id == body.bundle_id
+        and bundle.capture_status == "captured"
+        and bundle.content_sha256 == body.content_sha256 == sha256_text(body.content)
+    )
