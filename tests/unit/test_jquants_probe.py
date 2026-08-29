@@ -14,6 +14,8 @@ testing the behaviour.
 """
 
 import ast
+import importlib.util
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -126,3 +128,69 @@ def test_it_authenticates_by_key_alone():
     values = code_literals()
     assert "x-api-key" in values
     assert "Authorization" not in values
+
+
+def probe():
+    """The module itself, loaded by path.
+
+    It is not importable as part of the package on purpose, so a test that
+    wants to exercise its decisions has to go and get it.
+    """
+    spec = importlib.util.spec_from_file_location("jquants_probe", PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TIMED = [{"DiscDate": "2026-05-08", "DiscTime": "14:30:00"}]
+BLANK = [{"DiscDate": "2026-05-08", "DiscTime": ""}]
+NONE_ = [{"DiscDate": "2026-05-08"}]
+
+
+def test_a_populated_field_alone_does_not_establish_the_free_entitlement():
+    """The finding that prompted this: a key of unknown plan returning a time
+    proves what THIS key may fetch, not what the free plan carries. The free
+    entitlement is recognised by what it withholds, so the verdict may only
+    claim it when the recent window came back empty."""
+    classify = probe().classify
+    fields = ["DiscDate", "DiscTime"]
+    assert classify(fields, TIMED, False)[0] == "restricted"
+    assert classify(fields, TIMED, True)[0] == "unrestricted"
+    assert classify(fields, TIMED, None)[0] == "unverified"
+    # The one that must never happen: recent data visible, free path claimed.
+    for sees_recent in (True, None):
+        outcome, sentence = classify(fields, TIMED, sees_recent)
+        assert outcome != "restricted", (sees_recent, sentence)
+
+
+def test_declared_and_empty_is_not_a_source():
+    classify = probe().classify
+    assert classify(["DiscDate", "DiscTime"], BLANK, False)[0] == "empty"
+    assert classify(["DiscDate"], NONE_, False)[0] == "absent"
+
+
+def test_the_entitlement_check_decides_nothing_on_an_unrelated_failure():
+    """403 and 400 are the window refusing; anything else is noise, and noise
+    must not read as `withheld` — that is the direction that would manufacture
+    a free-tier conclusion out of a network hiccup."""
+    import io
+    import urllib.error
+
+    module = probe()
+
+    def raising(code):
+        def _get(path, params, key):
+            raise urllib.error.HTTPError("u", code, "m", {}, io.BytesIO(b"{}"))
+        return _get
+
+    for code in (400, 403):
+        module.get = raising(code)
+        assert module.visibility("k", date(2026, 8, 21))[0] is False, code
+    for code in (429, 500, 502):
+        module.get = raising(code)
+        assert module.visibility("k", date(2026, 8, 21))[0] is None, code
+
+    module.get = lambda path, params, key: {"data": [{"DiscDate": "2026-08-21"}]}
+    assert module.visibility("k", date(2026, 8, 21))[0] is True
+    module.get = lambda path, params, key: {"data": []}
+    assert module.visibility("k", date(2026, 8, 21))[0] is False

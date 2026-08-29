@@ -21,6 +21,12 @@ refresh token for an ID token and sending `Authorization: Bearer`; V2 issues a
 key from the dashboard and expects it in `x-api-key`, and the two headers may
 not be sent together. `/v1/fins/statements` became `/v2/fins/summary`. The
 first run returned 403 on all three counts at once.
+
+The plan behind the key is inferred, not assumed. A populated field proves what
+*this key* is entitled to; saying "the Free tier has it" from a key of unknown
+plan is a different claim than the request supports. The free entitlement
+withholds a recent window, so one date inside that window separates a restricted
+key from an unrestricted one — same endpoint, no plan lookup.
 """
 
 import json
@@ -38,6 +44,11 @@ TIMEOUT = 30
 # that is left, and a schedule read in advance cannot confirm that a
 # publication occurred (ERS-ADR-0062).
 WANTED = ("DiscDate", "DiscTime")
+
+# The plan is not asked for; it is inferred. The Free entitlement withholds a
+# recent window, so a date inside that window separates a restricted key from
+# an unrestricted one without a second endpoint.
+RECENT_WEEKS = 3
 
 
 def get(path, params, key):
@@ -63,6 +74,55 @@ def rows_in(payload):
         if isinstance(value, list) and value and isinstance(value[0], dict):
             return value, name
     return [], "(none found)"
+
+
+def visibility(key, day):
+    """Whether this key can see a date inside the withheld recent window.
+
+    True  — recent data came back, so the key is not under the free window.
+    False — withheld, which is what the free entitlement does.
+    None  — the request failed for a reason that decides nothing.
+    """
+    try:
+        payload = get("/fins/summary", {"date": day.strftime("%Y%m%d")}, key)
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        return (False, "HTTP %s" % exc.code) if exc.code in (400, 403) else (None, "HTTP %s" % exc.code)
+    except urllib.error.URLError as exc:
+        return None, str(exc.reason)
+    rows, _ = rows_in(payload)
+    return len(rows) > 0, "%d rows" % len(rows)
+
+
+def classify(fields, rows, sees_recent):
+    """The verdict, as a decision over what was observed.
+
+    Kept separate from the request so the branches can be exercised directly.
+    Nothing here names a plan: a populated field proves what *this key* is
+    entitled to, and the plan behind the key is inferred, never assumed.
+    """
+    declared = [f for f in WANTED if "Time" in f and f in fields]
+    populated = [
+        r for r in rows
+        if any("Time" in f and str(r.get(f) or "").strip() for f in declared)
+    ]
+    if not declared:
+        return "absent", ("No disclosure time in this response. The free path for "
+                          "timing provenance does not exist; only the announcement "
+                          "schedule does, and a schedule is not a confirmation.")
+    if not populated:
+        return "empty", ("The time field is declared but empty on this date. Declared "
+                         "and unpopulated is not a source; try another date.")
+    if sees_recent is True:
+        return "unrestricted", ("This key also returns data inside the recent window, so "
+                                "it is not under the free entitlement. The field exists "
+                                "for THIS key; free availability is not shown by this run.")
+    if sees_recent is None:
+        return "unverified", ("The field is populated, but the entitlement check did not "
+                              "decide. Treat the plan as an unverified prerequisite.")
+    return "restricted", ("The field is populated and the recent window is withheld, "
+                          "which is what the free entitlement does. The zero-cost path "
+                          "exists, on the delay.")
 
 
 def main():
@@ -109,6 +169,13 @@ def main():
 
     fields = sorted(rows[0])
     print("fields returned: %d" % len(fields))
+
+    recent = date.today() - timedelta(weeks=RECENT_WEEKS)
+    while recent.weekday() >= 5:
+        recent -= timedelta(days=1)
+    sees_recent, detail = visibility(key, recent)
+    print("recent window %s: %s (sees recent: %s)" % (recent, detail, sees_recent))
+
     print("\n--- the question")
     for name in WANTED:
         mark = "yes" if name in fields else "no "
@@ -119,23 +186,15 @@ def main():
             sample = "   e.g. %r" % rows[0][name]
         print("  %-10s %s%s" % (name, mark, sample))
 
-    populated = [
-        r for r in rows
+    filled = sum(
+        1 for r in rows
         if any("Time" in f and str(r.get(f) or "").strip() for f in WANTED)
-    ]
-    print("  rows with a non-empty time: %d / %d" % (len(populated), len(rows)))
+    )
+    print("  rows with a non-empty time: %d / %d" % (filled, len(rows)))
 
-    print("\n--- verdict")
-    if populated:
-        print("  The Free tier carries a disclosure time. The zero-cost timing")
-        print("  path exists, on the twelve-week delay.")
-    elif any("Time" in f for f in fields if f in WANTED):
-        print("  The time field is present but empty on this date. Declared and")
-        print("  unpopulated is not a source; try another date before deciding.")
-    else:
-        print("  No disclosure time in this response. The free path for timing")
-        print("  provenance does not exist; only the announcement schedule does,")
-        print("  and a schedule is not a confirmation.")
+    outcome, sentence = classify(fields, rows, sees_recent)
+    print("\n--- verdict [%s]" % outcome)
+    print("  " + sentence)
 
     missing = [f for f in WANTED if f not in fields]
     if missing:
