@@ -32,10 +32,10 @@ from earnings_research.statistics.lookahead import (
     prices_for,
 )
 
-EVENT5 = "decision_d1_close__entry_d2_open__exit_event_d5_close"
-EVENT20 = "decision_d1_close__entry_d2_open__exit_event_d20_close"
-PLUS5 = "decision_d1_close__entry_d2_open__exit_entry_plus5_close"
-PLUS20 = "decision_d1_close__entry_d2_open__exit_entry_plus20_close"
+EVENT5 = "entry_i0p2_open__exit_i0p5_close"
+EVENT20 = "entry_i0p2_open__exit_i0p20_close"
+PLUS5 = "entry_i0p2_open__exit_i0p7_close"
+PLUS20 = "entry_i0p2_open__exit_i0p22_close"
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORDS = ROOT / "data/historical_research/earnings_research_os/v1/source/records.csv"
@@ -58,7 +58,7 @@ def test_the_fill_price_is_the_open_after_the_session_the_label_is_read_at():
     that decides it.
     """
     for name in (EVENT5, EVENT20, PLUS5, PLUS20):
-        assert prices_for(name)[0] == "entry_open", name
+        assert prices_for(name)[0] == "i0p2_open", name
         for cohort in ("rank", "narrative", "judge", "surprise", "shodo", "reaction"):
             assert contamination(cohort, name) is None, (cohort, name)
 
@@ -72,22 +72,35 @@ def test_the_two_axes_share_an_entry_and_differ_only_in_what_moves():
     exit-fixed pair is the entry and a difference within the holding-fixed pair
     is the duration.
     """
-    assert prices_for(EVENT5) == ("entry_open", "d5_close")
-    assert prices_for(EVENT20) == ("entry_open", "d20_close")
-    assert prices_for(PLUS5) == ("entry_open", "entry_plus5_close")
-    assert prices_for(PLUS20) == ("entry_open", "entry_plus20_close")
+    assert prices_for(EVENT5) == ("i0p2_open", "d5_close")
+    assert prices_for(EVENT20) == ("i0p2_open", "d20_close")
+    assert prices_for(PLUS5) == ("i0p2_open", "i0p7_close")
+    assert prices_for(PLUS20) == ("i0p2_open", "i0p22_close")
     assert set(COMPARISON_AXIS["duration"]) == {PLUS5, PLUS20}
     assert {EVENT5, EVENT20} <= set(COMPARISON_AXIS["entry"])
     # No series appears on both axes; a name that did would answer neither.
     assert not set(COMPARISON_AXIS["entry"]) & set(COMPARISON_AXIS["duration"])
 
 
-def test_no_series_is_named_only_by_its_horizon():
-    """`d5` meant a five-session hold from the previous close, four from the
-    first open and three from the fill, printed in the same table. A reader
-    comparing them was comparing entry and duration at once."""
+def test_every_series_is_named_by_the_sessions_it_spans():
+    """And by nothing else.
+
+    An earlier draft called these `decision_d1_close__entry_d2_open__…`, which
+    asserts that the disclosure lands after i0's close and that i0+1 is the
+    first reacting session. The record cannot support that — there is no
+    announcement session, and `date` may be a before-open, intraday or
+    after-close event — so the names say which sessions the prices come from
+    and leave the interpretation to the ADR that owns it.
+
+    `d5` alone was the other half of the problem: a five-session hold from the
+    previous close, four from the first open, three from i0+2, all in one table.
+    """
     for name in (EVENT5, EVENT20, PLUS5, PLUS20):
-        assert name.startswith("decision_") and "__entry_" in name and "__exit_" in name
+        assert name.startswith("entry_i0p") and "__exit_i0p" in name, name
+        assert "decision_" not in name, name
+    # The offsets are in the name, so the hold length is readable from it.
+    assert prices_for(PLUS5)[1] == "i0p7_close"
+    assert prices_for(EVENT5)[1] == "d5_close"
 
 
 def test_a_label_fixed_after_every_price_is_still_refused():
@@ -95,7 +108,7 @@ def test_a_label_fixed_after_every_price_is_still_refused():
     one is not an exception. Their span is read off the anchor table, so adding
     a price extends it without anybody remembering to."""
     for cohort in ("dollar_environment", "volatility_environment"):
-        assert "entry_open" in COHORT_SPAN[cohort]
+        assert "i0p2_open" in COHORT_SPAN[cohort]
         assert contamination(cohort, EVENT5) is not None
         assert contamination(cohort, PLUS20) is not None
 
@@ -181,3 +194,68 @@ def test_prices_that_do_not_match_their_digest_are_refused(tmp_path):
     prices.write_text((ROOT / ENTRY_PRICES).read_text(encoding="utf-8") + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="do not match the digest"):
         with_entry_prices(records(), prices, ROOT / ENTRY_MANIFEST)
+
+
+def test_a_price_file_that_omits_an_event_is_refused(tmp_path):
+    """A digest proves the bytes are the ones recorded. Only coverage proves
+    they are about the same events.
+
+    A truncated file with a regenerated digest used to pass: `disagreements`
+    iterates the fetched rows, so an omitted event has nothing to disagree
+    with, and `attach` gave it an empty price. The published tables then showed
+    a smaller denominator as though the observation had not occurred.
+    """
+    from earnings_research.legacy_research.entry_prices import uncovered
+
+    rows, source = fetched(), records()
+    assert uncovered(rows, source) == []
+    assert len(uncovered(rows[:-5], source)) == 5
+
+    prices = tmp_path / "sessions.jsonl"
+    prices.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows[:-5]),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    payload = json.loads((ROOT / ENTRY_MANIFEST).read_text(encoding="utf-8"))
+    payload["sha256"] = digest(prices)
+    manifest.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    # The manifest still claims 254, so this trips the manifest-versus-file
+    # check first — the one that used to compare the manifest against the
+    # record, which it makes no claim about.
+    with pytest.raises(ValueError, match="manifest records 254 events and the file holds 249"):
+        with_entry_prices(source, prices, manifest)
+    # With the count corrected too, the coverage check is what stands between a
+    # trimmed file and five silently smaller denominators.
+    payload["event_count"] = 249
+    manifest.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="in the record but not in the fetched prices"):
+        with_entry_prices(source, prices, manifest)
+
+
+def test_an_event_recorded_as_having_no_session_still_counts_as_covered():
+    """Different from an omission. The file states the session is absent, and
+    the count of those stays visible; an omitted event says nothing at all."""
+    from earnings_research.legacy_research.entry_prices import uncovered
+
+    rows = fetched()
+    unpriced = [row for row in rows if row.get("status") != "ok"]
+    assert unpriced
+    assert uncovered(rows, records()) == []
+
+
+def test_a_signed_off_discrepancy_only_excuses_the_values_that_were_reviewed(tmp_path):
+    """Keyed on the row and column alone, those two cells were exempt for
+    whatever value ever appeared there — so a re-fetch reading the wrong ticker
+    would sail past on the two cells most likely to reveal it."""
+    from earnings_research.legacy_research.entry_prices import accepted
+
+    allowed = accepted(ROOT / ENTRY_MANIFEST)
+    assert set(allowed) == {("5609", "2026-07-29", "next_open"), ("8316", "2026-07-31", "next_open")}
+    assert allowed[("5609", "2026-07-29", "next_open")] == (936.0, 935.0)
+
+    rows = [row for row in fetched() if row["code"] == "5609" and row["event_date"] == "2026-07-29"]
+    assert rows and disagreements(rows, records(), allowed) == []
+    wrong = json.loads(json.dumps(rows[0]))
+    wrong["derived"]["next_open"] = 500.0
+    assert disagreements([wrong], records(), allowed) != []

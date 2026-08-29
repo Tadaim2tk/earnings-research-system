@@ -24,16 +24,16 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 SCHEMA_VERSION = "legacy_event_sessions_v1"
-ENTRY_FIELD = "entry_open"
+ENTRY_FIELD = "i0p2_open"
 
 # Which session each price column comes from, counting the announcement day as
 # i0. Written as offsets rather than as five named fetches, because the first
 # pass stored named prices and adding one series meant fetching all 254 events
 # again — a research question shaped by what was convenient to store.
 PRICE_OFFSETS = {
-    "entry_open": (2, "open"),
-    "entry_plus5_close": (7, "close"),
-    "entry_plus20_close": (22, "close"),
+    "i0p2_open": (2, "open"),
+    "i0p7_close": (7, "close"),
+    "i0p22_close": (22, "close"),
 }
 
 Key = Tuple[str, str]
@@ -99,22 +99,49 @@ def attach(records, prices: Dict[Key, Dict[str, float]]) -> List[dict]:
     return out
 
 
-def accepted(manifest_path: Path) -> set:
-    """Disagreements already measured, named, and signed off.
+def accepted(manifest_path: Path) -> Dict[tuple, tuple]:
+    """Disagreements already measured, named, and signed off — with their values.
 
-    Two of 1146 known price points came back different — both `next_open`,
-    both under 0.15%, neither feeding the entry anchor. Listing them keeps the
-    check strict: a third disagreement fails instead of joining them quietly
-    under a tolerance nobody chose.
+    Two of 1146 known price points came back different: both `next_open`, both
+    under 0.15%, neither feeding the entry anchor. Listing them keeps the check
+    strict, so a third fails instead of joining them under a tolerance nobody
+    chose.
+
+    Keyed to the exact pair of numbers, not just to the row and the column.
+    Keyed on `(code, date, field)` alone, those two cells were exempt for
+    whatever value ever appeared there — so a re-fetch that read the wrong
+    ticker would sail past on the two cells most likely to show it.
     """
     payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     return {
-        (item["code"], item["event_date"], item["field"])
+        (item["code"], item["event_date"], item["field"]): (item["record"], item["fetched"])
         for item in payload.get("accepted_discrepancies", [])
     }
 
 
-def disagreements(rows, records, allowed=frozenset()) -> List[str]:
+def uncovered(rows, records) -> List[str]:
+    """Events in the record that the fetched file says nothing about.
+
+    Not the same as an event with no price. A row recorded as `no_session` is
+    covered — the file states that the session is absent, and the count of
+    those stays visible. An event the file omits entirely is different: the
+    aggregation would give it an empty price and publish a smaller denominator
+    as though the observation had simply not occurred.
+
+    That is how a truncated file with a regenerated digest used to pass. The
+    digest proves the bytes are the ones recorded; only this proves they are
+    about the same events.
+    """
+    fetched = {(row.get("code"), row.get("event_date")) for row in rows}
+    return [
+        "%s %s is in the record but not in the fetched prices"
+        % (item.get("code"), item.get("date"))
+        for item in records
+        if (item.get("code"), item.get("date")) not in fetched
+    ]
+
+
+def disagreements(rows, records, allowed=None) -> List[str]:
     """Where the fetch and the committed record disagree about a known price.
 
     The five prices the record already holds are re-derived by the fetch. They
@@ -138,7 +165,11 @@ def disagreements(rows, records, allowed=frozenset()) -> List[str]:
             held = record.get(name)
             if held in (None, "") or fetched is None:
                 continue
-            if (row["code"], row["event_date"], name) in allowed:
+            signed_off = (allowed or {}).get((row["code"], row["event_date"], name))
+            if signed_off and (
+                abs(float(held) - signed_off[0]) < 1e-9
+                and abs(float(fetched) - signed_off[1]) < 1e-9
+            ):
                 continue
             if abs(float(held) - round(float(fetched), 1)) > 0.6:
                 problems.append(

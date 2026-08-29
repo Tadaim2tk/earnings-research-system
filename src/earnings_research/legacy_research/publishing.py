@@ -12,15 +12,23 @@ from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import prices_for
 
 from .aggregation import build_aggregation
-from .entry_prices import accepted, attach as attach_entry_prices, by_event, digest as entry_digest, disagreements, read as read_entry_prices
+from .entry_prices import (
+    accepted,
+    attach as attach_entry_prices,
+    by_event,
+    digest as entry_digest,
+    disagreements,
+    read as read_entry_prices,
+    uncovered,
+)
 from .labels import cohort_label
 
 # Long on purpose. "d5" meant a five-session hold from the previous close, four
 # from the first open and three from the fill, all printed in the same table.
-EXIT_EVENT_D5 = "decision_d1_close__entry_d2_open__exit_event_d5_close"
-EXIT_EVENT_D20 = "decision_d1_close__entry_d2_open__exit_event_d20_close"
-EXIT_PLUS5 = "decision_d1_close__entry_d2_open__exit_entry_plus5_close"
-EXIT_PLUS20 = "decision_d1_close__entry_d2_open__exit_entry_plus20_close"
+EXIT_EVENT_D5 = "entry_i0p2_open__exit_i0p5_close"
+EXIT_EVENT_D20 = "entry_i0p2_open__exit_i0p20_close"
+EXIT_PLUS5 = "entry_i0p2_open__exit_i0p7_close"
+EXIT_PLUS20 = "entry_i0p2_open__exit_i0p22_close"
 
 # Three entries into the same exit, then two holds from the same entry. The
 # first group answers where to get in, the second how long to stay; a table
@@ -534,7 +542,17 @@ def with_entry_prices(rows, path: Path, manifest_path: Path):
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     if manifest["sha256"] != entry_digest(path):
         raise ValueError("fetched prices do not match the digest recorded for them")
-    problems = disagreements(fetched, rows, accepted(manifest_path))
+    # Two checks with different jobs. This one asks whether the manifest and the
+    # file agree; `uncovered` below asks whether the file and the record do.
+    # Written against `len(rows)` — the record — it compared the manifest to
+    # something it makes no claim about, and a truncated file with a
+    # regenerated digest passed it untouched.
+    if manifest["event_count"] != len(fetched):
+        raise ValueError(
+            "the manifest records %d events and the file holds %d"
+            % (manifest["event_count"], len(fetched))
+        )
+    problems = uncovered(fetched, rows) + disagreements(fetched, rows, accepted(manifest_path))
     if problems:
         raise ValueError(
             "fetched prices disagree with the record in %d places: %s"

@@ -288,8 +288,8 @@ def _dated_rows(count, start_day=1):
             "code": "%04d" % (index + 1000),
             "date": "2026-0%d-%02d" % (1 + index // 28, 1 + index % 28),
             "prev_close": "100", "next_open": "101", "next_close": "102",
-            "entry_open": "102.5", "d5_close": "103", "d20_close": "104",
-            "entry_plus5_close": "105", "entry_plus20_close": "106",
+            "i0p2_open": "102.5", "d5_close": "103", "d20_close": "104",
+            "i0p7_close": "105", "i0p22_close": "106",
             "gap": "0.01", "ret_d1": "0.02", "ret_d5": "0.03", "ret_d20": "0.04",
             "shodo": "GU", "reaction": "GU継続", "rank": "B", "narrative": "増収増益",
         }
@@ -386,9 +386,9 @@ def test_the_published_statistics_cannot_see_the_reserved_period():
     note_before = _note_insights(render_note(rows, date(2026, 6, 10)))
     for row in split.reserved:
         # Returns nothing like the explored period's, in every anchored field.
-        row.update({"next_open": "100", "next_close": "180", "entry_open": "185",
+        row.update({"next_open": "100", "next_close": "180", "i0p2_open": "185",
                     "d5_close": "220", "d20_close": "260",
-                    "entry_plus5_close": "240", "entry_plus20_close": "280"})
+                    "i0p7_close": "240", "i0p22_close": "280"})
         row["ret_d1"] = row["ret_d5"] = row["ret_d20"] = "0.8"
     after = render_dashboard(rows, "2026-06-10 00:00")
     note_after = _note_insights(render_note(rows, date(2026, 6, 10)))
@@ -406,9 +406,9 @@ def test_changing_the_explored_period_does_move_the_published_statistics():
     split = split_by_date(rows)
     before = render_dashboard(rows, "2026-06-10 00:00")
     for row in split.exploration:
-        row.update({"next_open": "100", "next_close": "180", "entry_open": "185",
+        row.update({"next_open": "100", "next_close": "180", "i0p2_open": "185",
                     "d5_close": "220", "d20_close": "260",
-                    "entry_plus5_close": "240", "entry_plus20_close": "280"})
+                    "i0p7_close": "240", "i0p22_close": "280"})
     after = render_dashboard(rows, "2026-06-10 00:00")
     assert _statistics_section(after) != _statistics_section(before)
 
@@ -455,13 +455,13 @@ def _varied_rows(count=40):
             "next_close": "%.2f" % (opening * (1 + drift)),
             # The fill price sits one bar past the close the label is read at,
             # and on its own modulus so a cohort cannot share a value with it.
-            "entry_open": "%.2f" % (opening * (1 + drift) + (index * 5) % 7 / 10),
+            "i0p2_open": "%.2f" % (opening * (1 + drift) + (index * 5) % 7 / 10),
             "d5_close": "%.2f" % (opening * (1 + drift * 2)),
             "d20_close": "%.2f" % (opening * (1 + drift * 3)),
             # Two sessions further out than the event-anchored exits, on their
             # own drift so a holding-fixed column cannot equal an exit-fixed one.
-            "entry_plus5_close": "%.2f" % (opening * (1 + drift * 2 + 0.004)),
-            "entry_plus20_close": "%.2f" % (opening * (1 + drift * 3 + 0.006)),
+            "i0p7_close": "%.2f" % (opening * (1 + drift * 2 + 0.004)),
+            "i0p22_close": "%.2f" % (opening * (1 + drift * 3 + 0.006)),
             "gap": "%.4f" % ((opening - 100) / 100),
             "ret_d1": "%.4f" % (drift + 0.02),
             "ret_d5": "%.4f" % (drift * 2 + 0.02),
@@ -584,9 +584,9 @@ def _expected_figures(rows, column, label, entry_column, exit_column):
 # which is what keeps the two questions apart.
 BOTH_AXES = (
     # three entries into the same exit — where to get in
-    ("next_open", "d20_close"), ("next_close", "d20_close"), ("entry_open", "d20_close"),
+    ("next_open", "d20_close"), ("next_close", "d20_close"), ("i0p2_open", "d20_close"),
     # two holds from the same entry — how long to stay
-    ("entry_open", "entry_plus5_close"), ("entry_open", "entry_plus20_close"),
+    ("i0p2_open", "i0p7_close"), ("i0p2_open", "i0p22_close"),
 )
 PUBLISHED_TABLES = tuple(
     (heading, column, BOTH_AXES)
@@ -786,7 +786,7 @@ def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
     for line in insights:
         label = line.split("「")[1].split("」")[0]
         match = lambda row, label=label: row.get("narrative") == label
-        sound = _anchored(explored, match, "decision_d1_close__entry_d2_open__exit_event_d20_close")
+        sound = _anchored(explored, match, "entry_i0p2_open__exit_i0p20_close")
         stale = _avg(explored, match, "ret_d20")
         assert sound != stale, label
         assert line.endswith(sound), (line, sound)
