@@ -1408,3 +1408,31 @@ Consequences: **取得元はまだ決めていない。** 母集団もEvidence�
 テストは 1100→1120。変異で確認: 未取得でもcontentを許す（3本落ちる）/ hash照合をやめる（2本）/ 母集団の上書きを許す / 未着手eventの検査を外す / 母集団外のeventを通す / appendを上書きに変える / 固定前の取得を通す / 境界を排他にする / manifest_id の照合をやめる。
 
 スコープ検査は当初ソースを grep して `rank` や `judge` を禁じていたが、**この能力が何をしないかを説明した docstring 自身に引っかかった** — 文章を縛って挙動を縛らないテストだった。モデルのフィールドに対する検査に置き換えた。
+
+---
+
+## ERS-ADR-0061
+
+Title: 取得元の可否を表にし、その表を検査で縛る
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Context: ERS-ADR-0060 で Immutable Evidence Capture を作ったが、取得元は抽象化したまま残した。母集団（当日の決算発表企業一覧）もEvidence（開示本文）も外部取得であり、`AGENTS.md` が取得前の source terms 確認を要求している。
+
+調べると **`docs/PRICE_DATA_SOURCE_REVIEW.md` が既に存在し、6候補を2026-07-23時点で調査済み**だった。TDnetの行には `公開閲覧は31日、Listed Company Searchは過去10年閲覧` とあり、私が直前にユーザーへ「TDnetは当日分しか閲覧できない」と述べたのは**リポジトリ自身の調査より厳しい制約を、確認せずに口にしたもの**だった。
+
+Decision:
+
+- **新規文書を作らず、既存文書に節を足す。** 「同一規則を複製しない」方針に従う。ただし表は分ける — 上の表は価格データ用で、**本文は著作物であり、価格の数値とは保存・再利用の判断が違う**。
+- **判断すべき8項目を明示する。** `automated_access_permitted` / `robots_and_rate_limit` / `availability_window` / `content_storage_allowed` / `primary_source_authority` / `published_at_fidelity` / `refetchable_later` / `fallback_allowed`。各項目に「埋まらないと何が起きるか」を併記する。
+- **埋まらない欄は `unknown` とし、推測で埋めない。** 既存文書と同じ方法論（公開情報のみ、契約・account作成・API接続・scrapingなし）を引き継ぐ。
+- **文書を検査で縛る。** 書いただけの規則が効かないことは、このセッションで繰り返し見た（`at_least_as_strict_as` は死にコード、留保期間は公開物に漏れ、汚染表は片方のrendererだけ修正されていた）。`tests/unit/test_source_eligibility.py` が、全候補がterms review中である限り `data/evidence/` に捕捉が存在しないことを検査する。
+  - **承認は肯定的にする。** 当初は「未解決statusの一覧」を除外する形だったが、`pending_candidate_terms_review（上表から）` という注釈付きの値が一覧に一致せず、**「承認済みsourceがある」と解釈されて検査ごとスキップされた**。自分の表の書き方が自分の検査を無効化していた。`approved` だけを承認とみなし、未定義のstatusは承認ではないとする（`is_usable` が `valid` だけを通すのと同じ）。
+
+Consequences: 3候補（TDnet / 会社公式IR / J-Quants）すべて `pending_terms_review` で、**どれからも取得していない**。`data/evidence/` は0件のまま。テストは 1120→1125。
+
+**既存文書との食い違いを1つ記録する。** 「暫定推奨」2項は announcement occurrence について「会社公式IRをprimary候補、TDnetをsecondary候補」としている。本節の Evidence（本文）の primary/fallback とは別の問題 — 前者は開示が起きた事実の確認元、後者は本文の取得元 — なので矛盾ではないが、別々に決まると混乱する。Timing Provenance の設計時にどちらを使うか明示する。
+
+変異で確認: 全候補pendingのまま捕捉を置く / 未定義のstatusを置く / `unknown` を推測で埋める。
