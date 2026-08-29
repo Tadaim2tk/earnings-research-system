@@ -1121,5 +1121,5 @@ Consequences: テストは 1051→1064。CIに `verify-rule-freeze` を追加し
 - 最初の eligible trial で開始時刻が確定する（`min→max` 変異で2本、`recorded_at→outcome_observed_at` 変異で4本が落ちる）
 - 2件目以降では動かない。ファイル名順ではなく最小時刻で決まる
 - 開始後は StopRule / PromotionRule のどちらが動いても拒否 — **緩和・厳格化の両方**を parametrize で明示（検査を無効化する変異で6本が落ちる）
-- 新versionは N=0 / `evaluation_started_at=None` から始まる
+- 新versionは N=0 / `evaluation_started_at=None` から始まり、**自分の最初の trial で自分の時計を開始する**。この経路は当初 `summarize_trials(successor, [], ...)` に対する `prospective_trials == 0` で確認していたが、空のbundleに対しては version の鍵付けがどうであれ真になる恒真アサーションだった。v1のtrialを実際に保持した記録に対して確認する形に変えた（trialの鍵から `hypothesis_version` を落とす変異で2本が落ちる）
 - 開始**前**は変更して再freezeできる（開始前でも発火させる変異で2本が落ちる）

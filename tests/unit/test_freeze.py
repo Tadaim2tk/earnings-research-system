@@ -274,21 +274,53 @@ def test_the_cli_refuses_a_rule_changed_after_the_start(tmp_path):
 
 def test_a_new_version_starts_from_no_trials_and_no_start(tmp_path):
     """The way a rule is supposed to change. The old version keeps its trials
-    and its rule; the new one has neither."""
+    and its rule; the new one inherits neither.
+
+    Asserted against the record that actually holds the old version's trial,
+    not against an empty list. `prospective_trials == 0` over no bundles at all
+    is true however the versions are keyed, and would have passed just as well
+    if v2 had swallowed v1's evidence.
+    """
+    directory = tmp_path / "registry"
     registry = synthetic_registry()
-    path = freeze(tmp_path / "registry", registry)
+    path = freeze(directory, registry)
     record(tmp_path, path, 1, datetime(2026, 10, 1, 9, tzinfo=JST))
     bundles = load_trial_bundles(tmp_path / "trials")
+    assert len(bundles) == 1
     successor = synthetic_registry(
         registry_version=2, hypothesis_version=2, stop=stop_rule(maximum_revisions=9)
     )
     assert rule_freeze_violations([registry, successor], bundles) == []
+    # The old version's trials belong to the old version, whichever way you ask.
     assert evaluation_started_at(key(successor), bundles) is None
+    with pytest.raises(ValueError, match="different registry"):
+        summarize_trials(successor, bundles, datetime(2026, 11, 1, tzinfo=JST))
     snapshot = summarize_trials(successor, [], datetime(2026, 11, 1, tzinfo=JST))
     fresh = snapshot.hypotheses[0]
     assert fresh.hypothesis_version == 2
     assert fresh.prospective_trials == 0
     assert fresh.evaluation_started_at is None
+
+
+def test_the_new_version_starts_its_own_clock_when_its_own_first_trial_arrives(tmp_path):
+    """N=0 is not a permanent state — the successor begins gathering evidence on
+    its own terms, and its start is its own first trial rather than the one the
+    predecessor is still holding."""
+    directory = tmp_path / "registry"
+    registry = synthetic_registry()
+    first_path = freeze(directory, registry)
+    began = datetime(2026, 10, 1, 9, tzinfo=JST)
+    record(tmp_path, first_path, 1, began)
+    successor = synthetic_registry(
+        registry_version=2, hypothesis_version=2, stop=stop_rule(maximum_revisions=9)
+    )
+    second_path = freeze(directory, successor)
+    later = datetime(2026, 12, 3, 9, tzinfo=JST)
+    record(tmp_path, second_path, 2, later)
+    bundles = load_trial_bundles(tmp_path / "trials")
+    assert len(bundles) == 2
+    assert evaluation_started_at(key(registry), bundles) == began
+    assert evaluation_started_at(key(successor), bundles) == later
 
 
 def test_the_status_snapshot_reports_the_start_it_derived(tmp_path):
