@@ -1435,4 +1435,12 @@ Consequences: 3候補（TDnet / 会社公式IR / J-Quants）すべて `pending_t
 
 **既存文書との食い違いを1つ記録する。** 「暫定推奨」2項は announcement occurrence について「会社公式IRをprimary候補、TDnetをsecondary候補」としている。本節の Evidence（本文）の primary/fallback とは別の問題 — 前者は開示が起きた事実の確認元、後者は本文の取得元 — なので矛盾ではないが、別々に決まると混乱する。Timing Provenance の設計時にどちらを使うか明示する。
 
-変異で確認: 全候補pendingのまま捕捉を置く / 未定義のstatusを置く / `unknown` を推測で埋める。
+### レビューでの訂正2件
+
+**(a) 孤立した台帳が門を素通りしていた。** テストもCIも捕捉を `population.json` で探していたが、`append_bundles()` は台帳と親ディレクトリを自分で作る。**`bundles.jsonl` だけを追加する変更 — 取得済みの第三者テキストがあり、母集団マニフェストが無い — は門から見えない。** 両方のファイルで探し、母集団を伴わない台帳を拒否する。
+
+**(b) 承認が source 単位の1ビットだった。** 候補が1つでも `approved` になると検査ごと無効化されるので、J-Quants を母集団用に承認しただけで、terms review 中の TDnet 本文や会社IR本文の commit が通る。
+
+ここはユーザーからも同じ方向の指摘を受けた。**同じsourceでも用途によって利用条件が違い得る** — 「企業一覧を読む」ことと「本文を自動取得して恒久保存する」ことは別の許諾である。承認を `(source, 用途)` の組ごとにし、用途を3つ（`population_discovery` / `evidence_capture` / `timing_provenance`）に分けた。捕捉の可否は **`evidence_capture` の承認だけ**を見る — 母集団用の承認は本文保存の許可ではない。
+
+変異で確認: 全候補pendingのまま捕捉を置く / 未定義のstatusを置く / `unknown` を推測で埋める / 孤立台帳を置く / 用途違いの承認で捕捉を通す。

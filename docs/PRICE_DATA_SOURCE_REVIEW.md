@@ -45,15 +45,33 @@ Population（その日の決算発表企業一覧）には別の観点が要る�
 | `refetchable_later` | 同一イベントを将来また取得できるか | 取り直しが効くのか、一度きりなのかで運用が変わる |
 | `fallback_allowed` | 取得失敗時に別sourceで代替してよいか | 代替を primary と同一扱いする事故が起きる |
 
+### 用途を分けて承認する
+
+**同じsourceでも用途によって利用条件が違い得る。** 「企業一覧を読む」ことと「本文を
+自動取得して恒久保存する」ことは別の許諾であり、`approved` を source 単位の1ビットに
+すると片方の承認がもう片方を通してしまう。用途は3つ:
+
+| 用途 | 何をするか |
+| --- | --- |
+| `population_discovery` | その日の決算発表企業一覧を読み、母集団を確定する |
+| `evidence_capture` | 開示本文を自動取得し、恒久保存する |
+| `timing_provenance` | 発表時刻を読み取り、`announced_at` の出所にする |
+
+承認は `(source, 用途)` の組ごとに与える。**未定義のstatusは承認ではない** — `approved`
+だけが承認であり、綴り違いや新語や注釈付きの値は通さない。
+
 ### 候補
 
-| source | 役割 | official | automated_access_permitted | robots_and_rate_limit | availability_window | content_storage_allowed | primary_source_authority | published_at_fidelity | refetchable_later | fallback_allowed | review_status |
+| source | 用途 | official | automated_access_permitted | robots_and_rate_limit | availability_window | content_storage_allowed | primary_source_authority | published_at_fidelity | refetchable_later | fallback_allowed | review_status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `JPX TDnet public viewing service` | population / primary evidence | official / JPX | unknown。上表では `conditional_secondary_pending_automation_terms`、自動accessは別途Human承認 | unknown | 上表の記録では公開閲覧31日、Listed Company Searchは過去10年閲覧。**再確認要** | unknown。上表の `storage_allowed` は価格の話で、本文には及ばない | highest。開示の掲載そのもの | 上表では「実開示日時が掲載時刻」= high。分単位で取れるか要確認 | unknown。閲覧期間との関係で決まる | — | `pending_terms_review` |
-| `会社公式IRページ` | fallback evidence | official / 発行会社 | unknown。会社ごとに異なる可能性 | unknown。会社ごと | unknown。会社ごと。掲載期間の統一規則は無い | unknown | high。発行会社自身。ただし掲載は開示より後になり得る | unknown。掲載日時が開示時刻とは限らない | unknown | fallback として位置づける候補 | `pending_terms_review` |
-| `J-Quants API` | population 補助 | official / JPXI | 上表では契約・保存・AI処理・自動取得のHuman承認前は採用済みと扱わない | unknown | 上表の記録では2年分だが直近12週間を除く（Free） | 上表: private analysis は likely、raw保存条件は terms 確認要 | high。ただし価格dataが主で、開示本文は範囲外 | 上表: TDnet時刻は別sourceが必要 | unknown | — | `pending_candidate_terms_review`（上表から） |
+| `JPX TDnet public viewing service` | `population_discovery` | official / JPX | unknown | unknown | 上表の記録では公開閲覧31日、Listed Company Searchは過去10年閲覧。**再確認要** | not_applicable。一覧の読み取りに本文保存は伴わない | highest | not_applicable | unknown | — | `pending_terms_review` |
+| `JPX TDnet public viewing service` | `evidence_capture` | official / JPX | unknown。上表では自動accessは別途Human承認 | unknown | 同上 | **unknown。上表の `storage_allowed` は価格の話で、本文には及ばない** | highest。開示の掲載そのもの | not_applicable | unknown | — | `pending_terms_review` |
+| `JPX TDnet public viewing service` | `timing_provenance` | official / JPX | unknown | unknown | 同上 | not_applicable。時刻だけを読む | highest | 上表では「実開示日時が掲載時刻」= high。分単位で取れるか要確認 | unknown | — | `pending_terms_review` |
+| `会社公式IRページ` | `evidence_capture` | official / 発行会社 | unknown。会社ごとに異なる | unknown。会社ごと | unknown。掲載期間の統一規則は無い | unknown | high。ただし掲載は開示より後になり得る | not_applicable | unknown | fallback候補 | `pending_terms_review` |
+| `会社公式IRページ` | `timing_provenance` | official / 発行会社 | unknown | unknown | unknown | not_applicable | high | unknown。掲載日時が開示時刻とは限らない | unknown | fallback候補 | `pending_terms_review` |
+| `J-Quants API` | `population_discovery` | official / JPXI | 上表では契約・保存・AI処理・自動取得のHuman承認前は採用済みと扱わない | unknown | 上表: 2年分だが直近12週間を除く（Free） | not_applicable | high。ただし価格dataが主 | not_applicable | unknown | — | `pending_terms_review` |
 
-**上の3候補はいずれも `review_status` が pending であり、どれからも取得していない。**
+**上の (source, 用途) の組はすべて `review_status` が pending であり、どれからも取得していない。**
 
 ### 役割の分離
 

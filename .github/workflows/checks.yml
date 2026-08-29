@@ -154,12 +154,24 @@ jobs:
         # existing ledger may only have lines appended after the ones it had.
         run: |
           set -euo pipefail
+          # Discovered by either file, not by the manifest alone. append_bundles()
+          # creates a ledger and its parent directory on its own, so a change
+          # adding only bundles.jsonl — captured third-party text, no manifest —
+          # was invisible to a loop that looked for population.json.
           verified=0
-          for manifest in $(find data/evidence -name population.json | sort); do
-            echo "verifying $(dirname "$manifest")"
+          for dir in $(find data/evidence -mindepth 1 -maxdepth 1 -type d | sort); do
+            manifest="$dir/population.json"
+            bundles="$dir/bundles.jsonl"
+            if [ ! -f "$manifest" ] && [ ! -f "$bundles" ]; then
+              continue
+            fi
+            if [ ! -f "$manifest" ]; then
+              echo "::error::$bundles has no population.json beside it; evidence cannot be captured outside a fixed population"
+              exit 1
+            fi
+            echo "verifying $dir"
             python -m earnings_research.cli verify-evidence-capture \
-              --manifest "$manifest" \
-              --bundles "$(dirname "$manifest")/bundles.jsonl"
+              --manifest "$manifest" --bundles "$bundles"
             verified=$((verified + 1))
           done
           echo "verified $verified evidence captures"
