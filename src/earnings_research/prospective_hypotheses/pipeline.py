@@ -167,7 +167,13 @@ def usable_hypotheses(registry, ledger_path: Path = None):
     refused = [
         item
         for item in registry.hypotheses
-        if not is_usable(item.hypothesis_id, item.hypothesis_version, ledger)
+        if not is_usable(
+            registry.registry_id,
+            registry.registry_version,
+            item.hypothesis_id,
+            item.hypothesis_version,
+            ledger,
+        )
     ]
     return [item for item in registry.hypotheses if item not in refused], refused
 
@@ -203,6 +209,19 @@ def evaluate_observation_file(
                 item.hypothesis_id for item in refused[:3]
             ) + ("…" if len(refused) > 3 else ""))
         )
+    if any(
+        bundle.earnings_event_id == observation.earnings_event_id
+        for bundle in load_trial_bundles(trials_dir)
+    ):
+        # Scanned by event rather than by pathname. `_write_new` refuses the
+        # same output file, which is not the same protection: the same event
+        # written under a different name passed straight through, put a second
+        # bundle into an append-only record, and made `summarize_trials` fail
+        # afterwards on its duplicate-identity check. This branch dropped the
+        # scan while replacing it with the source-validity gate, and the suite
+        # stayed green because the test that named this behaviour reused one
+        # output path and accepted either error.
+        raise ValueError("this earnings event already has an append-only hypothesis trial bundle")
     bundle = evaluate_observation(registry, observation, recorded_at)
     _write_new(output_path, _render(bundle))
     return bundle

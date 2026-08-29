@@ -1041,3 +1041,49 @@ Decision:
 Consequences: 標準が動いたので台帳は3世代になった（57行）。`rules=3d7c2657 fields=なし` が invalid 17 / undeclared 2、`rules=b8138a74 fields=なし` が invalid 19、`rules=b8138a74 fields=8f532e41` が invalid 19。テストは 1036→1046。
 
 監査が指摘した恒真・自己参照テストも直した。とくに `test_the_two_rates_answer_different_questions` は**期待値を関数自身の出力から計算**しており、実質 `round(x,6)==x` の恒等式だった。KPIの数値は台帳から独立に数え直して固定する形に置き換えた。`valid` は committed registry に1件も無いため、その経路は合成ケースでしか試験できない — 片側だけの試験になっていたので、規則を一時的に緩めて `valid` に到達させるテストを足した。
+
+---
+
+## ERS-ADR-0054
+
+Title: 判定の単位は「定義」ではなく「freeze」— および、私が削除した重複ガードの復元
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Context: PR #59 の Codex レビューが3件を指摘し、3件とも実在した。
+
+**P1 — 重複イベントガードの消失。** `evaluate_observation_file` に source-validity ゲートを追加した際、既存の
+
+```python
+existing = load_trial_bundles(trials_dir)
+if any(bundle.earnings_event_id == observation.earnings_event_id for bundle in existing):
+    raise ValueError(...)
+```
+
+を**置き換えてしまった**。`trials_dir` は未使用引数になり、`_write_new` が守るのは出力**パス名**だけになった。同じイベントを別名で書けば追記専用の記録に2つ目の bundle が入り、後続の `summarize_trials` が重複同一性検査で落ちる。
+
+1046本のテストが緑のままだった理由が本質的である。`test_append_only_writer_rejects_duplicate_event_and_existing_output` は名前で2つの性質を主張しながら、**同一の出力パスに2回書いていた**。`pytest.raises((ValueError, FileExistsError), match="already")` は、イベント走査の `already has an append-only...` でも、パス名拒否の `append-only output already exists` でも通る。ガードを消しても通る形の試験だった。
+
+**P2 — 判定の keying が freeze を見ていない。** `effective_status` は `(hypothesis_id, hypothesis_version)` で鍵を作る。後継レジストリが同じ定義を同じ version のまま引き継ぐと、`unevaluated` は前レジストリの行で満たされたと見なし、新しい freeze には判定が1行も追記されない。`rates` のレジストリ別バケツにも現れない — 「後のレジストリが同じ誤りを繰り返していれば見える」という設計目的が、その場合に限って機能しない。
+
+ADR-0053 でこの潰れ自体は認識しており、`rates` の中だけを台帳直読みに直していた。**症状を1経路で塞ぎ、原因を残した。** これは前回の監査が診断した失敗形そのものである。
+
+**P2 — CIが1本のレジストリしか検証していない。** ステップが `legacy_research_v1.json` を直書きしていたため、v2 を凍結して一度も判定せずに merge しても、このステップは v1 について緑のままになる。新しく凍結された知識を守るための常設検査が、まさにその場合に効かない。
+
+Decision:
+
+- **重複イベント走査を復元する。** パス名ではなくイベントで走査する。テストは2本に分け、重複側は**別の出力パス**に書いて `_write_new` が発火し得ないようにし、メッセージを個別に照合する。ガードを削除する変異でこのテストが落ちることを実測で確認した。
+- **判定の単位を freeze に統一する。** `_latest(ledger, key_of)` を1本置き、`effective_status`（定義単位）と `effective_status_by_freeze`（freeze単位）を同じ走査から作る。`unevaluated` / `is_usable` / `rates` の3経路すべてを freeze 単位に切り替える。1経路だけ直すのは今回の指摘の原因そのものなので採らない。
+  - `is_usable` は `(registry_id, registry_version, hypothesis_id, hypothesis_version, ledger)` を必須引数にした。省略可能にすると、引数を渡し忘れた呼び出しが**通ってしまう**方向に倒れる。
+  - 定義単位の `effective_status` は残す。「この定義は現行標準でどう判定されているか」は依然として有効な問いであり、「この freeze は判定済みか」とは別の問いである。
+- **CIは data/prospective_hypotheses/ 配下の全レジストリを検証する。** レジストリが1本も見つからない場合も error にする。改名でステップが no-op になり、それでも成功を報告する状態を作らないため。加えて同じ性質を pytest 側にも置いた（`test_every_registry_in_the_repository_has_been_judged`）— YAMLは走らせ忘れられるが、テストは常設検査の一部として走る。
+
+Consequences: テストは 1046→1050。判定結果は変わらない（19/19 invalid、retroactive rate 1.0、`b8138a74` / `8f532e41`）。keying の変更は committed ledger に対して恒等である — 単一レジストリしか無いため。**変わったのは、2本目のレジストリが凍結された瞬間の挙動である。**
+
+実測で確認した3経路:
+
+- 未判定の後継レジストリ（v2）を置くと CI ステップが exit 1
+- レジストリが1本も無いと exit 1
+- `unevaluated` / `is_usable` を定義単位に戻す変異で、それぞれ対応するテストが落ちる

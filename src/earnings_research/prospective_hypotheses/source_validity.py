@@ -174,12 +174,8 @@ def append_ledger(path: Path, verdicts: Sequence[Verdict]) -> int:
     return len(verdicts)
 
 
-def effective_status(ledger: Sequence[dict], digest: Optional[str] = None) -> Dict[tuple, dict]:
-    """What each hypothesis stands at now, derived rather than written down.
-
-    The latest judgement under the standard as it stands, keyed by hypothesis
-    and version. Deriving it means an invalidation cannot be recorded and then
-    forgotten to be acted on: there is no second place to update.
+def _latest(ledger: Sequence[dict], key_of, digest: Optional[str] = None) -> Dict[tuple, dict]:
+    """The last judgement recorded under the standard as it stands, per key.
 
     Times are parsed before they are compared. Compared as strings, a verdict
     stamped +00:00 loses to an earlier one stamped +09:00, and the ledger would
@@ -194,29 +190,85 @@ def effective_status(ledger: Sequence[dict], digest: Optional[str] = None) -> Di
             continue
         if row.get("source_fields_sha256") != fields:
             continue
-        key = (row["hypothesis_id"], row["hypothesis_version"])
+        key = key_of(row)
         current = latest.get(key)
         if current is None or _moment(row) >= _moment(current):
             latest[key] = row
     return latest
 
 
+def _definition(row: dict) -> tuple:
+    return (row["hypothesis_id"], row["hypothesis_version"])
+
+
+def _freeze(row: dict) -> tuple:
+    return (
+        row["registry_id"],
+        row["registry_version"],
+        row["hypothesis_id"],
+        row["hypothesis_version"],
+    )
+
+
 def _moment(row: dict) -> datetime:
     return datetime.fromisoformat(row["evaluated_at"])
 
 
+def effective_status(ledger: Sequence[dict], digest: Optional[str] = None) -> Dict[tuple, dict]:
+    """What each definition stands at now, derived rather than written down.
+
+    The latest judgement under the standard as it stands, keyed by hypothesis
+    and version. Deriving it means an invalidation cannot be recorded and then
+    forgotten to be acted on: there is no second place to update.
+
+    This answers a question about a definition. Whether a particular freeze has
+    been judged is a different question, and `effective_status_by_freeze` is
+    what answers it.
+    """
+    return _latest(ledger, _definition, digest)
+
+
+def effective_status_by_freeze(
+    ledger: Sequence[dict], digest: Optional[str] = None
+) -> Dict[tuple, dict]:
+    """The same, keyed by the freeze the judgement was recorded against.
+
+    A definition carried unchanged into a successor registry would draw the
+    same verdict, so keying coverage on the definition alone looks harmless.
+    It is not: "this freeze has been judged" and "this definition has been
+    judged somewhere" are different claims, and only the first is something a
+    standing check can rest on. On the definition key, a successor registry
+    inherited its predecessor's row — the re-scan appended nothing for the new
+    freeze, the per-freeze rate had no bucket for it, and the repeated
+    invalidity that rate exists to expose was invisible.
+    """
+    return _latest(ledger, _freeze, digest)
+
+
 def unevaluated(registry, ledger: Sequence[dict], digest: Optional[str] = None) -> List[tuple]:
-    """Hypotheses with no judgement under the rules as they stand."""
-    known = effective_status(ledger, digest)
+    """Hypotheses in this freeze with no judgement under the rules as they stand."""
+    known = effective_status_by_freeze(ledger, digest)
     return [
         (item.hypothesis_id, item.hypothesis_version)
         for item in registry.hypotheses
-        if (item.hypothesis_id, item.hypothesis_version) not in known
+        if (
+            registry.registry_id,
+            registry.registry_version,
+            item.hypothesis_id,
+            item.hypothesis_version,
+        )
+        not in known
     ]
 
 
-def is_usable(hypothesis_id: str, hypothesis_version: int, ledger: Sequence[dict]) -> bool:
-    """Whether prospective work may still be recorded against this hypothesis.
+def is_usable(
+    registry_id: str,
+    registry_version: int,
+    hypothesis_id: str,
+    hypothesis_version: int,
+    ledger: Sequence[dict],
+) -> bool:
+    """Whether prospective work may still be recorded against this freeze.
 
     Only an affirmative `valid`. Unjudged is not usable — a hypothesis nobody
     has checked under the current rules is the case this capability exists for
@@ -224,8 +276,15 @@ def is_usable(hypothesis_id: str, hypothesis_version: int, ledger: Sequence[dict
     about the cohort. Letting that through treated "we have not looked" as
     "go ahead", and two hypotheses whose labels were later measured to depend
     on data from after the event passed the gate on it.
+
+    Asked of the freeze rather than of the definition, so this gate and the
+    standing check refuse the same things. Asked of the definition, a successor
+    registry could record trials against knowledge that was never judged in
+    that freeze while `verify-source-validity` refused the same registry.
     """
-    row = effective_status(ledger).get((hypothesis_id, hypothesis_version))
+    row = effective_status_by_freeze(ledger).get(
+        (registry_id, registry_version, hypothesis_id, hypothesis_version)
+    )
     return row is not None and row["verdict"] == VALID
 
 
@@ -238,33 +297,26 @@ def rates(registry, ledger: Sequence[dict], digest: Optional[str] = None) -> Dic
     a later registry that repeats the mistakes of an earlier one is visible.
     Reporting only the first would let the numbers improve by never adding a
     rule again, which is the outcome nobody wants.
+
+    Both are counted per freeze. Counted per definition, two registries sharing
+    a hypothesis id at the same version collapse into one, and the bucket that
+    disappears is the successor — the one the per-freeze rate exists to show.
     """
-    status = effective_status(ledger, digest)
-    frozen = [(item.hypothesis_id, item.hypothesis_version) for item in registry.hypotheses]
+    status = effective_status_by_freeze(ledger, digest)
+    frozen = [
+        (
+            registry.registry_id,
+            registry.registry_version,
+            item.hypothesis_id,
+            item.hypothesis_version,
+        )
+        for item in registry.hypotheses
+    ]
     judged = [status[key] for key in frozen if key in status]
     invalid = sum(1 for row in judged if row["verdict"] == INVALID)
     undeclared = sum(1 for row in judged if row["verdict"] == UNDECLARED)
-    # Built from the ledger rather than from the status map above, which is
-    # keyed on the hypothesis alone: two freezes carrying the same definition
-    # collapse there, and one of the buckets disappears — the case the
-    # per-freeze rate exists to show.
-    rules, fields = _standard()
-    rules = digest or rules
-    per_freeze: Dict[tuple, dict] = {}
-    for row in ledger:
-        if row.get("contamination_rules_sha256") != rules:
-            continue
-        if row.get("source_fields_sha256") != fields:
-            continue
-        key = (
-            row["registry_id"], row["registry_version"],
-            row["hypothesis_id"], row["hypothesis_version"],
-        )
-        current = per_freeze.get(key)
-        if current is None or _moment(row) >= _moment(current):
-            per_freeze[key] = row
     by_registry: Dict[str, Dict[str, int]] = {}
-    for (registry_id, registry_version, _id, _version), row in per_freeze.items():
+    for (registry_id, registry_version, _id, _version), row in status.items():
         bucket = by_registry.setdefault(
             "%s@v%d" % (registry_id, registry_version), {"frozen": 0, "invalid": 0}
         )

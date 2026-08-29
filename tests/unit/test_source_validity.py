@@ -180,15 +180,36 @@ def test_only_knowledge_the_rules_affirmatively_clear_may_gather_evidence(verdic
     the event they describe."""
     row = {
         "hypothesis_id": "LRH-X", "hypothesis_version": 1, "verdict": verdict,
+        "registry_id": "ERS-X", "registry_version": 1,
         "evaluated_at": "2026-09-01T00:00:00+09:00",
         "contamination_rules_sha256": lookahead.rules_digest(),
         "source_fields_sha256": source_fields_digest(),
     }
-    assert is_usable("LRH-X", 1, [row]) is usable
+    assert is_usable("ERS-X", 1, "LRH-X", 1, [row]) is usable
 
 
 def test_knowledge_nobody_has_judged_may_not_gather_evidence_either():
-    assert is_usable("LRH-X", 1, []) is False
+    assert is_usable("ERS-X", 1, "LRH-X", 1, []) is False
+
+
+def test_a_successor_freeze_is_not_cleared_by_its_predecessors_verdict():
+    """The gate and the standing check must refuse the same things.
+
+    A definition carried forward unchanged draws the same verdict, so keying on
+    the definition alone looks harmless — but it means no verdict is ever
+    recorded against the new freeze. Trials could then be recorded against
+    knowledge that was never judged where it was frozen, while
+    `verify-source-validity` refused the very same registry.
+    """
+    row = {
+        "hypothesis_id": "LRH-X", "hypothesis_version": 1, "verdict": VALID,
+        "registry_id": "ERS-X", "registry_version": 1,
+        "evaluated_at": "2026-09-01T00:00:00+09:00",
+        "contamination_rules_sha256": lookahead.rules_digest(),
+        "source_fields_sha256": source_fields_digest(),
+    }
+    assert is_usable("ERS-X", 1, "LRH-X", 1, [row]) is True
+    assert is_usable("ERS-X", 2, "LRH-X", 1, [row]) is False
 
 
 def test_the_two_rates_answer_different_questions():
@@ -316,6 +337,8 @@ def test_two_freezes_sharing_a_hypothesis_id_each_keep_their_own_rate():
     from earnings_research.prospective_hypotheses.source_validity import rates as compute
 
     class _One:
+        registry_id = "ERS-X"
+        registry_version = 1
         hypotheses = []
 
     buckets = compute(_One(), rows)["by_registry"]
@@ -391,3 +414,37 @@ def test_the_valid_verdict_is_reachable_and_distinct(monkeypatch):
     assert reaction
     assert all(item.verdict == VALID for item in reaction), [item.verdict for item in reaction]
     assert all(item.reason is None for item in reaction)
+
+
+def test_a_successor_registry_is_unjudged_however_much_it_inherits():
+    """Re-freezing carries the definitions forward; it does not carry the
+    verdicts forward. Keyed on the definition, a successor registry read as
+    fully judged the moment it was created, `evaluate-source-validity` appended
+    nothing for it, and its per-freeze rate had no bucket to be counted in."""
+    committed = registry()
+    ledger = read_ledger(LEDGER)
+    assert unevaluated(committed, ledger) == []
+    successor = committed.model_copy(update={"registry_version": committed.registry_version + 1})
+    assert len(unevaluated(successor, ledger)) == len(successor.hypotheses)
+    assert "%s@v%d" % (successor.registry_id, successor.registry_version) not in rates(
+        successor, ledger
+    )["by_registry"]
+
+
+def test_every_registry_in_the_repository_has_been_judged():
+    """Named by directory rather than by filename.
+
+    The CI step this mirrors used to verify one hard-coded path, so a second
+    registry could be committed, never judged under the current standard, and
+    merge with the step still green — the standing check silently not covering
+    the newly frozen knowledge it exists for.
+    """
+    directory = ROOT / "data/prospective_hypotheses"
+    registries = [
+        path
+        for path in sorted(directory.glob("*.json"))
+        if {"registry_id", "hypotheses"} <= set(json.loads(path.read_text(encoding="utf-8")))
+    ]
+    assert registries, "no registry found in %s" % directory
+    for path in registries:
+        assert verify_source_validity_file(path, LEDGER)["status"] == "judged", path

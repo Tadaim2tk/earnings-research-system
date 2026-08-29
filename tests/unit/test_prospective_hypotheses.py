@@ -17,6 +17,7 @@ from earnings_research.prospective_hypotheses.models import (
     HypothesisTrialBundle,
 )
 from earnings_research.prospective_hypotheses.pipeline import (
+    _write_new,
     build_registry_file,
     evaluate_observation_file,
     verify_registry_file,
@@ -160,17 +161,41 @@ def test_missing_or_noncomparable_horizon_is_not_counted_as_failure():
     assert any(reason == "evaluation horizon has not matured" for reason in bundle.ineligible_hypotheses.values())
 
 
-def test_append_only_writer_rejects_duplicate_event_and_existing_output(tmp_path):
+def test_the_same_event_may_not_be_recorded_twice_under_another_name(tmp_path):
+    """Written to a different output path on purpose.
+
+    The earlier form of this test reused one path and accepted either error, so
+    `_write_new` refusing the filename satisfied it and the event-level scan it
+    was named for could be — and was — deleted without the suite noticing. The
+    scan is what protects an append-only record: a second bundle for one event
+    is what `summarize_trials` afterwards fails on.
+    """
+    path, _count = usable_registry(tmp_path)
+    trials = tmp_path / "trials"
+    evaluate_observation_file(
+        path, OBSERVATION, trials, trials / "first.json", datetime(2026, 9, 30, 18, tzinfo=JST)
+    )
+    with pytest.raises(ValueError, match="already has an append-only hypothesis trial bundle"):
+        evaluate_observation_file(
+            path, OBSERVATION, trials, trials / "second.json",
+            datetime(2026, 9, 30, 19, tzinfo=JST),
+        )
+    assert sorted(item.name for item in trials.glob("*.json")) == ["first.json"]
+
+
+def test_an_existing_output_file_is_never_overwritten(tmp_path):
+    """The other half of what one test used to claim: the writer refuses the
+    filename even where the event-level scan has nothing to say."""
     path, _count = usable_registry(tmp_path)
     trials = tmp_path / "trials"
     output = trials / "event.json"
     evaluate_observation_file(
         path, OBSERVATION, trials, output, datetime(2026, 9, 30, 18, tzinfo=JST)
     )
-    with pytest.raises((ValueError, FileExistsError), match="already"):
-        evaluate_observation_file(
-            path, OBSERVATION, trials, output, datetime(2026, 9, 30, 19, tzinfo=JST)
-        )
+    before = output.read_text(encoding="utf-8")
+    with pytest.raises(FileExistsError, match="append-only output already exists"):
+        _write_new(output, "{}\n")
+    assert output.read_text(encoding="utf-8") == before
 
 
 def test_no_trial_is_recorded_against_knowledge_the_rules_condemn(tmp_path):
