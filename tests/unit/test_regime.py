@@ -60,11 +60,41 @@ def test_an_empty_axis_is_stated_not_silently_zero():
 
 
 def test_a_gap_in_the_series_is_not_filled():
-    closes = {"2026-08-01": 100.0}
-    assert features.window_move(closes, "2026-08-01", "2026-08-25") is None
-    assert features.window_move({}, "a", "b") is None
+    assert features.window_move({}, "2026-08-01", "2026-08-25") is None
     assert features.window_move({"a": 0.0, "b": 5.0}, "a", "b") is None
-    assert features.window_move({"a": float("nan"), "b": 5.0}, "a", "b") is None
+    assert features.window_move({"2026-09-01": 5.0}, "2026-08-01", "2026-08-25") is None
+    assert features.window_move({"2026-07-01": 5.0}, "2026-08-01", "2026-08-25") is None
+
+
+def test_a_weekend_boundary_does_not_erase_the_series():
+    """要求した 2026-08-01 は土曜。日付をそのまま引くと、その日に値を持つ
+    暗号資産以外の全系列が消え、銀と銅の乖離も出なくなる。実測でこれを踏んだ——
+    しかも検証には出荷していない補助関数を使っていたので、出荷したAPIでは
+    本文に書いた窓が再現できなかった。"""
+    tokyo = {"2026-08-03": 100.0, "2026-08-04": 101.0, "2026-08-25": 103.3}
+    assert features.resolve_endpoints(tokyo, "2026-08-01", "2026-08-25") == \
+        ("2026-08-03", "2026-08-25")
+    assert features.window_move(tokyo, "2026-08-01", "2026-08-25") == pytest.approx(3.3)
+
+    crypto = {"2026-08-01": 100.0, "2026-08-02": 101.0, "2026-08-25": 125.2}
+    assert features.resolve_endpoints(crypto, "2026-08-01", "2026-08-25")[0] == "2026-08-01"
+
+
+def test_resolution_never_reaches_outside_the_requested_window():
+    """寄せるのは内側だけ。外へ広げると窓の外の値が混ざる。"""
+    closes = {"2026-07-25": 90.0, "2026-08-03": 100.0,
+              "2026-08-25": 103.0, "2026-09-05": 120.0}
+    assert features.resolve_endpoints(closes, "2026-08-01", "2026-08-26") == \
+        ("2026-08-03", "2026-08-25")
+
+
+def test_the_summary_says_which_days_it_actually_measured():
+    """寄せた結果を黙って要求どおりに見せない。"""
+    got = features.summarise(
+        {"^N225": {"2026-08-03": 100.0, "2026-08-25": 103.3}},
+        "2026-08-01", "2026-08-25")
+    assert got["requested_start"] == "2026-08-01"
+    assert got["resolved"]["^N225"] == {"start": "2026-08-03", "end": "2026-08-25"}
 
 
 def test_volatility_needs_enough_days_to_mean_anything():

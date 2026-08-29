@@ -17,12 +17,36 @@ MOVE_THRESHOLD_PCT = 5.0
 QUIET_THRESHOLD_PCT = 3.5
 
 
-def window_move(closes: Mapping[str, float], start: str, end: str) -> Optional[float]:
-    """区間の騰落率(%)。端が欠けていれば `None`。埋めない。"""
-    a, b = closes.get(start), closes.get(end)
-    if a is None or b is None:
+def resolve_endpoints(closes: Mapping[str, float], start: str, end: str
+                      ) -> Optional[Tuple[str, str]]:
+    """要求した境界を、その系列が実際に観測した日へ寄せる。
+
+    系列ごとに開いている日が違う。暗号資産は土日も動き、先物は休みが別で、
+    日本株は東京の休場に従う。**日付をそのまま引くと、境界が週末に落ちた瞬間に
+    その系列だけ窓が消える。** 実測でこれを踏んだ——`2026-08-01` は土曜で、
+    その日に値を持つのは暗号資産だけだった。株・ボラ・金利・為替・貴金属・
+    産業金属が全部「観測なし」になり、銀と銅の乖離が出なくなる。
+
+    開始は要求日**以降**の最初の観測日、終了は要求日**以前**の最後の観測日。
+    外側へ広げないので、窓の外の値を混ぜない。
+    """
+    days = sorted(d for d, c in closes.items() if c is not None and math.isfinite(c))
+    if not days:
         return None
-    if not (math.isfinite(a) and math.isfinite(b)) or a == 0:
+    first = next((d for d in days if d >= start), None)
+    last = next((d for d in reversed(days) if d <= end), None)
+    if first is None or last is None or first > last:
+        return None
+    return first, last
+
+
+def window_move(closes: Mapping[str, float], start: str, end: str) -> Optional[float]:
+    """区間の騰落率(%)。観測日へ寄せて測る。欠けていれば `None`。埋めない。"""
+    resolved = resolve_endpoints(closes, start, end)
+    if resolved is None:
+        return None
+    a, b = closes[resolved[0]], closes[resolved[1]]
+    if a == 0:
         return None
     return (b / a - 1.0) * 100.0
 
@@ -66,10 +90,17 @@ def summarise(closes_by_symbol: Mapping[str, Mapping[str, float]],
     """
     moves = {sym: window_move(closes, start, end)
              for sym, closes in closes_by_symbol.items()}
+    # どの系列をどの日で測ったか。要求した境界と一緒に残す——寄せた結果を
+    # 黙って要求どおりに見せない。
+    resolved = {sym: resolve_endpoints(closes, start, end)
+                for sym, closes in closes_by_symbol.items()}
     got = [sym for sym, move in moves.items() if move is not None]
     missing = missing_roles(got)
     ranked = sorted(((abs(m), s, m) for s, m in moves.items() if m is not None), reverse=True)
     return {
+        "requested_start": start, "requested_end": end,
+        "resolved": {sym: {"start": r[0], "end": r[1]}
+                     for sym, r in sorted(resolved.items()) if r is not None},
         "start": start, "end": end,
         "series_observed": len(got),
         "missing_roles": list(missing),
