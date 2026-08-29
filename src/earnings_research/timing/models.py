@@ -21,10 +21,12 @@ measured one — the same reason `undeclared` exists in the source-validity
 ledger and `capture_status` in the evidence bundles.
 """
 
-from datetime import datetime, time, timedelta, timezone
-from typing import Dict, List, Literal, Optional, Tuple
+from datetime import date, datetime, timedelta, timezone
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from earnings_research.market_reaction.models import VerifiedTradingSession
 
 SCHEMA_TIMING = "event_timing_provenance_v1"
 
@@ -34,77 +36,96 @@ JST = timezone(timedelta(hours=9))
 TimingClass = Literal["pre_open", "intraday", "post_close", "non_trading_day", "unknown"]
 TIMING_CLASSES = ("pre_open", "intraday", "post_close", "non_trading_day", "unknown")
 
-# Tokyo's session. Written here rather than assumed at each call site, because
-# the boundary between pre_open and intraday is the whole classification.
-SESSION_OPEN = time(9, 0)
-SESSION_CLOSE = time(15, 0)
-
-
 class TradingCalendar(BaseModel):
-    """The sessions, in order. Supplied rather than computed.
+    """The sessions, in order, each with the hours it actually kept.
 
-    Holidays are not derivable from a date, and a wrong calendar moves every
-    entry by a session — which is the error this module exists to remove.
+    Built on `VerifiedTradingSession` rather than on a list of dates and a pair
+    of module constants. The constants were wrong: this wrote a 15:00 close
+    while the repository's own verified fixtures use 15:30, which is the hour
+    the exchange has kept since it extended the afternoon session. Every
+    disclosure between 15:00 and 15:30 would have been filed as `post_close`
+    and routed to the next session.
+
+    Hours belong to a date for the same reason holidays do — they change, and a
+    constant cannot say when. Using the existing model also means a calendar
+    entry is a real date by construction, where a list of strings accepted
+    "2026-02-30" and failed later inside `strptime`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     calendar_id: str = Field(min_length=1)
-    sessions: List[str] = Field(min_length=1)
+    sessions: List[VerifiedTradingSession] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_calendar(self):
-        if self.sessions != sorted(self.sessions):
+        dates = [item.trading_date for item in self.sessions]
+        if dates != sorted(dates):
             raise ValueError("sessions must be in order")
-        if len(self.sessions) != len(set(self.sessions)):
+        if len(dates) != len(set(dates)):
             raise ValueError("a session appears twice")
         return self
 
-    def index_of(self, session: str) -> Optional[int]:
+    def _dates(self) -> List[date]:
+        return [item.trading_date for item in self.sessions]
+
+    def session_on(self, day: date) -> Optional[VerifiedTradingSession]:
+        for item in self.sessions:
+            if item.trading_date == day:
+                return item
+        return None
+
+    def index_of(self, day: date) -> Optional[int]:
         try:
-            return self.sessions.index(session)
+            return self._dates().index(day)
         except ValueError:
             return None
 
-    def after(self, session: str, offset: int) -> Optional[str]:
-        base = self.index_of(session)
-        if base is None or not 0 <= base + offset < len(self.sessions):
-            return None
-        return self.sessions[base + offset]
-
-    def first_open_after(self, moment: datetime) -> Optional[str]:
+    def first_open_after(self, moment: datetime) -> Optional[date]:
         """The first session whose open is strictly after this instant.
 
-        Where a position can first be opened, once the information exists. An
-        announcement at 08:00 JST reaches that session's own open; one at 16:00
-        reaches the next.
-
-        Strictly after, not at-or-after. At exactly 09:00:00 the disclosure and
-        the opening print are simultaneous, so that open is not a price the
-        information could be acted on at. With `>=` such an event classified as
-        `intraday` and still returned its own session — the same class that
-        returns the next session at 12:00 — so one class answered two ways
-        depending on the minute. Nothing tested the boundary; a mutation did.
+        Strictly after, not at-or-after. At exactly the opening bell the
+        disclosure and the opening print are simultaneous, so that open is not
+        a price the information could be acted on at. With `>=` such an event
+        classified as `intraday` and still returned its own session — the same
+        class that returns the next session an hour later — so one class
+        answered two ways depending on the minute. Nothing tested the boundary;
+        a mutation did.
         """
-        local = moment.astimezone(JST)
-        for session in self.sessions:
-            opens = datetime.combine(
-                datetime.strptime(session, "%Y-%m-%d").date(), SESSION_OPEN, tzinfo=JST
-            )
-            if opens > local:
-                return session
+        for item in self.sessions:
+            if item.regular_open > moment:
+                return item.trading_date
+        return None
+
+    def session_in_progress_or_next(self, moment: datetime) -> Optional[date]:
+        """The session a position could first be opened in.
+
+        Not the same question as the one above. An intraday disclosure can be
+        acted on immediately — at the next print, at VWAP, at the close — so
+        the session it lands in is tradeable even though its opening price is
+        already behind. Only the *opening print* is unavailable, and the
+        repository's own intraday workflow records minute or VWAP prices on the
+        announcement date for exactly that reason.
+        """
+        for item in self.sessions:
+            if item.regular_close > moment:
+                return item.trading_date
         return None
 
 
 def classify(announced_at: datetime, calendar: TradingCalendar) -> TimingClass:
-    """Where this instant falls relative to the session it lands on."""
+    """Where this instant falls relative to the session it lands on.
+
+    Read off that date's own hours. A close written as a constant was wrong by
+    thirty minutes for every contemporary event.
+    """
     local = announced_at.astimezone(JST)
-    session = local.date().isoformat()
-    if calendar.index_of(session) is None:
+    session = calendar.session_on(local.date())
+    if session is None:
         return "non_trading_day"
-    if local.time() < SESSION_OPEN:
+    if local < session.regular_open:
         return "pre_open"
-    if local.time() >= SESSION_CLOSE:
+    if local >= session.regular_close:
         return "post_close"
     return "intraday"
 
@@ -158,7 +179,28 @@ class EventTiming(BaseModel):
             raise ValueError("source_observed_at must include timezone")
         if self.announced_at.astimezone(JST).date().isoformat() != self.event_date:
             raise ValueError("announced_at falls on a different day from event_date")
+        if self.source_observed_at < self.announced_at:
+            # A schedule read before the event is not confirmation that the
+            # event happened. Recorded the other way round, an expectation
+            # becomes provenance for an occurrence.
+            raise ValueError(
+                "source_observed_at precedes announced_at; a source read before "
+                "the announcement cannot confirm that it occurred"
+            )
         return self
+
+    def agrees_with(self, calendar: "TradingCalendar") -> bool:
+        """Whether the recorded class is the one this instant actually falls in.
+
+        Not enforced by the model, because a timing is built without a calendar
+        and the calendar is what decides. Checked wherever both are in hand —
+        `verify_against` below — because a payload claiming `post_close` over an
+        08:00 instant would let a consumer cohort it one way while the derived
+        entry behaves the other.
+        """
+        if self.timing_class == "unknown" or self.announced_at is None:
+            return self.timing_class == "unknown"
+        return classify(self.announced_at, calendar) == self.timing_class
 
 
 def decision_available_at(timing: EventTiming) -> Optional[datetime]:
@@ -168,31 +210,72 @@ def decision_available_at(timing: EventTiming) -> Optional[datetime]:
 
 def first_tradeable_session(
     timing: EventTiming, calendar: TradingCalendar
-) -> Optional[str]:
-    """The first session an order could be filled in.
+) -> Optional[date]:
+    """The session a position could first be opened in.
 
-    This is what `i0+2` was standing in for, and why the substitution was
-    fragile: from a post-close announcement the first fill is the next
-    session's open, but from a pre-open one it is that same session's, and the
-    two differ by a whole bar. An unknown timing yields no session rather than
-    a default one.
+    For a disclosure before the open, that session. For one during it, **that
+    same session** — the information can be acted on at the next print, at
+    VWAP, or at the close, which is what the intraday workflow already records.
+    For one after the close, the next session.
+
+    An earlier version returned the next session for intraday too, because it
+    was really answering the question below and had been given this name. The
+    two differ by a whole bar for every intraday event.
     """
     if timing.announced_at is None:
         return None
-    return calendar.first_open_after(timing.announced_at)
+    return calendar.session_in_progress_or_next(timing.announced_at.astimezone(JST))
+
+
+def first_open_anchored_session(
+    timing: EventTiming, calendar: TradingCalendar
+) -> Optional[date]:
+    """The first session whose *opening print* can serve as an entry price.
+
+    What `i0+2` was standing in for. For an intraday disclosure this is the
+    next session even though the current one is tradeable, because that
+    session's open has already happened.
+    """
+    if timing.announced_at is None:
+        return None
+    return calendar.first_open_after(timing.announced_at.astimezone(JST))
 
 
 def session_index(timing: EventTiming, calendar: TradingCalendar) -> Optional[int]:
-    """How far the first tradeable session sits from the event date.
+    """How far the first tradeable session sits from the event date."""
+    return _offset(timing, calendar, first_tradeable_session(timing, calendar))
 
-    Reported so the legacy series can be read against it: a series that assumed
-    a fixed offset is comparable only across events whose real offset matches.
+
+def open_anchored_index(timing: EventTiming, calendar: TradingCalendar) -> Optional[int]:
+    """The same, for the first usable opening print.
+
+    Reported beside `session_index` so a legacy series built on a fixed offset
+    can be read against the offset each event actually had.
     """
-    session = first_tradeable_session(timing, calendar)
+    return _offset(timing, calendar, first_open_anchored_session(timing, calendar))
+
+
+def _offset(
+    timing: EventTiming, calendar: TradingCalendar, session: Optional[date]
+) -> Optional[int]:
     if session is None:
         return None
-    base = calendar.index_of(timing.event_date)
+    base = calendar.index_of(date.fromisoformat(timing.event_date))
     target = calendar.index_of(session)
     if base is None or target is None:
         return None
     return target - base
+
+
+def verify_against(timing: EventTiming, calendar: TradingCalendar) -> None:
+    """Refuse a timing whose recorded class contradicts its own instant."""
+    if not timing.agrees_with(calendar):
+        raise ValueError(
+            "%s is recorded as %s but %s falls in %s"
+            % (
+                timing.event_id,
+                timing.timing_class,
+                timing.announced_at.isoformat() if timing.announced_at else "no instant",
+                classify(timing.announced_at, calendar) if timing.announced_at else "unknown",
+            )
+        )
