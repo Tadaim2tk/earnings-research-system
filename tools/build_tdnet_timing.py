@@ -56,7 +56,7 @@ def ledger_events():
         ident = json.loads(line)["normalized_identity"]
         code, day = ident.get("ticker_candidate"), (ident.get("legacy_event_date") or "")[:10]
         if code and day:
-            seen.append((code, day))
+            seen.append((code, day, ident.get("company_name_candidate")))
     return seen
 
 
@@ -64,12 +64,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--sleep", type=float, default=1.0)
+    ap.add_argument("--replace", action="store_true",
+                    help="既存の出力を置き換える。既定では拒否する")
     args = ap.parse_args()
+
+    out = Path(args.out)
+    if out.exists() and not args.replace:
+        # 出力は provenance で、`source_observed_at` は「いつ見たか」の記録である。
+        # 黙って上書きすると、確定済みの観測がその都度消える。
+        print("%s は既に在る。置き換えるなら --replace を明示すること。" % out, file=sys.stderr)
+        return 2
 
     events = ledger_events()
     by_day = collections.defaultdict(list)
-    for code, day in events:
-        by_day[day].append(code)
+    for code, day, name in events:
+        by_day[day].append((code, name))
     print("台帳 %d件 / %d日" % (len(events), len(by_day)))
 
     rows, tally = [], collections.Counter()
@@ -77,14 +86,16 @@ def main():
         try:
             items, used = fetch(day)
         except (urllib.error.HTTPError, urllib.error.URLError, RuntimeError) as exc:
-            print("  %s 取得失敗: %s" % (day, exc))
-            for code in by_day[day]:
-                tally["fetch_failed"] += 1
-                rows.append({"ticker": code, "event_date": day, "selection": "fetch_failed"})
-            continue
+            # 取得失敗を placeholder にして書き出すと、一度の不調で確定済みの
+            # 記録が消える。1日でも取れなければ何も書かずに終える。
+            print("  %s 取得失敗: %s" % (day, exc), file=sys.stderr)
+            print("\n取得できない日があったので、出力は作らない。", file=sys.stderr)
+            return 1
         observed = datetime.now(JST).isoformat()
-        for code in by_day[day]:
-            got = ix.select(items, code, day)
+        seen_today = collections.Counter()
+        for code, name in by_day[day]:
+            got = ix.select(items, code, day, expect_name=name)
+            seen_today[got.status] += 1
             tally[got.status] += 1
             row = {
                 "schema_version": "legacy_event_timing_v1",
@@ -96,6 +107,7 @@ def main():
                 "source_observed_at": observed,
                 "index_size": len(items),
                 "same_day_candidates": got.candidates,
+                "name_agrees": got.name_agrees,
                 "corrections_seen": got.corrections,
             }
             if got.status == "matched":
@@ -105,12 +117,9 @@ def main():
             rows.append(row)
         print("  [%2d/%2d] %s  索引%5d件(limit %d)  %s" %
               (n, len(by_day), day, len(items), used,
-               " ".join("%s=%d" % (k, v) for k, v in
-                        sorted(collections.Counter(
-                            ix.select(items, c, day).status for c in by_day[day]).items()))))
+               " ".join("%s=%d" % (k, v) for k, v in sorted(seen_today.items()))))
         time.sleep(args.sleep)
 
-    out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", encoding="utf-8") as fh:
         for row in rows:

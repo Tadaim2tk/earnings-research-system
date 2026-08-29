@@ -25,6 +25,7 @@
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -42,7 +43,21 @@ TANSHIN = "決算短信"
 CORRECTION = "訂正"
 
 # 選別の結果。無いことを黙って落とさず、なぜ無いかを言う。
-SELECTIONS = ("matched", "ambiguous", "correction_only", "no_tanshin", "no_disclosure")
+SELECTIONS = ("matched", "ambiguous", "correction_only", "no_tanshin", "no_disclosure",
+              "unresolved_code", "invalid_timestamp")
+
+# 索引は TDnet の表示名で、市場の接頭辞（グロース `Ｇ－`、REIT `Ｒ－`）や
+# `ＨＤ` の略記が付く。台帳側は正式名に近い。落としてから比べる。
+# `normalise` が NFKC を通した**後**に当てるので、ここは半角で書く。
+# 全角のまま書いた版は `Ｇ－` が既に `G-` になっていて一度も当たらなかった。
+MARKET_PREFIX = re.compile(r"^[GRSNP]-")
+HOLDINGS = re.compile(r"(ホールディングス|HD|グループ)$")
+
+# 台帳のコードは4桁のことも、末尾0を付けた5桁のこともある。それ以外の形は
+# ティッカーではない——`80310_dup` は重複行の目印で、4文字で切ると本物の
+# 8031 の開示に一致してしまう。切る前に形を見る。
+CODE = re.compile(r"^(?:[0-9]{4}|[0-9]{3}[A-Z])$")
+CODE5 = re.compile(r"^(?:[0-9]{4}|[0-9]{3}[A-Z])0$")
 
 
 def normalise(title: str) -> str:
@@ -75,13 +90,45 @@ def items_from(payload) -> List[dict]:
     return [row.get("Tdnet", row) if isinstance(row, dict) else row for row in rows]
 
 
-def short_code(code: str) -> str:
-    """索引の証券コードは5桁（`76980`）、台帳は4桁（`7698`）。
+def short_code(code: str) -> Optional[str]:
+    """4桁の証券コードにする。ティッカーでない文字列は `None` を返す。
 
-    英数字を含むコード（`130A`）もあるので、単純に末尾を落とさず4文字で切る。
+    以前は無条件に4文字で切っていた。台帳には `80310_dup`（重複行の目印、
+    会社名は `—`）が入っており、切ると `8031` になって**三井物産の実際の開示に
+    一致し、同じ時刻と同じハッシュを与えていた**。台帳が確かめていない身元を、
+    切り詰めが勝手に主張していたことになる。
+
+    受け付けるのは4桁（`7698` / `130A`）と、末尾0を付けた5桁（`76980`）だけ。
     """
     text = (code or "").strip()
-    return text[:4]
+    if CODE.match(text):
+        return text
+    if CODE5.match(text):
+        return text[:4]
+    return None
+
+
+def company_key(name: Optional[str]) -> str:
+    """比較用に名前を削る。市場の接頭辞と持株会社の語尾を落とす。"""
+    text = normalise(name or "")
+    text = MARKET_PREFIX.sub("", text)
+    text = HOLDINGS.sub("", text)
+    return text.replace("株式会社", "").replace("・", "")
+
+
+def same_company(ledger_name: Optional[str], index_name: Optional[str]) -> Optional[bool]:
+    """会社名が同じものを指しているか。判断できなければ `None`。
+
+    **これは門ではなく観測である。** 索引の表示名は `ＫＴＫ`（台帳は
+    `ケイティケイ`）、`日フイルコン`（同 `日本フイルコン`）のように略され、
+    一致を要求すると本物を大量に落とす。実測で254件中73件が落ちた。
+    身元の門はコードの形（`short_code`）が担い、名前は記録に残して
+    後から見えるようにする——ゲートは保守的に、検知は敏感に。
+    """
+    a, b = company_key(ledger_name), company_key(index_name)
+    if not a or not b or a in ("—", "-", "…"):
+        return None
+    return a in b or b in a
 
 
 def announced_at(item: dict) -> Optional[datetime]:
@@ -104,6 +151,8 @@ class Selection:
     content_sha256: Optional[str] = None
     candidates: int = 0
     corrections: int = 0
+    # 名前が一致したか。`None` は照合できなかったことを表す。判定には使わない。
+    name_agrees: Optional[bool] = None
 
     def __post_init__(self):
         if self.status not in SELECTIONS:
@@ -124,12 +173,18 @@ def digest(item: dict) -> str:
     ).hexdigest()
 
 
-def select(items: Sequence[dict], code: str, event_date: str) -> Selection:
+def select(items: Sequence[dict], code: str, event_date: str,
+           expect_name: Optional[str] = None) -> Selection:
     """その会社・その日の開示から、決算短信を1件選ぶ。
 
     複数あれば選ばない。どちらが発表かを推測すると、その推測が時刻になる。
+
+    `expect_name` を渡すと会社名も照合する。コード1列で身元を決めると、
+    台帳の重複マーカーが実在企業の開示を拾う。
     """
     want = short_code(code)
+    if want is None:
+        return Selection("unresolved_code")
     same_day = [
         i for i in items
         if short_code(i.get("company_code", "")) == want
@@ -152,9 +207,12 @@ def select(items: Sequence[dict], code: str, event_date: str) -> Selection:
                          corrections=len(corrections))
 
     only = originals[0]
+    agrees = same_company(expect_name, only.get("company_name")) if expect_name else None
     when = announced_at(only)
     if when is None:
-        return Selection("no_tanshin", candidates=len(same_day))
+        # 短信は在ったが時刻が読めない。`no_tanshin` にすると、観測したことの
+        # 反対を記録し、提供側の書式崩れを正当な不在として隠すことになる。
+        return Selection("invalid_timestamp", candidates=len(same_day), name_agrees=agrees)
     return Selection(
         "matched",
         announced_at=when,
@@ -162,6 +220,7 @@ def select(items: Sequence[dict], code: str, event_date: str) -> Selection:
         content_sha256=digest(only),
         candidates=1,
         corrections=len(corrections),
+        name_agrees=agrees,
     )
 
 

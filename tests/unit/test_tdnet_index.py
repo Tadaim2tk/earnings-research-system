@@ -152,3 +152,63 @@ def test_selection_reaches_no_network():
                 assert "urllib" not in (alias.name or ""), alias.name
             assert "urllib" not in mod and "http" not in mod, mod
     assert not any("urlopen" in n or "request" in n for n in names), sorted(names)
+
+
+MITSUI = {"company_code": "80310", "pubdate": "2026-08-04 12:00:00",
+          "company_name": "三井物産", "title": "2027年3月期第1四半期決算短信〔IFRS〕（連結）"}
+
+
+def test_a_duplicate_marker_never_borrows_a_real_company_identity():
+    """台帳の `80310_dup`（会社名 `—`）を4文字で切ると `8031` になり、三井物産の
+    実際の開示に一致して同じ時刻と同じハッシュを受け取っていた。台帳が確かめて
+    いない身元を、切り詰めが主張していた。"""
+    assert ix.short_code("80310_dup") is None
+    got = ix.select([MITSUI], "80310_dup", "2026-08-04")
+    assert got.status == "unresolved_code"
+    assert got.announced_at is None
+
+
+def test_the_five_digit_ledger_form_still_resolves():
+    """5桁は正当な表記。帝人 34010 → 3401。塞ぎすぎると本物まで落ちる。"""
+    assert ix.short_code("34010") == "3401"
+    assert ix.short_code("80310") == "8031"
+    assert ix.short_code("130A0") == "130A"
+    assert ix.short_code("7698") == "7698"
+    for junk in ("…", "", None, "80310_dup", "12345", "abc"):
+        assert ix.short_code(junk) is None, junk
+
+
+def test_the_company_name_is_recorded_but_never_gates_the_match():
+    """名前を門にすると本物が落ちる。索引は TDnet の表示名で、`ＫＴＫ`（台帳は
+    `ケイティケイ`）や `日フイルコン`（同 `日本フイルコン`）のように略される。
+    門にした版は254件中73件を落とした。ゲートは保守的に、検知は敏感に。"""
+    same = ix.select([MITSUI], "80310", "2026-08-04", expect_name="三井物産（Duplicate）")
+    assert same.status == "matched" and same.name_agrees is True
+
+    other = ix.select([MITSUI], "80310", "2026-08-04", expect_name="全く別の会社")
+    assert other.status == "matched", "名前の不一致で観測を捨てない"
+    assert other.name_agrees is False, "ただし不一致は記録に残す"
+
+    blank = ix.select([MITSUI], "80310", "2026-08-04", expect_name="—")
+    assert blank.name_agrees is None, "照合できないことを False と区別する"
+
+    assert ix.select([MITSUI], "80310", "2026-08-04").name_agrees is None
+
+
+def test_display_name_abbreviations_still_agree():
+    """市場の接頭辞と持株会社の語尾は落としてから比べる。"""
+    assert ix.same_company("アストロスケールホールディングス", "Ｇ－アストロスケール") is True
+    assert ix.same_company("KDX不動産投資法人", "Ｒ－ＫＤＸ不動産") is True
+    assert ix.same_company("パレモ・ホールディングス", "パレモ・ＨＤ") is True
+    assert ix.same_company("クスリのアオキホールディングス", "クスリのアオキＨＤ") is True
+    assert ix.same_company("三井物産", "全く無関係な会社") is False
+
+
+def test_an_unreadable_timestamp_is_not_reported_as_a_missing_tanshin():
+    """短信は在ったのに `no_tanshin` と書くと、観測したことの反対を記録し、
+    書式崩れを正当な不在として隠す。"""
+    broken = dict(MITSUI, pubdate="2026-08-04 25:00:00")
+    got = ix.select([broken], "80310", "2026-08-04")
+    assert got.status == "invalid_timestamp"
+    assert got.announced_at is None
+    assert ix.announced_at(broken) is None
