@@ -1488,3 +1488,33 @@ Consequences: テストは 1125→1146。取得元は未定のままで、この
 **(d) `source_observed_at` が `announced_at` より前でも通っていた。** **事前に読んだ予定表が、開示が実際に起きた確認として通用してしまう。** `market_reaction/models.py` は同じ順序を既に禁じている。
 
 変異で確認: `unknown` に instant を持たせる / `source` を任意にする / `pre_open` 判定を落とす（4本）/ 大引けを定数15:00に戻す（3本）/ 境界を `>=` に戻す / 末尾超過で最後のセッションを返す / 非取引日を判定しない / intraday の取引可能を翌日にする（4本）/ 寄付起点も同一セッションにする（4本）/ 順序検査を外す / class照合を常に真にする。
+
+---
+
+## ERS-ADR-0063
+
+Title: 取得元を用途ごとに決め、公開リポジトリに本文を置けないことに気づく
+
+Date: 2026-08-29
+
+Status: Accepted
+
+Context: ERS-ADR-0061 で `(source, 用途)` の表を作り、全組を `pending_terms_review` にした。ユーザーが公式情報を確認し、用途ごとの判断を返した。
+
+Decision:
+
+- **TDnet API（契約型）を3用途すべての第一候補とする。** 公式仕様上、APIは開示日・**開示時刻**・銘柄コード・表題を含むインデックスと開示資料そのものを返す。JPX自身が「該当する開示を自動的に取得・蓄積」「自然言語処理等による分析」を利用例として挙げており、取得可能期間は5年間。ERSの用途と合う。
+- **公開閲覧サービスのスクレイピングは採用しない。** 自動利用には正規APIが別途提供されている。設計・利用条件の両面で、公開Webを巡回するよりAPIを使う方が明確である。
+- **Timing Provenance の primary は TDnet の開示時刻とする。** 会社IRの掲載日時から推定しない。JPX自身が会社Webへの掲載をTDnet開示後に行うよう求めており、掲載時刻は法的な公表時刻と一致しない。会社IRは `corroboration_only` に降格する。
+- **会社IRの `evidence_capture` は個社ごと**（`pending_per_site_review`）。会社ごとに利用条件もサイト構成も違うため包括承認はしない。
+- **`approved_candidate` を語彙に加える。** 技術・利用条件の上では第一候補だが、**契約・課金の判断が残っている**という意味であり、**捕捉を解禁しない**。`approved` だけが承認である。statusの語彙を列挙して、未定義の語がどこかの分岐に落ちないようにした。
+
+Consequences: **保存先の制約が実装より先に露見した。** このリポジトリは public である。TDnet API の利用条件は、自分の分析用途での自動取得・蓄積を認める一方、第三者への再配信を認めていない。したがって **`content` を public repository にコミットする現行の Evidence Bundle 設計は、契約しても使えない** — 保存した瞬間に再配信になる。
+
+ERS-ADR-0060 で `data/evidence/` を committed artifact として設計したのは、この制約を確認する前だった。**本文は repository 外の private store に置き、public 側には hash・URL・取得時刻・`capture_status`・provenance だけを置く。** 公開側の hash だけで「後で読み直したものが同一である」ことは証明できるので、replay に必要なものは失われない。外部成果物（note等）には派生した分析・引用可能範囲・provenance だけを出す。
+
+**この分離は adapter 実装より前に決める必要がある。** 一度公開した本文は取り消せない。`test_no_disclosure_body_is_committed_to_this_public_repository` が、committed 台帳のどの行も `content` を持たないことを検査する。
+
+「各行に `unknown` が1つはある」という検査は、何も調査されていない間だけ正しかった。**開いた問いが前進を妨げる**という向きに置き換えた — `approved` または `approved_candidate` の行に `unknown` があってはならない。
+
+**次にやるべきことは adapter 実装ではない。** TDnet API の現在の料金・契約プランを確認し、このERSの規模で採用する価値があるかを判断する。採用するなら3用途を `approved` へ変更し、併せて保存先の分離を実装してから adapter へ進む。

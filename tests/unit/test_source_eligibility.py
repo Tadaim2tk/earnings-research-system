@@ -25,6 +25,21 @@ SECTION = "## Evidence / Population 取得元レビュー"
 # is not permission.
 APPROVED = frozenset({"approved"})
 
+# The whole vocabulary, enumerated so an unrecognised word fails rather than
+# landing in whichever branch happens to catch it. Only `approved` grants.
+#
+# `approved_candidate` is deliberately not approval: it means the terms and the
+# capability fit, and a contract-and-cost decision is still open. A source can
+# sit there indefinitely without unlocking anything.
+STATUSES = frozenset({
+    "approved",
+    "approved_candidate",
+    "pending_terms_review",
+    "pending_per_site_review",
+    "corroboration_only",
+    "not_approved",
+})
+
 # The same source can be permitted for one use and not another: reading a
 # roster and permanently storing a document body are different licences. A
 # single bit per source would let approval of one carry the other.
@@ -92,12 +107,21 @@ def test_every_candidate_names_a_source_a_use_and_a_status():
         assert status_of(cells), cells[0]
 
 
-def test_an_unrecognised_status_is_not_taken_for_approval():
-    """Fail closed. A status nobody has defined — a typo, a new word, a
-    decorated one — must not be read as permission to fetch."""
+def test_every_status_is_one_the_review_defines():
+    """Fail closed. A typo, a new word or a decorated one must not land in
+    whichever branch happens to catch it."""
     for cells in candidate_rows():
-        status = status_of(cells)
-        assert status in APPROVED or "pending" in status, (cells[0], cells[1], status)
+        assert status_of(cells) in STATUSES, (cells[0], cells[1], status_of(cells))
+
+
+def test_being_a_candidate_is_not_being_approved():
+    """`approved_candidate` means the terms and the capability fit and a
+    contract-and-cost decision is still open. It unlocks nothing."""
+    assert "approved_candidate" not in APPROVED
+    candidates = [c for c in candidate_rows() if status_of(c) == "approved_candidate"]
+    assert candidates, "the table has no candidate to check this against"
+    for cells in candidates:
+        assert (cells[0].strip("` "), cells[1].strip("` ")) not in approved_uses()
 
 
 def test_every_use_is_reviewed_separately_for_every_source():
@@ -126,21 +150,63 @@ def test_nothing_is_captured_while_no_use_is_approved_for_capture():
         )
 
 
-def test_no_cell_in_the_evidence_table_was_guessed_at():
-    """`unknown` is the honest value and the table says so.
+def test_a_row_with_an_open_question_cannot_be_advanced():
+    """`unknown` is the honest value, and a row carrying one has not been
+    settled enough to be approved or even to be a candidate.
 
-    The review's own boundary is public information only — no contracts, no
-    accounts, no API calls, no scraping. A cell that could not be established
-    that way has to read `unknown` rather than a plausible-sounding answer.
+    An earlier version asserted every row had at least one `unknown`, which was
+    true while nothing had been researched and became wrong the moment a source
+    was. The property that survives that is the other direction: an open
+    question blocks advancement, rather than every row being obliged to have one.
     """
     body = section()
-    assert "unknown" in body
-    assert "推測で埋めない" in body
+    assert "unknown" in body and "推測で埋めない" in body
     for cells in candidate_rows():
-        assert any("unknown" in cell for cell in cells), (cells[0], cells[1])
+        status = status_of(cells)
+        if status in ("approved", "approved_candidate"):
+            open_cells = [c for c in cells if "unknown" in c]
+            assert not open_cells, (cells[0], cells[1], status, open_cells)
 
 
 def test_the_review_states_what_it_did_not_do():
     body = section()
     for claim in ("契約", "account作成", "API接続", "scraping"):
+        assert claim in body, claim
+
+
+def test_no_disclosure_body_is_committed_to_this_public_repository():
+    """The constraint discovered after the capture models were designed.
+
+    This repository is public. The terms permit fetching and accumulating
+    disclosures for one's own analysis and do not permit redistribution, so a
+    body committed here is redistributed the moment it lands — a contract would
+    not make it allowed.
+
+    `ERS-ADR-0060` designed `data/evidence/` as a committed artifact before that
+    was checked. What may be committed is the hash, the URL, the retrieval time
+    and the status; the body belongs in a private store outside the repository.
+    Committed hashes still prove that a later re-read returned the same text,
+    which is what replay needs.
+    """
+    import json
+
+    for ledger in CAPTURES.glob("*/bundles.jsonl"):
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            assert row.get("content") is None, (
+                "%s carries a disclosure body; this repository is public"
+                % ledger.relative_to(ROOT)
+            )
+            assert row.get("content_sha256") is not None or row.get(
+                "capture_status"
+            ) != "captured", ledger.relative_to(ROOT)
+
+
+def test_the_review_records_where_the_body_may_and_may_not_live():
+    """Written down because the separation has to be decided before the first
+    fetch: a body published once cannot be unpublished."""
+    body = section()
+    for claim in ("public", "private store", "再配信"):
         assert claim in body, claim
