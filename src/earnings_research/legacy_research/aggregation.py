@@ -11,6 +11,7 @@ from earnings_research.statistics.cohort import (
     tail_capture,
     verdict_for,
 )
+from earnings_research.legacy_research.labels import cohort_label
 from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import contamination, prices_for
 from earnings_research.statistics.stability import assess as assess_stability
@@ -166,10 +167,17 @@ def _open_anchored(row):
 
 
 def _group(rows, key, population=None):
+    """Group on the canonical label, not on the characters that were typed.
+
+    `row.get(key) or "not_recorded"` grouped on the raw cell, so a full-width
+    plus made `＋1` a second cohort beside `+1`, and the em dash and the ellipsis
+    — both of which mean "not recorded" — became two more. Six of 254 records
+    sat in cohorts of one or two, taken out of the levels they belong to, in
+    the tables a reader actually reads.
+    """
     groups = defaultdict(list)
     for row in rows:
-        value = row.get(key) or "not_recorded"
-        groups[value].append(row)
+        groups[cohort_label(row.get(key))].append(row)
     return {
         value: _metrics(items, cohort_key=key, population=population)
         for value, items in sorted(groups.items())

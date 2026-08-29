@@ -131,8 +131,11 @@ def make_tso(tmp_path, future=False, wrong_name=False, bad_cutoff=False, spoofed
     # spoofed_usable: the link claims an early usable-from time even though the
     # referenced context snapshot's real usable-from time is later (future leak).
     link_usable = "2026-06-09 22:00:05 UTC" if spoofed_usable else real_usable
-    # bad_cutoff: decision_cutoff_utc is not anchored to a day prior to the legacy event date.
-    cutoff = "2026-06-10 00:00:00 UTC" if bad_cutoff else "2026-06-09 23:00:00 UTC"
+    # bad_cutoff: the cutoff falls after the market opened on the event date, so
+    # the context it selects can already contain the reaction. 06:00 UTC is
+    # 15:00 JST, the close. The sound value is 00:00 UTC — 09:00 JST, the
+    # opening bell — which is what all 254 committed records carry.
+    cutoff = "2026-06-10 06:00:00 UTC" if bad_cutoff else "2026-06-10 00:00:00 UTC"
     link_fields = [
         "ers_code", "ers_name", "ers_date", "ers_quarter", "decision_cutoff_utc", "join_status",
         "snapshot_id", "provenance", "snapshot_usable_from_utc", "snapshot_generated_at_utc",
@@ -226,12 +229,17 @@ def test_context_future_leak_and_identity_mismatch_are_rejected(tmp_path):
 
 def test_context_cutoff_and_usable_from_are_cross_checked(tmp_path):
     source, source_commit = make_source(tmp_path)
-    # decision_cutoff_utc must be anchored to a day prior to the legacy event date,
-    # not merely trusted as whatever the TSO link supplies.
+    # The cutoff must precede the moment the market could react to the event,
+    # not merely fall on an earlier calendar day in UTC. The earlier form of
+    # this check compared `cutoff.date() >= event_date` and so rejected every
+    # one of the 254 committed records: each carries 00:00:00 UTC on its event
+    # date, which is 09:00 JST — the opening bell, six hours before the
+    # earliest possible disclosure. The whole migration was blocked by a test
+    # that had the rule backwards.
     other = tmp_path / "other_bad_cutoff"
     other.mkdir()
     bad_cutoff_tso, bad_cutoff_commit = make_tso(other, bad_cutoff=True)
-    with pytest.raises(ValueError, match="not anchored to a prior legacy event date"):
+    with pytest.raises(ValueError, match="after the market opened"):
         build_import(source, source_commit, "source-run-1", bad_cutoff_tso, bad_cutoff_commit, "2026-08-26T08:00:00+09:00")
     # snapshot_usable_from_utc on the link must match the referenced context row's own
     # usable_from_utc; a link that copies an early time while the real snapshot became
@@ -364,3 +372,90 @@ def test_the_committed_research_outputs_are_what_their_generator_produces():
         expected = body if isinstance(body, str) else body.decode("utf-8")
         assert committed.joinpath(name).read_text(encoding="utf-8") == expected, name
     assert "統計ガードを通っていない経路" in generated["research_report.md"]
+
+
+def test_the_committed_cutoffs_are_accepted_by_the_guard():
+    """Stated against the real record, because a synthetic fixture is what got
+    this wrong: the guard was written, tested against a made-up value, and
+    rejected all 254 committed rows without anyone running it on them."""
+    import json as _json
+    from datetime import date as _date
+    from earnings_research.legacy_research.importer import _market_open_utc, _utc_datetime
+
+    path = ROOT / "data/historical_research/earnings_research_os/v1/legacy_context_view.jsonl"
+    rows = [_json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 254
+    for row in rows:
+        cutoff = _utc_datetime(row["decision_cutoff_utc"])
+        opening = _market_open_utc(_date.fromisoformat(row["legacy_event_date"]))
+        assert cutoff <= opening, row["legacy_record_id"]
+        # And the snapshot behind it was usable before that cutoff.
+        assert _utc_datetime(row["market_context"]["usable_from_utc"]) <= cutoff
+
+
+def test_the_guard_still_refuses_a_cutoff_past_the_open():
+    from datetime import date as _date
+    from earnings_research.legacy_research.importer import _market_open_utc, _utc_datetime
+
+    opening = _market_open_utc(_date(2026, 6, 10))
+    assert _utc_datetime("2026-06-10 00:00:00 UTC") <= opening      # 09:00 JST, the bell
+    assert _utc_datetime("2026-06-09 23:00:00 UTC") <= opening      # the evening before
+    assert not _utc_datetime("2026-06-10 00:00:01 UTC") <= opening  # one second late
+    assert not _utc_datetime("2026-06-10 06:00:00 UTC") <= opening  # 15:00 JST, the close
+
+
+def test_the_published_reports_are_rebuildable_without_the_retired_repository():
+    """The gap this closes.
+
+    The reports a reader opens were produced only by `migrate-legacy-os`, which
+    needs the retired repository and a TSO checkout at pinned commits. CI has
+    neither, so nothing checked them: they sat committed for weeks describing a
+    pipeline that had been replaced, with figures measured from the previous
+    close while the code measured from the open.
+    """
+    from earnings_research.legacy_research.publishing import rebuild_reports, verify_reports
+
+    root = ROOT / "data/historical_research/earnings_research_os/v1"
+    reports = rebuild_reports(root)
+    assert set(reports) == {
+        "dashboard.md", "weekly_report.md", "note_draft.md", "aggregation_summary.json"
+    }
+    assert verify_reports(root, ROOT / "outputs/historical_research")["status"] == "verified"
+
+
+def test_a_committed_report_that_drifted_is_refused(tmp_path):
+    from earnings_research.legacy_research.publishing import rebuild_reports, verify_reports
+
+    root = ROOT / "data/historical_research/earnings_research_os/v1"
+    out = tmp_path / "outputs"
+    out.mkdir()
+    for name, content in rebuild_reports(root).items():
+        (out / name).write_bytes(content)
+    assert verify_reports(root, out)["status"] == "verified"
+    (out / "dashboard.md").write_bytes(b"# something else\n")
+    with pytest.raises(ValueError, match="not what the current code produces"):
+        verify_reports(root, out)
+
+
+def test_the_rebuild_refuses_an_input_that_does_not_match_its_manifest(tmp_path):
+    """Rebuilt from the record means the record, not whatever is on disk."""
+    import shutil
+    from earnings_research.legacy_research.publishing import rebuild_reports
+
+    root = tmp_path / "v1"
+    shutil.copytree(ROOT / "data/historical_research/earnings_research_os/v1", root)
+    assert rebuild_reports(root)
+    target = root / "source/records.csv"
+    target.write_bytes(target.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="input hash mismatch"):
+        rebuild_reports(root)
+
+
+def test_the_as_of_date_comes_from_the_record_and_not_from_the_clock():
+    """A caller-supplied as-of would put a different date in the file every day
+    it was rebuilt, and the drift check above would report a mismatch that
+    means nothing."""
+    from earnings_research.legacy_research.publishing import rebuild_reports
+
+    reports = rebuild_reports(ROOT / "data/historical_research/earnings_research_os/v1")
+    assert b"2026-08-25" in reports["weekly_report.md"]

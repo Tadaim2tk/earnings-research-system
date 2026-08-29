@@ -1,6 +1,6 @@
 # このディレクトリの成果物について
 
-**ここにある数字は、現在のコードが到達する結論と一致しません。**
+**二種類が混在しています。片方は現行コードが生成したもの、もう片方はそうではありません。**
 
 注記が冒頭に入っているのは Markdown の6ファイルだけです。`aggregation_summary.json` は
 `superseded_note` キーで、`research_knowledge.json` と `publishing_parity.json` は
@@ -10,19 +10,22 @@
 
 ## 二つの由来がある
 
-**移行成果物** — `dashboard.md` / `weekly_report.md` / `note_draft.md` /
-`aggregation_summary.json` / `publishing_parity.json`
+**公開レポート（現行コードの出力）** — `dashboard.md` / `weekly_report.md` /
+`note_draft.md` / `aggregation_summary.json`
 
-退役した earnings-research-os が公開していたものを再現した記録です。生成時点では
-留保期間の分割も、寄り付き起点のリターンも、多重比較補正もありませんでした。
-とくに `dashboard.md` の「初動分類別」は、分類に使ったギャップ自体を成果として
-数え直しています。**同じ254件**を寄り付き起点で測り直すと GU **+5.8% → -0.6%**、
-GD **-5.3% → +0.1%** と符号が反転します。現行パイプラインが報告する探索165件では
-GU +6.1% → -0.4%、GD -5.4% → +0.5% で、どちらの基準でも反転します。
+**2026-08-29 に再生成しました。** 留保期間の分割、寄り付き起点のリターン、
+Benjamini-Hochberg 補正がすべて入っています。冒頭に「917件の比較を補正した結果、
+統計的に主張できる項目は0件」が出ます。
 
-再生成は現在できません。`migrate-legacy-os` が PR #53 で追加された
-`decision_cutoff` 検証に阻まれ、凍結ソースを受け付けないためです（ERS-ADR-0045
-の未対応事項）。
+以前ここには「再生成できない」と書いてありました。`migrate-legacy-os` が
+`decision_cutoff` 検証に阻まれていたためですが、**その検証が誤っていました**。
+UTC の暦日で `cutoff.date() >= event_date` を比較しており、254件すべてが持つ
+`イベント日 00:00:00 UTC`（= 09:00 JST、寄り付き）を「発表後」として弾いていました。
+決算開示は 15:00 JST 以降なので、実際には6時間以上前です。市場が反応し得る最初の
+瞬間（寄り付き）との比較に直しました。ERS-ADR-0056。
+
+なお `publishing_parity.json` は退役システムの renderer が自分の出力を byte 単位で
+再現することの記録で、こちらは変わっていません。
 
 **`knowledge.py` の出力** — `research_knowledge.json` / `research_report.md` /
 `note_research_digest.md` / `weekly_research_digest.md`

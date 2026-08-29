@@ -35,6 +35,16 @@ def _number(value):
 
 
 def _label(value):
+    """Deliberately not `labels.cohort_label`, which also folds sign variants.
+
+    `research_knowledge.json` is hash-bound to the frozen hypothesis registry —
+    `verify-hypothesis-registry` re-derives the registry from it and refuses a
+    mismatch. Folding `＋1` into `+1` here would move that hash and unfreeze
+    nineteen definitions. The fix belongs to the next registry version, built
+    from research that has it, not to an edit underneath the one that is
+    frozen. `labels.frozen_cohort_label` says the same thing where the two
+    definitions sit side by side.
+    """
     value = str(value or "").strip()
     return "not_recorded" if value in MISSING_LABELS else value
 

@@ -409,6 +409,28 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
         parity[label] = {"source_commit": output_commit, "byte_equal": rendered == old_output, "source_sha256": sha256_bytes(old_output), "rendered_sha256": sha256_bytes(rendered)}
     if not all(item["byte_equal"] for item in parity.values()):
         raise ValueError("legacy publishing parity failed")
+    reports = render_reports(final_rows, context_views, source_commit, as_of)
+    reports["publishing_parity.json"] = json.dumps({
+        "schema_version": "legacy_publishing_parity_v1", "source_commit": source_commit,
+        "record_count": len(final_rows),
+        "tso_context_link_count": sum(view["join_status"] == "ok" for view in context_views),
+        "outputs": parity,
+    }, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    return source_files, reports, parity
+
+
+def render_reports(final_rows, context_views, source_commit: str, as_of: date):
+    """The published reports, from the record alone.
+
+    Split out of `build_reports` because that call also proves the retired
+    system's own renderer still reproduces its own output byte for byte, and
+    that proof needs the retired repository at a pinned commit. Two machines
+    have it; CI does not. So the reports the reader actually reads could not be
+    checked anywhere — they sat committed, generated once, with nothing
+    noticing when the code that makes them changed underneath.
+
+    Everything here comes from files this repository carries and hashes.
+    """
     coverage = sum(view["join_status"] == "ok" for view in context_views)
     provenance = f"dataset_origin: earnings-research-os / record_mode: legacy_observational / source_commit: {source_commit} / TSO context: {coverage}/{len(context_views)}"
     aggregation = build_aggregation(final_rows, context_views, source_commit)
@@ -433,20 +455,14 @@ def build_reports(source_repo: Path, source_commit: str, final_rows, context_vie
     note = render_note(final_rows, as_of, aggregation=aggregation).replace(
         "\n\n", f"\n\n{provenance}\n\n", 1
     )
-    reports = {
+    return {
         "dashboard.md": dashboard.encode("utf-8"),
         "weekly_report.md": weekly.encode("utf-8"),
         "note_draft.md": note.encode("utf-8"),
-        "publishing_parity.json": json.dumps({
-            "schema_version": "legacy_publishing_parity_v1", "source_commit": source_commit,
-            "record_count": len(final_rows), "tso_context_link_count": coverage,
-            "outputs": parity,
-        }, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8") + b"\n",
         "aggregation_summary.json": json.dumps(
             aggregation, ensure_ascii=False, indent=2, sort_keys=True
         ).encode("utf-8") + b"\n",
     }
-    return source_files, reports, parity
 
 
 def write_reports(output_dir: Path, reports: dict[str, bytes]):
@@ -457,3 +473,53 @@ def write_reports(output_dir: Path, reports: dict[str, bytes]):
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_bytes(content)
         temp.replace(path)
+
+
+def rebuild_reports(input_root: Path):
+    """The published reports, rebuilt from what this repository already carries.
+
+    No retired repository, no TSO checkout, nothing outside these files. That
+    is the point: the reports a reader actually opens were generated once, by
+    hand, on a machine that had those checkouts — so when the statistics under
+    them changed, nothing said the committed files no longer matched the code.
+    They sat for weeks describing a pipeline that had been replaced.
+
+    Every input is hash-checked against the migration manifest, so "rebuilt
+    from the record" means the record and not whatever is on disk.
+    """
+    input_root = Path(input_root)
+    manifest = json.loads((input_root / "migration_manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("prospective_records_created") != 0 or manifest.get("formal_evidence_created") != 0:
+        raise ValueError("frozen legacy migration boundary is invalid")
+    if manifest.get("tso_writeback_performed") is not False:
+        raise ValueError("frozen legacy migration must remain read-only to TSO")
+    digests = manifest.get("output_sha256", {})
+    for name in ("source/records.csv", "legacy_context_view.jsonl"):
+        expected = digests.get(name)
+        actual = sha256_bytes((input_root / name).read_bytes())
+        if not expected or actual != expected:
+            raise ValueError(f"frozen legacy input hash mismatch: {name}")
+    _fields, rows = parse_csv_bytes((input_root / "source/records.csv").read_bytes())
+    contexts = [
+        json.loads(line)
+        for line in (input_root / "legacy_context_view.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    # Derived, not passed in. An as-of supplied by the caller would put a
+    # different date in the file every day it was rebuilt, and the check below
+    # would report a mismatch that means nothing.
+    dates = sorted(row["date"] for row in rows if row.get("date"))
+    if not dates:
+        raise ValueError("frozen legacy record carries no usable dates")
+    return render_reports(rows, contexts, manifest["frozen_source_commit"], date.fromisoformat(dates[-1]))
+
+
+def verify_reports(input_root: Path, output_dir: Path):
+    """Refuse committed reports that the current code would not produce."""
+    expected = rebuild_reports(input_root)
+    output_dir = Path(output_dir)
+    for name, content in expected.items():
+        path = output_dir / name
+        if not path.is_file() or path.read_bytes() != content:
+            raise ValueError(f"published report is not what the current code produces: {name}")
+    return {"status": "verified", "report_count": len(expected)}
