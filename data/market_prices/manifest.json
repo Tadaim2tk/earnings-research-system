@@ -1,0 +1,65 @@
+{
+  "accepted_discrepancies": [
+    {
+      "code": "5609",
+      "event_date": "2026-07-29",
+      "fetched": 935.0,
+      "field": "next_open",
+      "record": 936.0,
+      "relative": 0.0011
+    },
+    {
+      "code": "8316",
+      "event_date": "2026-07-31",
+      "fetched": 6709.0,
+      "field": "next_open",
+      "record": 6700.0,
+      "relative": 0.0013
+    }
+  ],
+  "auto_adjust": false,
+  "checked_points": 1146,
+  "event_count": 254,
+  "events_without_a_session": [
+    {
+      "code": "…",
+      "event_date": "2026-06-30"
+    },
+    {
+      "code": "3977",
+      "event_date": "2026-07-14"
+    },
+    {
+      "code": "34010",
+      "event_date": "2026-08-04"
+    },
+    {
+      "code": "52010",
+      "event_date": "2026-08-04"
+    },
+    {
+      "code": "64400",
+      "event_date": "2026-08-04"
+    },
+    {
+      "code": "67410",
+      "event_date": "2026-08-04"
+    },
+    {
+      "code": "80310",
+      "event_date": "2026-08-04"
+    },
+    {
+      "code": "80310_dup",
+      "event_date": "2026-08-04"
+    }
+  ],
+  "fetched_at": "2026-08-29T14:43:30+09:00",
+  "matching_points": 1144,
+  "priced_count": 246,
+  "schema_version": "legacy_event_entry_price_manifest_v1",
+  "session_index": "i0 = the announcement date's session; the entry price is i0+2's open",
+  "sha256": "6ba2121c0e8d23d07ca1103c3bd81a183d4f3ae41bab56abab692783e04c947c",
+  "source": "yfinance",
+  "ticker_convention": "{code}.T"
+}

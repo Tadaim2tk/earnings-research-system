@@ -288,7 +288,7 @@ def _dated_rows(count, start_day=1):
             "code": "%04d" % (index + 1000),
             "date": "2026-0%d-%02d" % (1 + index // 28, 1 + index % 28),
             "prev_close": "100", "next_open": "101", "next_close": "102",
-            "d5_close": "103", "d20_close": "104",
+            "entry_open": "102.5", "d5_close": "103", "d20_close": "104",
             "gap": "0.01", "ret_d1": "0.02", "ret_d5": "0.03", "ret_d20": "0.04",
             "shodo": "GU", "reaction": "GU継続", "rank": "B", "narrative": "増収増益",
         }
@@ -385,7 +385,8 @@ def test_the_published_statistics_cannot_see_the_reserved_period():
     note_before = _note_insights(render_note(rows, date(2026, 6, 10)))
     for row in split.reserved:
         # Returns nothing like the explored period's, in every anchored field.
-        row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
+        row.update({"next_open": "100", "next_close": "180", "entry_open": "185",
+                    "d5_close": "220", "d20_close": "260"})
         row["ret_d1"] = row["ret_d5"] = row["ret_d20"] = "0.8"
     after = render_dashboard(rows, "2026-06-10 00:00")
     note_after = _note_insights(render_note(rows, date(2026, 6, 10)))
@@ -403,7 +404,8 @@ def test_changing_the_explored_period_does_move_the_published_statistics():
     split = split_by_date(rows)
     before = render_dashboard(rows, "2026-06-10 00:00")
     for row in split.exploration:
-        row.update({"next_open": "100", "next_close": "180", "d5_close": "220", "d20_close": "260"})
+        row.update({"next_open": "100", "next_close": "180", "entry_open": "185",
+                    "d5_close": "220", "d20_close": "260"})
     after = render_dashboard(rows, "2026-06-10 00:00")
     assert _statistics_section(after) != _statistics_section(before)
 
@@ -448,6 +450,9 @@ def _varied_rows(count=40):
             "prev_close": "100",
             "next_open": "%.2f" % opening,
             "next_close": "%.2f" % (opening * (1 + drift)),
+            # The fill price sits one bar past the close the label is read at,
+            # and on its own modulus so a cohort cannot share a value with it.
+            "entry_open": "%.2f" % (opening * (1 + drift) + (index * 5) % 7 / 10),
             "d5_close": "%.2f" % (opening * (1 + drift * 2)),
             "d20_close": "%.2f" % (opening * (1 + drift * 3)),
             "gap": "%.4f" % ((opening - 100) / 100),
@@ -561,15 +566,18 @@ def _expected_figures(rows, column, label, entry_column, exit_column):
 # supposed to span, written out here rather than looked up: the thing under
 # test is which prices the report uses, and asking prices_for would be asking
 # the code being checked for its own answer.
+# Every published table now measures from the price an order actually fills at:
+# the open of session i0+2, after the disclosure and after the first session
+# has reacted. The tables used to start from next_open — a price a trade would
+# have to buy the gap to get — or from next_close, which for a reaction cohort
+# is the very print that decides the label.
 PUBLISHED_TABLES = (
-    ("### ランク別", "rank",
-     (("next_open", "next_close"), ("next_open", "d5_close"), ("next_open", "d20_close"))),
-    ("### ナラティブ整合別", "narrative", (("next_open", "d20_close"),)),
-    ("### 判断別", "judge", (("next_open", "d20_close"),)),
-    ("### 初動分類別", "shodo",
-     (("next_open", "next_close"), ("next_open", "d5_close"), ("next_open", "d20_close"))),
-    ("### 反応分類別", "reaction", (("next_close", "d5_close"), ("next_close", "d20_close"))),
-    ("### AIサプライズ", "surprise", (("next_open", "next_close"), ("next_open", "d20_close"))),
+    ("### ランク別", "rank", (("entry_open", "d5_close"), ("entry_open", "d20_close"))),
+    ("### ナラティブ整合別", "narrative", (("entry_open", "d20_close"),)),
+    ("### 判断別", "judge", (("entry_open", "d5_close"), ("entry_open", "d20_close"))),
+    ("### 初動分類別", "shodo", (("entry_open", "d5_close"), ("entry_open", "d20_close"))),
+    ("### 反応分類別", "reaction", (("entry_open", "d5_close"), ("entry_open", "d20_close"))),
+    ("### AIサプライズ", "surprise", (("entry_open", "d5_close"), ("entry_open", "d20_close"))),
 )
 
 
@@ -737,7 +745,12 @@ def test_a_tail_driven_cohort_is_marked_where_it_is_published():
 def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
     """The narrative insight was measured from the previous close — the anchor
     the JSON withholds for that cohort — inside the block the reader is told to
-    copy and publish."""
+    copy and publish.
+
+    The sound anchor is now the fill price rather than the first session's
+    open: the note carries what an order would have made, like every other
+    published figure.
+    """
     from earnings_research.legacy_research.aggregation import _open_anchored
     from earnings_research.legacy_research.publishing import _anchored, _avg, render_note
     from earnings_research.statistics.holdout import split_by_date
@@ -756,8 +769,8 @@ def test_the_note_does_not_publish_a_pairing_the_summary_withholds():
     for line in insights:
         label = line.split("「")[1].split("」")[0]
         match = lambda row, label=label: row.get("narrative") == label
-        sound = _anchored(explored, match, "open_d1")
-        stale = _avg(explored, match, "ret_d1")
+        sound = _anchored(explored, match, "entry_d20")
+        stale = _avg(explored, match, "ret_d20")
         assert sound != stale, label
         assert line.endswith(sound), (line, sound)
 

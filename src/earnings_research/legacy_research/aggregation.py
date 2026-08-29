@@ -13,17 +13,19 @@ from earnings_research.statistics.cohort import (
 )
 from earnings_research.legacy_research.labels import cohort_label
 from earnings_research.statistics.holdout import split_by_date
-from earnings_research.statistics.lookahead import contamination, prices_for
+from earnings_research.statistics.lookahead import (
+    DERIVED_FIELDS,
+    RETURN_ANCHOR,
+    contamination,
+    prices_for,
+)
 from earnings_research.statistics.stability import assess as assess_stability
 
-# Returns from the previous close, and the same horizons from the opening
-# price. The opening price is the first one anyone can transact at, so it is
-# what a cohort split on the gap has to be scored against.
-RETURN_FIELDS = (
-    "gap", "ret_d1", "ret_d5", "ret_d20",
-    "open_d1", "open_d5", "open_d20",
-    "close_d5", "close_d20",
-)
+# Every field the declaration table names, in the order it names them. Written
+# out here as a tuple of nine, it was the third copy of that table's contents
+# in this file, and adding an anchor to the table left all three lists short —
+# the new field was computed on each row and then summarised nowhere.
+RETURN_FIELDS = tuple(RETURN_ANCHOR)
 
 # Where the money is when outcomes are fat-tailed. A cohort with a flat median
 # still earns its place if it holds the large moves more often than the run of
@@ -148,13 +150,18 @@ def _open_anchored(row):
     The exits stay fixed at the fifth and twentieth session after the
     announcement, so close_d5 is a four-session hold and open_d5 a five-session
     one. Only the entry moves; that is the comparison.
+
+    The set of fields comes from the declaration table rather than being listed
+    here. Listed here, adding the entry anchor to that table left this loop
+    computing the five fields it was written with, and the new anchor reported
+    as absent on every row.
     """
     enriched = dict(row)
     # Acting on the first day's pattern means acting at its close, so the
     # horizons a reaction cohort can be scored on start there; acting on the
     # gap means the opening price. Both pairs come from the declaration table
     # rather than being written out again here.
-    for name in ("open_d1", "open_d5", "open_d20", "close_d5", "close_d20"):
+    for name in DERIVED_FIELDS:
         entry_field, exit_field = prices_for(name)
         entry, exit_ = _number(row.get(entry_field)), _number(row.get(exit_field))
         # The key is always present, None where it cannot be computed. Leaving

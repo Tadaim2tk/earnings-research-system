@@ -31,6 +31,19 @@ RETURN_ANCHOR: Dict[str, str] = {
     "open_d20": "next_open",
     "close_d5": "next_close",
     "close_d20": "next_close",
+    # The price an order actually gets. The disclosure lands after the close,
+    # the first session reacts, the reaction is read off that session's close,
+    # and the order fills at the next open — session i0+2, counting the
+    # announcement day as i0. Every other anchor here is a price the record
+    # happened to carry; this is the one a decision is executed at.
+    #
+    # It is also the only anchor no label reaches. A reaction cohort is fixed
+    # at the first session's close, which is strictly before this price exists,
+    # so the split and the result share no bar at all — where scoring the same
+    # cohort from next_close means entering at the very price that decides the
+    # label.
+    "entry_d5": "entry_open",
+    "entry_d20": "entry_open",
 }
 
 # What each cohort variable is derived from. A cohort split on the gap is
@@ -174,7 +187,20 @@ RETURN_EXIT: Dict[str, str] = {
     "open_d20": "d20_close",
     "close_d5": "d5_close",
     "close_d20": "d20_close",
+    "entry_d5": "d5_close",
+    "entry_d20": "d20_close",
 }
+
+
+# The fields a row does not arrive with and has to be given. The source CSV
+# carries the previous-close returns as columns; everything else is derived
+# from the price pair declared above. Read off RETURN_ANCHOR rather than listed
+# again, because a list beside a table is a second place to forget: the entry
+# anchor was added to the table and the aggregation went on computing the five
+# fields it had been written with, reporting the new one as absent everywhere.
+DERIVED_FIELDS = tuple(
+    field for field, anchor in RETURN_ANCHOR.items() if anchor != "prev_close"
+)
 
 
 def prices_for(outcome_field: str) -> tuple:

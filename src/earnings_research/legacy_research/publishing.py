@@ -12,6 +12,7 @@ from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import prices_for
 
 from .aggregation import build_aggregation
+from .entry_prices import accepted, attach as attach_entry_prices, by_event, digest as entry_digest, disagreements, read as read_entry_prices
 from .labels import cohort_label
 from .legacy_parity import (
     render_dashboard_as_retired,
@@ -216,62 +217,70 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "`-` は該当する観測が1件も無いという意味。同一銘柄が複数回現れる群では",
               "件数のうしろに社数を添える。",
               "",
-              "ランク・ナラティブ・判断・サプライズは**開示を読んでから**付けている。",
-              "コミット記録では254件すべてが大引け後、PTSの値動きを引いたメモもある。",
-              "前日終値起点で測るとその日のうちに知り得なかったラベルで当日の値動きを",
-              "採点することになるので、これらも**寄り付き起点**で並べる。",
+              "**すべて約定起点で並べている。** 開示は大引け後に出る。初日が反応し、",
+              "その引けを見て判断し、注文は翌日の寄り付きで約定する。その寄り付き",
+              "(発表日を i0 として i0+2)が、これらの数字の起点である。",
+              "",
+              "これまでは寄り付き(i0+1)起点で並べていた。汚染はされていないが、",
+              "**ギャップに飛び乗る前提**の数字であり、実際に執行する地点ではない。",
+              "翌日終値(i0+1)起点も同様に、反応分類を決めるまさにその値段で約定する",
+              "前提になる。約定起点だけが、どのラベルよりも後に存在する価格である。",
+              "",
+              "出口は発表から5営業日後・20営業日後の引けに固定しているので、起点を",
+              "変えても比べられる。動くのは入口だけ。",
               "",
               "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
-              "| ランク | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
+              "| ランク | 約定→5日 | 約定→20日 |", "|---|---|---|"]
     for rank in RANKS:
         match = lambda row, rank=rank: cohort_label(row.get("rank")) == rank
         lines.append(
-            f"| {rank} | {_anchored(counted, match, 'open_d1')} | "
-            f"{_anchored(counted, match, 'open_d5')} | "
-            f"{_anchored(counted, match, 'open_d20')} |"
+            f"| {rank} | {_anchored(counted, match, 'entry_d5')} | "
+            f"{_anchored(counted, match, 'entry_d20')} |"
         )
-    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 寄り付き→20日 |", "|---|---|"]
+    lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 約定→20日 |", "|---|---|"]
     for narrative in NARRATIVES:
         match = lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative
-        lines.append(f"| {narrative} | {_anchored(counted, match, 'open_d20')} |")
-    lines += ["", "### 判断別 20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 寄り付き→20日 |", "|---|---|"]
+        lines.append(f"| {narrative} | {_anchored(counted, match, 'entry_d20')} |")
+    lines += ["", "### 判断別 リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
     for judge in JUDGES:
         match = lambda row, judge=judge: cohort_label(row.get("judge")) == judge
-        lines.append(f"| {judge} | {_anchored(counted, match, 'open_d20')} |")
+        lines.append(
+            f"| {judge} | {_anchored(counted, match, 'entry_d5')} | "
+            f"{_anchored(counted, match, 'entry_d20')} |"
+        )
     lines += ["", "### 初動分類別 リターン(仮説: 初動ギャップは持続するか)", "",
-              "これらの群は**ギャップで分けている**ので、前日終値起点のリターンで見ると",
-              "分類に使った当のギャップを測り直すことになり、必ず「GUは強い」と出る。",
-              "約定できる最初の価格は寄り付きなので、**寄り付き起点**で並べる。",
+              "この群は**ギャップで分けている**ので、前日終値起点で見ると分類に使った",
+              "当のギャップを測り直すことになり、必ず「GUは強い」と出る。",
               "",
-              "| 初動 | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
+              "| 初動 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
     for value in ("GU", "フラット", "GD"):
         match = lambda row, value=value: cohort_label(row.get("shodo")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'open_d1')} | "
-            f"{_anchored(counted, match, 'open_d5')} | "
-            f"{_anchored(counted, match, 'open_d20')} |"
+            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
+            f"{_anchored(counted, match, 'entry_d20')} |"
         )
     lines += ["", "### 反応分類別 リターン(仮説: 初日の値動きパターンに持続性はあるか)", "",
-              "この群は初日の値動きでも分けているので、寄り付き起点にも定義の半分が入る。",
-              "戻しを見てから入るなら起点は翌日終値になる。",
+              "この分類は初日の引けで確定する。約定起点はその後に存在する価格なので、",
+              "分類と結果が1本も重ならない。翌日終値起点だと、分類を決めるその値段で",
+              "約定する前提になっていた。",
               "",
-              "| 分類 | 翌日終値→5日 | 翌日終値→20日 |", "|---|---|---|"]
+              "| 分類 | 約定→5日 | 約定→20日 |", "|---|---|---|"]
     for value in ("GU継続", "GU失速", "GD反発", "GD継続"):
         match = lambda row, value=value: cohort_label(row.get("reaction")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'close_d5')} | "
-            f"{_anchored(counted, match, 'close_d20')} |"
+            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
+            f"{_anchored(counted, match, 'entry_d20')} |"
         )
     lines += ["", "### AIサプライズ評価 × 実際の市場反応(自己較正)", "",
               "元はギャップで較正していたが、ギャップは寄り付きで起きるのでどちら向きにも",
               "取引できず、しかもサプライズ評価自体が大引け後に付く。",
               "",
-              "| サプライズ | 寄り付き→翌日終値 | 寄り付き→20日 |", "|---|---|---|"]
+              "| サプライズ | 約定→5日 | 約定→20日 |", "|---|---|---|"]
     for value in SURPRISES:
         match = lambda row, value=value: cohort_label(row.get("surprise")) == value
         lines.append(
-            f"| {value} | {_anchored(counted, match, 'open_d1')} | "
-            f"{_anchored(counted, match, 'open_d20')} |"
+            f"| {value} | {_anchored(counted, match, 'entry_d5')} | "
+            f"{_anchored(counted, match, 'entry_d20')} |"
         )
     # A section titled 集計 three lines under a sentence promising the reserved
     # rows enter no aggregate. Empty today because no result column is filled,
@@ -335,25 +344,24 @@ def render_note(rows, as_of: date, *, aggregation=None):
     week = sorted((row for row in rows if str(since) <= row.get("date", "") <= str(as_of)), key=lambda item: (item.get("rank", "z"), item.get("date", "")))
     insights = []
     for narrative in NARRATIVES:
-        # The narrative is read off the disclosure, after the close ret_d1 is
-        # measured from, so the JSON summary withholds this pairing. The note
-        # was publishing it anyway — inside the block the reader is told to
-        # copy — because the anchor was corrected in the dashboard and here.
+        # Every figure the note carries is measured from the price an order
+        # fills at. The note is the block a reader is told to copy, so an
+        # anchor corrected in the dashboard and not here is a corrected report
+        # publishing the uncorrected number.
         figures = _anchored(
             counted, lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative,
-            "open_d1",
+            "entry_d20",
         )
         if figures != "-":
-            insights.append(f"ナラティブ「{narrative}」の寄り付きから翌日終値 勝率/中央値/平均: {figures}")
+            insights.append(f"ナラティブ「{narrative}」の約定から20日 勝率/中央値/平均: {figures}")
     for reaction in ("GD反発", "GD継続", "GU継続", "GU失速"):
-        # These cohorts are split on the first day's own move, so a return that
-        # starts before that close contains the split. Reading from the close
-        # is the earliest honest anchor.
+        # Split on the first day's own move, which is settled at that day's
+        # close — strictly before the price this return starts from.
         figures = _anchored(
-            counted, lambda row, reaction=reaction: cohort_label(row.get("reaction")) == reaction, "close_d5"
+            counted, lambda row, reaction=reaction: cohort_label(row.get("reaction")) == reaction, "entry_d5"
         )
         if figures != "-":
-            insights.append(f"初日「{reaction}」の翌日終値からの5日 勝率/中央値/平均: {figures}")
+            insights.append(f"初日「{reaction}」の約定からの5日 勝率/中央値/平均: {figures}")
     lines = [f"# AI決算研究ログ 週次検証 {as_of}(note投稿用ドラフト)", "", "―― 使い方 ――  下の「今週の気づき」に一筆だけ書き、`本文ここから`以降をnoteにコピペして公開してください。", "", "## 今週の気づき(←ここだけ手書き。これがこの記事の主役)", "", "（例: 衝突判定の銘柄は翌日リターンが弱い傾向が続いている。件数が増えたら本検証する。）", "", "──────────  本文ここから  ──────────", "", "決算発表に対する株価反応を記録・検証している個人研究ログです。特定銘柄の売買を推奨するものではなく、観察と仮説検証の記録です。", "", f"## 今週記録した銘柄({len(week)}件)", ""]
     if week:
         for row in week:
@@ -476,6 +484,39 @@ def write_reports(output_dir: Path, reports: dict[str, bytes]):
         temp.replace(path)
 
 
+# Fetched separately from the frozen migration, because the retired system never
+# recorded it. Kept beside the repository root rather than inside the migration
+# tree: that tree is reproduced byte for byte from the retired repository and a
+# file it never held does not belong in it.
+ENTRY_PRICES = Path("data/market_prices/legacy_event_entry_price.jsonl")
+ENTRY_MANIFEST = Path("data/market_prices/manifest.json")
+
+
+def with_entry_prices(rows, path: Path, manifest_path: Path):
+    """Give each record the price its order would have filled at.
+
+    Refuses rather than degrades. Without this file every entry-anchored return
+    is None, which reads in the published tables as "not enough records" — the
+    same words a genuinely small cohort gets. A missing fetch would look like a
+    finding about the data.
+
+    The fetch is checked against the record before it is used: it re-derives the
+    five prices the record already holds, and a disagreement means it read a
+    different series and its entry price cannot be trusted either.
+    """
+    fetched = read_entry_prices(path)
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if manifest["sha256"] != entry_digest(path):
+        raise ValueError("fetched prices do not match the digest recorded for them")
+    problems = disagreements(fetched, rows, accepted(manifest_path))
+    if problems:
+        raise ValueError(
+            "fetched prices disagree with the record in %d places: %s"
+            % (len(problems), "; ".join(problems[:3]))
+        )
+    return attach_entry_prices(rows, by_event(fetched))
+
+
 def reporting_date(rows) -> date:
     """The as-of the reports carry: the last day the record covers.
 
@@ -491,7 +532,8 @@ def reporting_date(rows) -> date:
     return date.fromisoformat(dates[-1])
 
 
-def rebuild_reports(input_root: Path):
+def rebuild_reports(input_root: Path, entry_prices: Path = ENTRY_PRICES,
+                    entry_manifest: Path = ENTRY_MANIFEST):
     """The published reports, rebuilt from what this repository already carries.
 
     No retired repository, no TSO checkout, nothing outside these files. That
@@ -516,6 +558,7 @@ def rebuild_reports(input_root: Path):
         if not expected or actual != expected:
             raise ValueError(f"frozen legacy input hash mismatch: {name}")
     _fields, rows = parse_csv_bytes((input_root / "source/records.csv").read_bytes())
+    rows = with_entry_prices(rows, entry_prices, entry_manifest)
     contexts = [
         json.loads(line)
         for line in (input_root / "legacy_context_view.jsonl").read_text(encoding="utf-8").splitlines()
@@ -527,9 +570,10 @@ def rebuild_reports(input_root: Path):
     return render_reports(rows, contexts, manifest["frozen_source_commit"], reporting_date(rows))
 
 
-def verify_reports(input_root: Path, output_dir: Path):
+def verify_reports(input_root: Path, output_dir: Path, entry_prices: Path = ENTRY_PRICES,
+                   entry_manifest: Path = ENTRY_MANIFEST):
     """Refuse committed reports that the current code would not produce."""
-    expected = rebuild_reports(input_root)
+    expected = rebuild_reports(input_root, entry_prices, entry_manifest)
     output_dir = Path(output_dir)
     for name, content in expected.items():
         path = output_dir / name
