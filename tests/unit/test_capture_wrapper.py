@@ -18,6 +18,16 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "tools/launchd/capture.sh"
+ZSH = shutil.which("zsh")
+
+# **zsh が無ければ検証できない。** 捕まえたい罠（`status` が読み取り専用）は
+# zsh 固有で、sh に書き換えると検証の意味が消える。この wrapper は macOS の
+# launchd から呼ばれるものなので、Linux の runner では飛ばす——ただし
+# **スキップとして見えるように**。黙って通すと、走っていない検査が緑に混ざる。
+needs_zsh = pytest.mark.skipif(
+    ZSH is None,
+    reason="zsh が無い。この wrapper は macOS の launchd 用で、"
+           "捕まえたい read-only variable の罠も zsh 固有である")
 
 
 def run_wrapper(tmp_path, exit_code):
@@ -31,7 +41,7 @@ def run_wrapper(tmp_path, exit_code):
     stub = tmp_path / "stub.py"
     stub.write_text("import sys\nprint('stub')\nsys.exit(%d)\n" % exit_code, encoding="utf-8")
     result = subprocess.run(
-        [shutil.which("zsh") or "/bin/zsh", str(WRAPPER)],
+        [ZSH, str(WRAPPER)],
         capture_output=True, text=True,
         env={**os.environ,
              "ERS_REPO": str(repo),
@@ -41,6 +51,7 @@ def run_wrapper(tmp_path, exit_code):
     return result, tmp_path / "capture.log"
 
 
+@needs_zsh
 @pytest.mark.parametrize("code", [0, 1, 3])
 def test_the_capture_status_reaches_the_scheduler(tmp_path, code):
     """緑は「全部取れた」以外を意味してはいけない。"""
@@ -49,15 +60,17 @@ def test_the_capture_status_reaches_the_scheduler(tmp_path, code):
     assert "exit=%d" % code in log.read_text(encoding="utf-8")
 
 
+@needs_zsh
 def test_the_wrapper_does_not_assign_to_a_read_only_shell_variable(tmp_path):
     """`status` への代入は zsh で失敗する。走らせれば stderr に出る。"""
     result, _ = run_wrapper(tmp_path, 0)
     assert "read-only variable" not in result.stderr, result.stderr
 
 
+@needs_zsh
 def test_a_missing_clone_is_reported_and_not_silently_skipped(tmp_path):
     result = subprocess.run(
-        [shutil.which("zsh") or "/bin/zsh", str(WRAPPER)],
+        [ZSH, str(WRAPPER)],
         capture_output=True, text=True,
         env={**os.environ,
              "ERS_REPO": str(tmp_path / "absent"),
