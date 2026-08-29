@@ -7,7 +7,8 @@ from .pipeline import (
     summarize_trials_file,
     verify_registry_file,
     verify_source_validity_file,
-    verify_stop_rules_only_tightened,
+    verify_rule_freeze_files,
+    verify_successor_registry,
 )
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "summarize_trials_file",
     "verify_registry_file",
     "verify_source_validity_file",
-    "verify_stop_rules_only_tightened",
+    "verify_rule_freeze_files",
+    "verify_successor_registry",
 ]

@@ -7,7 +7,9 @@ from statistics import fmean
 
 from earnings_research.statistics.stability import assess
 
+from .freeze import evaluation_started_at
 from .models import (
+    canonical_hash,
     CompletedEventObservation,
     HypothesisRegistry,
     HypothesisStatus,
@@ -15,11 +17,6 @@ from .models import (
     HypothesisTrial,
     HypothesisTrialBundle,
 )
-
-
-def canonical_hash(model) -> str:
-    payload = json.dumps(model.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _feature(observation, definition):
@@ -196,14 +193,26 @@ def _halves_reversed(definition, target, comparator):
     return (first > 0) != (second > 0)
 
 
-def stop_rule_relaxations(previous, current):
-    """Report every way a successor registry loosened what it inherited.
+def successor_registry_problems(previous, current):
+    """Report every way a successor registry retires what it inherited.
 
-    Widening a condition is the obvious way. Dropping the hypothesis entirely
-    is the larger one and was passing silently: a successor keeping one of
-    nineteen definitions, or renaming every identifier so that nothing matched,
-    was reported as having only tightened. So is comparing against an unrelated
-    registry, which the version check alone cannot catch.
+    Three things, all decidable from two files: an unrelated registry, a
+    version that went backwards, and a definition — or its stop rule — that
+    quietly disappeared. Dropping the hypothesis was passing silently before: a
+    successor keeping one of nineteen definitions, or renaming every identifier
+    so that nothing matched, was reported as having only tightened.
+
+    Whether a rule *changed* is not decided here, and briefly was. This
+    function sees two registries and no trials, so it cannot tell a change made
+    before any evidence arrived — which is permitted, and is how a rule is
+    meant to be corrected — from one made after. Judging it here made the
+    permitted path impossible to merge: CI runs this on every registry change,
+    and it rejected the pre-start edit that `verify-rule-freeze` explicitly
+    allows. The trial-aware check owns that question.
+
+    Dropping a stop rule stays here, and unconditionally, because it is not a
+    question about freezing. A hypothesis with no abandonment condition is one
+    that can never be wrong, whether or not it has started.
     """
     problems = []
     if previous.registry_id != current.registry_id:
@@ -232,11 +241,6 @@ def stop_rule_relaxations(previous, current):
         if current_rule is None:
             problems.append(
                 "%s v%d drops the stop rule frozen in v%d"
-                % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
-            )
-        elif not current_rule.at_least_as_strict_as(was):
-            problems.append(
-                "%s v%d relaxes the stop rule frozen in v%d"
                 % (item.hypothesis_id, item.hypothesis_version, before.hypothesis_version)
             )
     return problems
@@ -332,6 +336,12 @@ def summarize_trials(registry, bundles, evaluated_at):
             prospective_positive_rate_effect=_rounded(target_rate - comparator_rate) if target and comparator else None,
             distinct_event_quarters=len({item.event_quarter for item in items}),
             last_evaluated_at=max((item.recorded_at for item in items), default=None),
+            # The same derivation the freeze check uses, called rather than
+            # repeated: two copies of "when did this start" is exactly the
+            # second source of truth this design exists to avoid.
+            evaluation_started_at=evaluation_started_at(
+                (definition.hypothesis_id, definition.hypothesis_version), bundles
+            ),
             production_review_eligible=False,
             stop_reason=stop_reason,
             stop_conditions_evaluated=evaluated,
