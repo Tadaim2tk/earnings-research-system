@@ -65,7 +65,12 @@ PROMPT = """次は日本企業の決算短信の「経営成績に関する説�
 DIRECTIONS = ("増加", "減少", "横ばい", "不明")
 PRESENCE = ("有", "無", "不明")
 OUTLOOK = ("上方", "下方", "据置", "言及なし")
-MAX_REASONS = 6
+# **反復を潰すのは重複排除の仕事で、件数上限の仕事ではない。** 上限6で落ちた5件を
+# 実際に見たところ、4件は 8〜10 個の別々の逆風（中東情勢／物価上昇／インフレ再燃…）
+# を挙げた正当な列挙で、暴走していたのは1件だけだった——「黒字化」が3回繰り返され
+# ていた。上限だけで両方を捌こうとすると、正当な列挙を捨てるか暴走を通すかになる。
+# 重複を先に落とし、そのうえで緩めの上限を置く。
+MAX_REASONS = 10
 
 FIELDS: Dict[str, Tuple[str, ...]] = {
     "sales_direction": DIRECTIONS,
@@ -137,7 +142,12 @@ def parse(output: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
             return None, "%s が配列ではない" % name
         if any(not isinstance(v, str) for v in value):
             return None, "%s に文字列でない要素がある" % name
-        items = [v.strip() for v in value if v.strip()]
+        seen, items = set(), []
+        for raw in value:
+            item = raw.strip()
+            if item and item not in seen:
+                seen.add(item)
+                items.append(item)
         if len(items) > MAX_REASONS:
             return None, "%s が %d 件を超えている" % (name, MAX_REASONS)
         facts[name] = items

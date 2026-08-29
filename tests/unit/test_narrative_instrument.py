@@ -127,10 +127,11 @@ def test_a_broken_output_is_refused_rather_than_repaired():
     assert facts is None and "sales_direction" in why
 
     # 上限は `MAX_REASONS`。超えたぶんを黙って切らない——切ると、モデルが
-    # 出した観測をこちらが選んだことになる。
-    at_limit = dict(GOOD, tailwinds=["a"] * I.MAX_REASONS)
+    # 出した観測をこちらが選んだことになる。同じ語の繰り返しは重複排除が先に
+    # 落とすので、上限に当てるには別々の項目が要る。
+    at_limit = dict(GOOD, tailwinds=["項目%d" % i for i in range(I.MAX_REASONS)])
     assert I.parse(json.dumps(at_limit, ensure_ascii=False))[0] is not None
-    too_many = dict(GOOD, tailwinds=["a"] * (I.MAX_REASONS + 1))
+    too_many = dict(GOOD, tailwinds=["項目%d" % i for i in range(I.MAX_REASONS + 1)])
     assert I.parse(json.dumps(too_many, ensure_ascii=False))[0] is None
 
     not_a_list = dict(GOOD, headwinds="原材料")
@@ -174,3 +175,25 @@ def test_the_direction_vocabulary_stayed_closed():
     for vocabulary in I.FIELDS.values():
         assert len(vocabulary) == len(set(vocabulary))
         assert all(isinstance(v, str) and v for v in vocabulary)
+
+
+def test_repetition_is_removed_before_the_count_is_checked():
+    """上限6で落ちた5件を実際に見たところ、4件は 8〜10 個の別々の逆風
+    （中東情勢／物価上昇／インフレ再燃…）を挙げた正当な列挙で、暴走していたのは
+    1件だけだった——「黒字化」が3回繰り返されていた。**反復を潰すのは重複排除の
+    仕事で、件数上限の仕事ではない。** 上限だけで両方を捌こうとすると、正当な
+    列挙を捨てるか暴走を通すかになる。"""
+    repeated = dict(GOOD, tailwinds=["黒字化", "黒字化", "黒字化", "成長"])
+    facts, why = I.parse(json.dumps(repeated, ensure_ascii=False))
+    assert why is None
+    assert facts["tailwinds"] == ["黒字化", "成長"], "重複を落として順序は保つ"
+
+    # 実測に近い、正当な長い列挙。上限で捨てない。
+    genuine = dict(GOOD, headwinds=[
+        "中東情勢の緊迫化", "金融資本市場の変動", "物価上昇の継続", "価格競争の激化",
+        "需要の鈍化", "前年の大型案件の反動減", "工事計画見直し", "投資意欲の減退"])
+    facts, why = I.parse(json.dumps(genuine, ensure_ascii=False))
+    assert why is None and len(facts["headwinds"]) == 8
+
+    runaway = dict(GOOD, tailwinds=["項目%d" % i for i in range(I.MAX_REASONS + 1)])
+    assert I.parse(json.dumps(runaway, ensure_ascii=False))[0] is None

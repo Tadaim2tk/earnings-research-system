@@ -122,6 +122,9 @@ def main():
             if facts is None:
                 record["status"] = "unreadable"
                 record["reason"] = why
+                # 生の出力を残す。理由だけだと「読めなかった」が行き止まりに
+                # なり、上限が妥当なのかモデルが暴走したのかを後から判断できない。
+                record["raw_output"] = output[:2000]
                 unreadable += 1
             else:
                 record["status"] = "extracted"
