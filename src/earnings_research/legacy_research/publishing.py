@@ -12,6 +12,7 @@ from earnings_research.statistics.holdout import split_by_date
 from earnings_research.statistics.lookahead import prices_for
 
 from .aggregation import build_aggregation
+from .labels import cohort_label
 from .legacy_parity import (
     render_dashboard_as_retired,
     render_note_as_retired,
@@ -223,7 +224,7 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "### ランク別 リターン(仮説: AI事前評価に予測力はあるか)",
               "| ランク | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
     for rank in RANKS:
-        match = lambda row, rank=rank: row.get("rank") == rank
+        match = lambda row, rank=rank: cohort_label(row.get("rank")) == rank
         lines.append(
             f"| {rank} | {_anchored(counted, match, 'open_d1')} | "
             f"{_anchored(counted, match, 'open_d5')} | "
@@ -231,11 +232,11 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
         )
     lines += ["", "### ナラティブ整合別 20日リターン(仮説: 衝突時は劣化?)", "| ナラティブ | 寄り付き→20日 |", "|---|---|"]
     for narrative in NARRATIVES:
-        match = lambda row, narrative=narrative: row.get("narrative") == narrative
+        match = lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative
         lines.append(f"| {narrative} | {_anchored(counted, match, 'open_d20')} |")
     lines += ["", "### 判断別 20日リターン(仮説: 見送りは防御か機会損失か)", "| 判断 | 寄り付き→20日 |", "|---|---|"]
     for judge in JUDGES:
-        match = lambda row, judge=judge: row.get("judge") == judge
+        match = lambda row, judge=judge: cohort_label(row.get("judge")) == judge
         lines.append(f"| {judge} | {_anchored(counted, match, 'open_d20')} |")
     lines += ["", "### 初動分類別 リターン(仮説: 初動ギャップは持続するか)", "",
               "これらの群は**ギャップで分けている**ので、前日終値起点のリターンで見ると",
@@ -244,7 +245,7 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "",
               "| 初動 | 寄り付き→翌日終値 | 寄り付き→5日 | 寄り付き→20日 |", "|---|---|---|---|"]
     for value in ("GU", "フラット", "GD"):
-        match = lambda row, value=value: row.get("shodo") == value
+        match = lambda row, value=value: cohort_label(row.get("shodo")) == value
         lines.append(
             f"| {value} | {_anchored(counted, match, 'open_d1')} | "
             f"{_anchored(counted, match, 'open_d5')} | "
@@ -256,7 +257,7 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "",
               "| 分類 | 翌日終値→5日 | 翌日終値→20日 |", "|---|---|---|"]
     for value in ("GU継続", "GU失速", "GD反発", "GD継続"):
-        match = lambda row, value=value: row.get("reaction") == value
+        match = lambda row, value=value: cohort_label(row.get("reaction")) == value
         lines.append(
             f"| {value} | {_anchored(counted, match, 'close_d5')} | "
             f"{_anchored(counted, match, 'close_d20')} |"
@@ -267,7 +268,7 @@ def render_dashboard(rows, updated_at: str, *, aggregation=None):
               "",
               "| サプライズ | 寄り付き→翌日終値 | 寄り付き→20日 |", "|---|---|---|"]
     for value in SURPRISES:
-        match = lambda row, value=value: str(row.get("surprise", "")).strip() == value
+        match = lambda row, value=value: cohort_label(row.get("surprise")) == value
         lines.append(
             f"| {value} | {_anchored(counted, match, 'open_d1')} | "
             f"{_anchored(counted, match, 'open_d20')} |"
@@ -339,7 +340,7 @@ def render_note(rows, as_of: date, *, aggregation=None):
         # was publishing it anyway — inside the block the reader is told to
         # copy — because the anchor was corrected in the dashboard and here.
         figures = _anchored(
-            counted, lambda row, narrative=narrative: row.get("narrative") == narrative,
+            counted, lambda row, narrative=narrative: cohort_label(row.get("narrative")) == narrative,
             "open_d1",
         )
         if figures != "-":
@@ -349,7 +350,7 @@ def render_note(rows, as_of: date, *, aggregation=None):
         # starts before that close contains the split. Reading from the close
         # is the earliest honest anchor.
         figures = _anchored(
-            counted, lambda row, reaction=reaction: row.get("reaction") == reaction, "close_d5"
+            counted, lambda row, reaction=reaction: cohort_label(row.get("reaction")) == reaction, "close_d5"
         )
         if figures != "-":
             insights.append(f"初日「{reaction}」の翌日終値からの5日 勝率/中央値/平均: {figures}")
@@ -475,6 +476,21 @@ def write_reports(output_dir: Path, reports: dict[str, bytes]):
         temp.replace(path)
 
 
+def reporting_date(rows) -> date:
+    """The as-of the reports carry: the last day the record covers.
+
+    One derivation, called by both paths that produce reports. They used to
+    disagree — the migration took an as-of from its caller while the rebuild
+    derived this one — so a report freshly made by the documented command
+    failed the verification of the same reports on the next line, and rebuilding
+    it silently moved the weekly window.
+    """
+    dates = sorted(row["date"] for row in rows if row.get("date"))
+    if not dates:
+        raise ValueError("frozen legacy record carries no usable dates")
+    return date.fromisoformat(dates[-1])
+
+
 def rebuild_reports(input_root: Path):
     """The published reports, rebuilt from what this repository already carries.
 
@@ -506,12 +522,9 @@ def rebuild_reports(input_root: Path):
         if line.strip()
     ]
     # Derived, not passed in. An as-of supplied by the caller would put a
-    # different date in the file every day it was rebuilt, and the check below
-    # would report a mismatch that means nothing.
-    dates = sorted(row["date"] for row in rows if row.get("date"))
-    if not dates:
-        raise ValueError("frozen legacy record carries no usable dates")
-    return render_reports(rows, contexts, manifest["frozen_source_commit"], date.fromisoformat(dates[-1]))
+    # different date in the file every day it was rebuilt, and the check
+    # against the committed copies would report a mismatch that means nothing.
+    return render_reports(rows, contexts, manifest["frozen_source_commit"], reporting_date(rows))
 
 
 def verify_reports(input_root: Path, output_dir: Path):

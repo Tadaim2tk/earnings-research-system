@@ -298,18 +298,28 @@ JST = timezone(timedelta(hours=9))
 
 
 def _market_open_utc(event_date: date) -> datetime:
-    """09:00 JST on the event date — the first moment a price can move on it.
+    """09:00 JST on the event date — the first moment a Tokyo price can move.
 
-    The check this replaced compared calendar days in UTC and rejected every
-    one of the 254 records: each carries a cutoff of 00:00:00 UTC on its event
-    date, which is 09:00 JST, the opening bell. Earnings are disclosed after
-    the 15:00 JST close, so those cutoffs sit six hours before the earliest
-    possible announcement — and the whole migration was blocked as if they
-    reached past it.
+    What this establishes, with the `usable <= cutoff` check beside it, is a
+    chain: the context snapshot was usable before the cutoff, and the cutoff is
+    at or before the open. So no snapshot reaching these views contains a
+    single tick of the session the event falls in.
 
-    The property that matters is not which calendar day the cutoff falls on in
-    a timezone nobody here trades in. It is that the market context was fixed
-    before the market could react. That instant is the open.
+    That is narrower than it first appears, and the difference matters. An
+    earlier draft of this justified the rule by saying earnings are disclosed
+    after the 15:00 JST close. The record cannot support that: `records.csv`
+    has 29 columns and none of them is an announcement time, and the evidence
+    actually available — that the analyst's labels were committed after 15:00 —
+    says when a person wrote them down, not when a company disclosed. A
+    disclosure before 08:17 JST would not be excluded by anything here.
+
+    LEGACY_OS_INTEGRATION.md chose a stricter proxy for exactly that reason:
+    with the time unverified, use no event-day snapshot at all. Measured
+    against the committed links, 234 of 254 are event-day, fixed between 07:00
+    and 08:17 JST — so that rule and this data have never agreed, and the
+    calendar-day check that enforced it blocked the migration outright rather
+    than reporting the disagreement. The rule is relaxed to the open here, and
+    the doc says so and says what it costs; it is not relaxed quietly.
     """
     return datetime.combine(event_date, time(9, 0), tzinfo=JST).astimezone(timezone.utc)
 
