@@ -51,8 +51,59 @@ def test_the_bell_itself_counts_as_after_the_bell():
     """235件のうち128件（54.5%）が15:30ちょうどで、**この一点の規約に分類が
     大きく依存する**。後場側に倒すと「引け後でない」が 27.7% から 82% に増える。
     `timing/models.py::classify` の `>= regular_close` に合わせてある。"""
-    assert schema.session_class(15, 29) == "afternoon"
-    assert schema.session_class(15, 30) == "post_close"
+    assert schema.session_class(15, 29, "2026-08-25") == "afternoon"
+    assert schema.session_class(15, 30, "2026-08-25") == "post_close"
+
+
+def test_the_bell_moved_in_2024_and_the_boundary_moves_with_it():
+    """**後場の終わりは 2024-11-05 に 15:00 から 15:30 へ延びた。**
+
+    固定値で区切ると、2021〜2024年の15:00発表が「後場の取引中」に化ける。
+    実際にはその日の引け後で、終値を見てから判断できた開示である。索引の実測で
+    最頻時刻は 2021〜2023年が 15:00（40〜42%）、2025〜2026年が 15:30（42%）。
+    """
+    # 延長前。15:00 はその日の引け。
+    assert schema.session_class(14, 59, "2024-11-01") == "afternoon"
+    assert schema.session_class(15, 0, "2024-11-01") == "post_close"
+    assert schema.session_class(15, 29, "2024-11-01") == "post_close"
+    # 延長後。同じ 15:00 が取引中になる。
+    assert schema.session_class(15, 0, "2024-11-05") == "afternoon"
+    assert schema.session_class(15, 29, "2024-11-05") == "afternoon"
+    assert schema.session_class(15, 30, "2024-11-05") == "post_close"
+
+
+def test_the_switch_day_is_the_first_day_with_the_longer_session():
+    """境目は索引から出した。2024-11-01 は 15:00 が36件・15:30 が11件、
+    2024-11-05 は 15:00 が12件・15:30 が46件。間に営業日は無い
+    （11/2-3 が週末、11/4 が振替休日）。"""
+    assert schema.afternoon_close("2024-11-01") == (15, 0)
+    assert schema.afternoon_close("2024-11-04") == (15, 0)
+    assert schema.afternoon_close(schema.CLOSE_EXTENDED_FROM) == (15, 30)
+    assert schema.afternoon_close("2024-11-05") == (15, 30)
+
+
+def test_a_day_that_is_not_a_day_stops_rather_than_picking_a_boundary():
+    """**全角数字は弾く。** `\\d` で検査すると `"2024-１1-05"` が通り、境界を
+    黙って取り違える。`regime.features.iso_day` で同じ穴を踏んで直した。"""
+    for bad in ("2024-１1-05", "2024-11-5", "2024/11/05", "2024-02-30",
+                "20241105", "", None, 20241105, "2024-11-05 15:30"):
+        with pytest.raises(schema.MalformedDay):
+            schema.afternoon_close(bad)
+        with pytest.raises(schema.MalformedDay):
+            schema.session_class(15, 0, bad)
+
+
+def test_the_day_check_agrees_with_the_one_in_regime():
+    """同じ規約が2箇所にある。**片方だけ直る事故を試験で塞ぐ。**"""
+    from earnings_research.regime import features as F
+    for value in ("2024-11-05", "2026-08-25", "2024-１1-05", "2024-11-5",
+                  "2024/11/05", "2024-02-30", "20241105", "", "2000-01-01"):
+        accepted_here = True
+        try:
+            schema._checked_day(value)
+        except schema.MalformedDay:
+            accepted_here = False
+        assert accepted_here is F.iso_day(value), value
 
 
 def test_a_missing_time_says_why_rather_than_going_quiet():

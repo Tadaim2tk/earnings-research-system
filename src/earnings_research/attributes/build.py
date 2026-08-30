@@ -47,7 +47,7 @@ def disclosure_block(timing: Optional[Mapping[str, Any]],
         }
     stamp = timing["announced_at"]
     when = datetime.fromisoformat(stamp)
-    klass = session_class(when.hour, when.minute)
+    klass = session_class(when.hour, when.minute, when.strftime("%Y-%m-%d"))
     weekday = _weekday(stamp[:10])
     return {
         "announced_at": stamp,

@@ -23,18 +23,27 @@
 `false` ではない。`false` は「調べて、無かった」を意味する。
 """
 
+from datetime import date
 from typing import Dict, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = "event_attributes_v1"
 
-# 東証の立会時間。2024年11月から後場は15:30まで。開示時刻をここで区切る。
-# `timing/models.py::classify` は日付ごとの実際の時間を使うが、こちらは
-# 台帳の窓（2026年6〜8月）に限った集計なので固定値で足りる。変えるときは
-# 両方を動かすこと。
+# 東証の立会時間。**後場の終わりは日付で変わる。**
+#
+# 2024-11-05 に 15:00 から 15:30 へ延びた。索引の実測で境目が出る:
+# 2024-11-01 は 15:00 が36件・15:30 が11件、2024-11-05 は 15:00 が12件・
+# 15:30 が46件。間に営業日は無い（11/2-3 が週末、11/4 が振替休日）。
+#
+# **固定値で区切ると2021〜2024年が壊れる。** 当時の15:00発表は引け後だが、
+# 15:30固定では「後場の取引中」に化ける。実測では2021〜2023年の最頻時刻が
+# 15:00（40〜42%）、2025〜2026年が15:30（42%）で、固定値のままだと
+# `afternoon` が 58% と 22% の間で理由なく跳ねる。
 MORNING_OPEN = (9, 0)
 MORNING_CLOSE = (11, 30)
 AFTERNOON_OPEN = (12, 30)
+AFTERNOON_CLOSE_BEFORE_EXTENSION = (15, 0)
 AFTERNOON_CLOSE = (15, 30)
+CLOSE_EXTENDED_FROM = "2024-11-05"
 
 SESSION_CLASSES = ("pre_open", "morning", "lunch", "afternoon", "post_close", "unknown")
 
@@ -47,14 +56,48 @@ ENTRY_OFFSET = 2
 SESSIONS_HELD: Dict[int, int] = {3: 1, 4: 2, 5: 3, 7: 5, 12: 10, 22: 20}
 
 
-def session_class(hour: int, minute: int) -> str:
-    """開示時刻がどの時間帯か。
+class MalformedDay(ValueError):
+    """日付が `YYYY-MM-DD` でない。黙って別の日の立会時間を使わない。"""
 
-    **引けちょうど（15:30）は引け後に数える。** 235件のうち128件（54.5%）が
+
+def _checked_day(value: object) -> date:
+    """`YYYY-MM-DD` の実在する日付として読む。読めなければ落とす。
+
+    **`\\d` で検査しない。** 正規表現の `\\d` は全角数字を通すので、
+    `"2024-１1-05"` が素通りして別の境界を選んでしまう。`date.fromisoformat`
+    で読んだうえで、元の文字列が正準な表記そのものかを確かめる。
+    `regime.features.iso_day` と同じ規約で、両者が一致することを試験で縛る。
+    """
+    if not isinstance(value, str):
+        raise MalformedDay(repr(value))
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise MalformedDay(value) from exc
+    if parsed.isoformat() != value:
+        raise MalformedDay(value)
+    return parsed
+
+
+def afternoon_close(day: str) -> Tuple[int, int]:
+    """その日の後場の終わり。`CLOSE_EXTENDED_FROM` の当日から15:30。"""
+    if _checked_day(day) < _checked_day(CLOSE_EXTENDED_FROM):
+        return AFTERNOON_CLOSE_BEFORE_EXTENSION
+    return AFTERNOON_CLOSE
+
+
+def session_class(hour: int, minute: int, day: str) -> str:
+    """開示時刻がどの時間帯か。**日付が要る。**
+
+    **引けちょうどは引け後に数える。** 2026年の台帳235件のうち128件（54.5%）が
     15:30ちょうどで、この一点の規約に分類が大きく依存する。後場側に倒すと
     「引け後でない」が 27.7% から 82% に増える。`timing/models.py::classify` が
     `local >= regular_close → post_close` としているのに合わせてある。
+
+    **`day` を省略できるようにしない。** 既定値を置くと、2021年の15:00発表が
+    黙って `afternoon` になる。呼ぶ側に日付を持たせて、境界を選ばせる。
     """
+    close = afternoon_close(day)
     at = hour * 60 + minute
     if at < MORNING_OPEN[0] * 60 + MORNING_OPEN[1]:
         return "pre_open"
@@ -62,7 +105,7 @@ def session_class(hour: int, minute: int) -> str:
         return "morning"
     if at < AFTERNOON_OPEN[0] * 60 + AFTERNOON_OPEN[1]:
         return "lunch"
-    if at < AFTERNOON_CLOSE[0] * 60 + AFTERNOON_CLOSE[1]:
+    if at < close[0] * 60 + close[1]:
         return "afternoon"
     return "post_close"
 
