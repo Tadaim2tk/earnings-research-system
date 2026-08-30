@@ -132,6 +132,7 @@ def test_the_corpus_may_not_live_inside_the_public_checkout():
 
 import contextlib
 import json as _json
+import shutil
 import types
 
 
@@ -211,15 +212,18 @@ def test_nothing_is_written_when_the_store_is_inside_the_repository(monkeypatch,
     day = "2026-08-14"
     known = sorted(tool().ledger_codes())[0]
     inside = ROOT / "data/__audit_should_not_exist__"
-    # 前の実行（変異試験など）の残骸があると、このテストは「作られた」と誤判定する。
-    # 見ているのは**この実行が作ったか**なので、先に消してから走らせる。
-    if inside.exists():
-        inside.rmdir()
-    code, fetched = _run(monkeypatch, tmp_path, {day: [_index_row(known, day)]},
-                         ["--store", str(inside), "--days", "1", "--today", day])
-    assert code == 2
-    assert fetched == [], "拒否したのに取得しに行っている"
-    assert not inside.exists(), "拒否したのにディレクトリを作っている"
+    # **門を外す変異を当てると、ここに JSON まで書かれる。** `rmdir()` は空でない
+    # ディレクトリで例外を投げるので、次の実行は門を試す前に落ち、作業ツリーも
+    # 汚れたままになる。前も後も、中身ごと消す。
+    shutil.rmtree(inside, ignore_errors=True)
+    try:
+        code, fetched = _run(monkeypatch, tmp_path, {day: [_index_row(known, day)]},
+                             ["--store", str(inside), "--days", "1", "--today", day])
+        assert code == 2
+        assert fetched == [], "拒否したのに取得しに行っている"
+        assert not inside.exists(), "拒否したのにディレクトリを作っている"
+    finally:
+        shutil.rmtree(inside, ignore_errors=True)
 
 
 def test_what_is_written_carries_the_text_and_no_document_body(monkeypatch, tmp_path):

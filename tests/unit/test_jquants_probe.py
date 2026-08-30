@@ -21,6 +21,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tools/jquants_probe.py"
 
+# 何かを残す呼び出し。名前で見るので、受け手を名指しできるかどうかに依らない。
+WRITING_METHODS = frozenset({
+    "write", "write_text", "write_bytes", "writelines",
+    "mkdir", "makedirs", "touch", "dump", "replace", "rename",
+})
+
 
 def tree() -> ast.Module:
     return ast.parse(PROBE.read_text(encoding="utf-8"))
@@ -90,10 +96,16 @@ def test_the_probe_writes_nothing():
     # Reading the network is not writing: urlopen is allowed by name, and the
     # substring check that once stood here rejected it.
     assert "urllib.request.urlopen" in called
+    # 素の名前も、ドット付きも、どちらも落とす。
+    #
+    # 直前の版は `name == writing or not name.endswith("." + writing)` と書いて
+    # いた。**素の名前をそこで許可していた。** 受け手を名指しできない書き込みを
+    # 見るために素の名前を集めておいて、その名前を通す条件を書いたことになる。
+    # 実測: `Path("leak.json").write_text("x")` を入れても9本すべて通った
+    # （絶対パスなら別のテストが偶然拾うが、相対パスでは何も拾わない）。
     for name in called:
-        for writing in ("write", "write_text", "write_bytes", "writelines",
-                        "mkdir", "makedirs", "touch", "dump"):
-            assert name == writing or not name.endswith("." + writing), name
+        last = name.rsplit(".", 1)[-1]
+        assert last not in WRITING_METHODS, name
 
 
 def test_the_key_is_read_from_the_environment_and_never_printed():
