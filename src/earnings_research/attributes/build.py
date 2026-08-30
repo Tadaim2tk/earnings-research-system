@@ -120,23 +120,52 @@ def narrative_block(facts: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return block
 
 
+# 台帳のコードをどう解決したか。**2値にすると対処法が混ざる。** `3977` は `.S` で
+# 取れ、`34010` は4桁に直せば取れ、`…` は解決できない——この3つは全部違う。
+TICKER_RESOLUTIONS = (
+    "resolved",              # そのまま取れた
+    "code_format_error",     # 5桁のまま渡していた。4桁に直せば取れる
+    "non_tse_venue",         # 東証以外。接尾辞が違う（札証は `.S`）
+    "renamed_ledger_stale",  # 社名が古い。コードは有効
+    "duplicate",             # 別の行と同一の開示を指す
+    "placeholder",           # そもそもイベントではない
+    "unknown",
+)
+
+# 分割は調整されている（`auto_adjust=False` でも）。3091 が 2026-06-29 に 1:2
+# 分割していて終値 2240→2235 に段差が無いことで確かめた。**「分割が無い」ではなく
+# 「分割は調整済み」である。**
+SPLIT_STATES = ("adjusted", "none_in_window", "unadjusted", "unknown")
+
+
 def quality_block(**flags) -> Dict[str, Any]:
     """この行を信用してよいかの目印。
 
     **調べていない項目は `"unknown"` であって `False` ではない。** `False` は
-    「調べて、無かった」を意味する。`~/.ers-corpus/notes/price-anomaly-candidates.md`
-    に候補の一覧があり、埋まっていないものはそこで `未確認` になっている。
+    「調べて、無かった」を意味する。`docs/PRICE_ANOMALY_CANDIDATES.md` に候補の
+    一覧があり、埋まっていないものはそこで `未確認` になっている。
     """
     known = {
-        "split_in_window": "unknown",
+        "ticker_resolution": "unknown",
+        "split_state": "unknown",
         "dividend_in_window": "unknown",
         "limit_move_at_entry": "unknown",
         "halted_in_window": "unknown",
         "zero_volume_in_window": "unknown",
-        "ticker_resolution": "unknown",
+        "event_date_is_business_day": "unknown",
         "duplicate_of": None,
+        "price_source": "unknown",
     }
-    known.update(flags)
+    unknown = set(flags) - set(known)
+    if unknown:
+        # 綴りの違う名前で新しい鍵が生えると、`unknown` のまま気づかない項目が
+        # 増える。増やすときはここに足すこと。
+        raise ValueError("知らない品質の項目: %s" % sorted(unknown))
+    if flags.get("ticker_resolution") not in (None,) + TICKER_RESOLUTIONS:
+        raise ValueError("ticker_resolution が語彙の外: %r" % flags["ticker_resolution"])
+    if flags.get("split_state") not in (None,) + SPLIT_STATES:
+        raise ValueError("split_state が語彙の外: %r" % flags["split_state"])
+    known.update({k: v for k, v in flags.items() if v is not None})
     return known
 
 

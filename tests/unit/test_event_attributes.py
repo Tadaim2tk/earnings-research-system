@@ -90,13 +90,14 @@ def test_a_partial_price_series_is_marked_not_padded():
 def test_unchecked_quality_is_unknown_not_false():
     """`False` は「調べて、無かった」を意味する。**調べていないものに書かない。**"""
     quality = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None)["quality"]
-    for flag in ("split_in_window", "dividend_in_window", "limit_move_at_entry",
-                 "halted_in_window", "zero_volume_in_window", "ticker_resolution"):
+    for flag in ("split_state", "dividend_in_window", "limit_move_at_entry",
+                 "halted_in_window", "zero_volume_in_window", "ticker_resolution",
+                 "event_date_is_business_day", "price_source"):
         assert quality[flag] == "unknown", flag
     checked = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
-                      split_in_window=False)["quality"]
-    assert checked["split_in_window"] is False
-    assert checked["dividend_in_window"] == "unknown", "他の項目を巻き込まない"
+                      dividend_in_window=False)["quality"]
+    assert checked["dividend_in_window"] is False
+    assert checked["split_state"] == "unknown", "他の項目を巻き込まない"
 
 
 def test_the_narrative_always_says_which_instrument_measured_it():
@@ -141,3 +142,32 @@ def test_grouping_keeps_the_rows_that_have_no_value():
     grouped = S.group(rows, "disclosure.session_class")
     assert set(grouped) == {"post_close", "unknown"}
     assert len(grouped["unknown"]) == 1
+
+
+def test_the_quality_vocabulary_is_closed():
+    """綴りの違う名前で鍵が生えると、`unknown` のまま気づかない項目が増える。"""
+    from earnings_research.attributes.build import quality_block
+    with pytest.raises(ValueError):
+        quality_block(splt_in_window=False)          # 綴り違い
+    with pytest.raises(ValueError):
+        quality_block(ticker_resolution="たぶん取れた")
+    with pytest.raises(ValueError):
+        quality_block(split_state="無い")
+    assert quality_block(ticker_resolution="non_tse_venue")["ticker_resolution"] == "non_tse_venue"
+
+
+def test_the_ticker_resolutions_do_not_collapse_into_two_values():
+    """`3977` は `.S` で取れ、`34010` は4桁に直せば取れ、`…` は解決できない。
+    **この3つは対処法が全部違う。** 2値にすると混ざる。"""
+    from earnings_research.attributes.build import TICKER_RESOLUTIONS
+    for kind in ("code_format_error", "non_tse_venue", "placeholder",
+                 "renamed_ledger_stale", "duplicate", "resolved"):
+        assert kind in TICKER_RESOLUTIONS, kind
+
+
+def test_a_split_that_was_adjusted_is_not_recorded_as_no_split():
+    """3091 は 2026-06-29 に 1:2 分割している。終値 2240→2235 に段差が無いのは
+    **調整されているから**であって、分割が無いからではない。"""
+    from earnings_research.attributes.build import quality_block, SPLIT_STATES
+    assert "adjusted" in SPLIT_STATES and "none_in_window" in SPLIT_STATES
+    assert quality_block(split_state="adjusted")["split_state"] == "adjusted"
