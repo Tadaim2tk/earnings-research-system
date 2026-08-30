@@ -171,3 +171,30 @@ def test_a_split_that_was_adjusted_is_not_recorded_as_no_split():
     from earnings_research.attributes.build import quality_block, SPLIT_STATES
     assert "adjusted" in SPLIT_STATES and "none_in_window" in SPLIT_STATES
     assert quality_block(split_state="adjusted")["split_state"] == "adjusted"
+
+
+def test_the_entry_gap_is_measured_because_that_is_where_the_rule_breaks():
+    """独立監査（2026-08-30）: 約定日そのものは246件すべて寄っており「約定できない」
+    は0件。**壊れるのは +1 が寄らないまま張り付いた8件**で、翌朝の寄りが窓を開ける。
+    ギャップ中央値は 11.73% と 0.67% で17.5倍、95パーセンタイル 4.19% の外側にある。
+
+    「+2の寄りで買う」が、その8件では**反応の大半を取り逃がした後の価格で買う**
+    ことを意味する。切れるように値で持つ。"""
+    normal = dict(SESSIONS)
+    normal[1] = {"date": "2026-08-10", "close": 100.0}
+    price = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), normal, None)["price"]
+    assert price["prev_session_close"] == 100.0
+    assert price["entry_gap_pct"] == pytest.approx(0.0)
+    assert price["entry_gap_is_outlier"] is False
+
+    jumped = dict(SESSIONS)
+    jumped[1] = {"date": "2026-08-10", "close": 88.0}   # +13.6% の窓
+    price = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), jumped, None)["price"]
+    assert price["entry_gap_pct"] == pytest.approx(13.6364, abs=1e-3)
+    assert price["entry_gap_is_outlier"] is True
+
+    # 前日が無ければ測らない。0 で埋めない。
+    without = {k: v for k, v in SESSIONS.items() if k != 1}
+    price = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), without, None)["price"]
+    assert price["entry_gap_pct"] is None
+    assert price["entry_gap_is_outlier"] is None

@@ -62,6 +62,18 @@ def disclosure_block(timing: Optional[Mapping[str, Any]],
     }
 
 
+# 約定の寄りが前日終値からどれだけ飛んだか。**これが約定規約の壊れ方を測る。**
+#
+# 独立監査（2026-08-30）: 約定日そのものは246件すべて寄っており「約定できない」は
+# 0件。壊れるのは **+1 が制限値幅で寄らないまま張り付いた8件**で、翌朝の寄りが
+# 一気に窓を開ける。ギャップの中央値は 11.73%、それ以外の234件は 0.67% で**17.5倍**。
+# 全246件の95パーセンタイルが 4.19% なので、8件は分布の完全な外側にある。
+#
+# 「+2の寄りで買う」が、この8件では**反応の大半を取り逃がした後の価格で買う**ことを
+# 意味している。切って確かめられるように、値で持つ。
+ENTRY_GAP_OUTLIER_PCT = 4.19
+
+
 def price_block(sessions: Optional[Mapping[int, Mapping[str, Any]]]) -> Dict[str, Any]:
     """約定と出口。**リターンは計算するが、集計はしない。**"""
     if not sessions or ENTRY_OFFSET not in sessions:
@@ -79,9 +91,20 @@ def price_block(sessions: Optional[Mapping[int, Mapping[str, Any]]]) -> Dict[str
             held = SESSIONS_HELD[offset]
             returns["held_%d" % held] = round((close / open_ - 1.0) * 100, 4)
             covered.append(held)
+    previous = sessions.get(ENTRY_OFFSET - 1) or {}
+    prev_close = previous.get("close")
+    gap = None
+    if prev_close and math.isfinite(prev_close):
+        gap = round((open_ / prev_close - 1.0) * 100, 4)
     return {
         "entry_date": entry.get("date"),
         "entry_open": open_,
+        "prev_session_close": prev_close if prev_close and math.isfinite(prev_close) else None,
+        # 約定の寄りが前日終値からどれだけ飛んだか。
+        "entry_gap_pct": gap,
+        # 分布の外側か。**閾値は全246件の95パーセンタイル**であって、
+        # ストップ高安の判定ではない（それには高値安値が要る）。
+        "entry_gap_is_outlier": (abs(gap) > ENTRY_GAP_OUTLIER_PCT) if gap is not None else None,
         # 名前は**保有本数**にする。`+5` はセッション番号で3本保有であり、
         # 「保有+5」と書いて5本と読まれた（公開したダッシュボードの誤り）。
         "returns": returns,
