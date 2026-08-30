@@ -6,21 +6,40 @@ TSO の SPEC-CAR-001 が非活性ゲート（clean評価30件以上・4資産以
 """
 
 import math
-import re
 import statistics
+from datetime import date
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 from earnings_research.regime.series import BY_SYMBOL, DIVERGENCE, missing_roles
 
-# 日付は `YYYY-MM-DD` に限る。**辞書順で比べているので、書式が崩れると窓が壊れる。**
-# 実測: `end` を `2026-8-25`（ゼロ埋め1つ欠け）にすると、`"2026-8-25" > "2026-08-27"`
-# が真になり、要求の2日先が終端に選ばれた。銀 +19.02% → +20.40%、銅 +3.00% → +1.12%
-# と、ERS-ADR-0066 が結論の根拠にした2つの数字が両方動く。
-ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-
 class MalformedWindow(ValueError):
     """窓の境界が `YYYY-MM-DD` でない。黙って別の日を測らない。"""
+
+
+def iso_day(value) -> bool:
+    """`YYYY-MM-DD` の実在する日付か。
+
+    **辞書順で比べているので、書式が崩れると窓が壊れる。** 実測: `end` を
+    `2026-8-25`（ゼロ埋め1つ欠け）にすると `"2026-8-25" > "2026-08-27"` が真に
+    なり、要求の2日先が終端に選ばれた。銀 +19.02% → +20.40%、銅 +3.00% → +1.12%
+    と、ERS-ADR-0066 が結論の根拠にした2つの数字が両方動く。
+
+    正規表現の `\d{4}-\d{2}-\d{2}` では足りない。Python の `\d` は**全角数字を
+    含む**ので `2026-０8-25` が通り、全角のゼロは ASCII の数字より後ろに並ぶため
+    `"2026-０8-25" > "2026-12-31"` が真になる——塞いだはずの汚染がそのまま戻る。
+    `2026-99-99` や `2026-02-30` も通ってしまう。
+
+    暦として解釈できること、かつ**書き戻したときに同じ文字列になること**を求める。
+    後者は Python 3.11 以降の `fromisoformat` が `20260825` のような別表記も
+    受けるためで、辞書順の比較は表記が揃っていないと意味を持たない。
+    """
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.isoformat() == value
 
 
 # 「動いた」と言える大きさ。これ未満は動いていない側に数える。
@@ -49,10 +68,10 @@ def resolve_endpoints(closes: Mapping[str, float], start: str, end: str
     **「動かなかった」と「1日しか見ていない」が区別できなかった**。
     """
     for boundary in (start, end):
-        if not isinstance(boundary, str) or not ISO_DATE.match(boundary):
-            raise MalformedWindow("窓の境界は YYYY-MM-DD で渡すこと: %r" % (boundary,))
+        if not iso_day(boundary):
+            raise MalformedWindow("窓の境界は実在する YYYY-MM-DD で渡すこと: %r" % (boundary,))
     days = sorted(d for d, c in closes.items()
-                  if c is not None and math.isfinite(c) and ISO_DATE.match(str(d)))
+                  if c is not None and math.isfinite(c) and iso_day(d))
     if not days:
         return None
     first = next((d for d in days if d >= start), None)

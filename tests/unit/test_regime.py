@@ -168,7 +168,13 @@ def test_a_malformed_boundary_is_refused_rather_than_silently_reaching_further()
     closes = {"2026-08-03": 100.0, "2026-08-25": 119.0, "2026-08-27": 120.4}
     assert features.resolve_endpoints(closes, "2026-08-01", "2026-08-25") == \
         ("2026-08-03", "2026-08-25")
-    for broken in ("2026-8-25", "2026/08/25", "20260825", "", None, "2026-08"):
+    # 正規表現の `\d{4}-\d{2}-\d{2}` では足りない。Python の `\d` は全角数字を
+    # 含むので `2026-０8-25` が通り、全角のゼロは ASCII の数字より後ろに並ぶため
+    # `"2026-０8-25" > "2026-12-31"` が真になる——塞いだはずの汚染が戻る。
+    # 暦としてありえない日付も通ってしまう。
+    for broken in ("2026-8-25", "2026/08/25", "20260825", "", None, "2026-08",
+                   "2026-０" + "8-25", "２０２６-０８-２５",
+                   "2026-99-99", "2026-02-30", "2026-13-01"):
         with pytest.raises(features.MalformedWindow):
             features.resolve_endpoints(closes, "2026-08-01", broken)
         with pytest.raises(features.MalformedWindow):
@@ -203,3 +209,29 @@ def test_one_observation_is_not_a_zero_percent_move():
     assert got["moves_pct"] == {}, "1点しか無いのに動きを報告している"
     assert got["insufficient_axes"] is True
     assert sorted(got["unobserved"]) == sorted(filled)
+
+
+def test_a_lenient_parser_does_not_widen_what_counts_as_a_date(monkeypatch):
+    """**`fromisoformat` は Python の版によって寛容さが違う。**
+
+    3.11 以降は `20260825` のような別表記も受ける。辞書順の比較は表記が揃って
+    いないと意味を持たないので、暦として読めるだけでは足りず、**書き戻して同じ
+    文字列になること**を求めている。
+
+    手元の 3.8 では `fromisoformat` 自体が厳しく、この検査を外しても結果が
+    変わらない（変異が等価になる）。版に依らずこの一点を試すため、寛容な
+    パーサに差し替えて確かめる。
+    """
+    import datetime as _dt
+
+    class Lenient(_dt.date):
+        @classmethod
+        def fromisoformat(cls, value):
+            if value == "20260825":
+                return _dt.date(2026, 8, 25)
+            return _dt.date.fromisoformat(value)
+
+    monkeypatch.setattr(features, "date", Lenient)
+    assert features.iso_day("2026-08-25") is True
+    assert features.iso_day("20260825") is False, \
+        "暦として読めても、書き戻して同じ文字列にならないものは日付として扱わない"
