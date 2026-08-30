@@ -40,6 +40,26 @@ def test_an_absent_field_is_not_read_as_no_revision():
     assert forecast.revision_flag("業績予想の修正に関するお知らせを公表しました") is None
 
 
+def test_text_near_the_label_is_not_mistaken_for_the_value():
+    """**欄の近くにある無関係な文字を答えにしない。** 緩い一致で実際に拾えたもの:
+
+        業績予想からの修正の有無（注記有）          -> 有
+        業績予想からの修正の有無について、無配を継続  -> 無
+        業績予想からの修正の有無 有・無             -> 有
+
+    3つとも「欄が読めなかった」が正しい。特に `有・無` は選択肢の表示であって、
+    どちらが選ばれたかを言っていない。
+    """
+    for misleading in (
+        "業績予想からの修正の有無（注記有）",
+        "業績予想からの修正の有無について、無配を継続します",
+        "業績予想からの修正の有無 有・無",
+        "業績予想からの修正の有無：有・無",
+        "業績予想からの修正の有無、無配当の方針",
+    ):
+        assert forecast.revision_flag(misleading) is None, misleading
+
+
 def test_the_direction_is_not_invented():
     """欄が言うのは有無だけで、上方か下方かは書かれていない。知るには数値の比較か
     参照先の開示が要る。`outlook_mention` は「上方」という向きまで答えさせていたが、
