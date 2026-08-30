@@ -1,0 +1,11 @@
+{
+  "end": "2026-08-31",
+  "fetched_at": "2026-08-30T13:23:40.916511+09:00",
+  "note": "表題だけで判定している。種別は言うが中身（比率・成否）は言わない",
+  "rows": 428,
+  "schema_version": "corporate_actions_v1",
+  "sha256": "e50297cab6e6885de6d9424d6628cc3c20d518f159cf075549507bf858ebd691",
+  "source": "tdnet_index_json",
+  "start": "2026-06-01",
+  "tickers": 248
+}

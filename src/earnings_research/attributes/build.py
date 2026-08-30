@@ -161,6 +161,55 @@ TICKER_RESOLUTIONS = (
 SPLIT_STATES = ("adjusted", "none_in_window", "unadjusted", "unknown")
 
 
+def corporate_actions_block(actions: Optional[Sequence[Mapping[str, Any]]],
+                            event_date: Optional[str],
+                            entry_date: Optional[str],
+                            exit_dates: Optional[Mapping[int, str]] = None) -> Dict[str, Any]:
+    """窓の期間に会社が何をしたか。**いつ出たかで分ける。**
+
+    実測（2026-08-30）で、**約定ギャップが分布の外側だった13件のうち7件が、決算と
+    同じ日の別の開示で説明できた**:
+
+        3480 ジェイ・エス・ビー +13.11%  決算と同日に TOB の開始と意見表明
+        6966 三井ハイテック    +14.09%  同日に通期業績予想の上方修正
+        4394 エクスモーション   +12.64%  同日に株主優待制度の導入
+        3659 ネクソン         +10.82%  同日に配当予想の修正＋自己株式の消却
+
+    **3480 の +13% は決算への反応ではない。** それを決算リターンとして測るのは誤りで
+    ある。さらに `3544` サツドラHD は、約定した日の引け後（2026-06-19 17:30）に TOB の
+    開始が出て、翌営業日から**連続2日ストップ高で寄らず**——保有期間のリターンが
+    まるごと TOB プレミアムになっている。
+
+    だから「窓にあったか」ではなく **「決算と同じ日か」「約定より前か」「保有中か」**
+    で分ける。決算の反応を測りたいなら、同日の別材料と保有中の材料は切れなければ
+    ならない。
+    """
+    if not actions:
+        return {"same_day": [], "before_entry": [], "during_hold": [],
+                "contaminated": None if event_date is None else False}
+    same_day, before_entry, during_hold = [], [], []
+    last_exit = max(exit_dates.values()) if exit_dates else None
+    for action in actions:
+        when = str(action.get("pubdate") or "")[:10]
+        if not when:
+            continue
+        kinds = list(action.get("actions") or [])
+        entry = {"date": when, "actions": kinds, "stage": action.get("stage")}
+        if event_date and when == event_date:
+            same_day.append(entry)
+        elif entry_date and when < entry_date:
+            before_entry.append(entry)
+        elif entry_date and (last_exit is None or when <= last_exit):
+            during_hold.append(entry)
+    return {
+        "same_day": same_day,
+        "before_entry": before_entry,
+        "during_hold": during_hold,
+        # **決算の反応として読めない状態か。** 同日の別材料か、保有中の資本異動。
+        "contaminated": bool(same_day or during_hold),
+    }
+
+
 def quality_block(**flags) -> Dict[str, Any]:
     """この行を信用してよいかの目印。
 
@@ -198,20 +247,31 @@ def build(record: Mapping[str, Any],
           facts: Optional[Mapping[str, Any]],
           forecast_revision: Optional[str] = None,
           regime: Optional[Mapping[str, Any]] = None,
+          actions: Optional[Sequence[Mapping[str, Any]]] = None,
           **quality) -> Dict[str, Any]:
     identity = record.get("normalized_identity", {})
+    event_date = (identity.get("legacy_event_date") or "")[:10] or None
+    price = price_block(sessions)
+    exit_dates = {}
+    if sessions:
+        for offset in EXIT_OFFSETS:
+            leg = sessions.get(offset) or {}
+            if leg.get("date"):
+                exit_dates[offset] = leg["date"]
     return {
         "schema_version": SCHEMA_VERSION,
         "identity": {
             "ticker": identity.get("ticker_candidate"),
             "company": identity.get("company_name_candidate"),
-            "event_date": (identity.get("legacy_event_date") or "")[:10] or None,
+            "event_date": event_date,
             "legacy_record_id": record.get("legacy_record_id"),
         },
         "disclosure": disclosure_block(timing, forecast_revision),
         "ledger": ledger_block(record.get("normalized_classifications", {})),
         "narrative": narrative_block(facts),
-        "price": price_block(sessions),
+        "price": price,
+        "corporate_actions": corporate_actions_block(
+            actions, event_date, price.get("entry_date"), exit_dates),
         "regime": dict(regime) if regime else {},
         "quality": quality_block(**quality),
     }

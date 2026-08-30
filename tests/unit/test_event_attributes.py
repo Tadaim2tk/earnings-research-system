@@ -198,3 +198,51 @@ def test_the_entry_gap_is_measured_because_that_is_where_the_rule_breaks():
     price = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), without, None)["price"]
     assert price["entry_gap_pct"] is None
     assert price["entry_gap_is_outlier"] is None
+
+
+ACTIONS = [
+    {"ticker": "7203", "pubdate": "2026-08-07 15:30:00",
+     "actions": ["tender_offer"], "stage": "announcement"},          # 決算と同じ日
+    {"ticker": "7203", "pubdate": "2026-08-03 10:00:00",
+     "actions": ["treasury_stock"], "stage": "announcement"},        # 約定より前
+    {"ticker": "7203", "pubdate": "2026-08-20 17:00:00",
+     "actions": ["share_split"], "stage": "announcement"},           # 保有中
+]
+
+
+def test_other_material_on_the_same_day_is_kept_apart_from_the_hold():
+    """実測（2026-08-30）: 約定ギャップが分布の外側だった13件のうち**7件が、決算と
+    同じ日の別の開示で説明できた**。`3480` の +13.11% は決算への反応ではなく **TOB**
+    である。`3544` サツドラHD は約定した日の引け後に TOB の開始が出て、翌営業日から
+    連続2日ストップ高で寄らず、**保有期間のリターンがまるごと TOB プレミアム**に
+    なっている。
+
+    「窓にあったか」では足りない。**決算と同じ日か、約定より前か、保有中か**で分ける。
+    """
+    got = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
+                  actions=ACTIONS)["corporate_actions"]
+    assert [a["actions"] for a in got["same_day"]] == [["tender_offer"]]
+    assert [a["actions"] for a in got["before_entry"]] == [["treasury_stock"]]
+    assert [a["actions"] for a in got["during_hold"]] == [["share_split"]]
+    assert got["contaminated"] is True
+
+
+def test_an_action_before_the_entry_does_not_contaminate():
+    """約定より前の材料は、約定価格に既に入っている。**決算の反応が読めなくなる
+    のは、同日の別材料と保有中の資本異動である。**"""
+    before_only = [ACTIONS[1]]
+    got = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
+                  actions=before_only)["corporate_actions"]
+    assert got["before_entry"] and not got["same_day"] and not got["during_hold"]
+    assert got["contaminated"] is False
+
+
+def test_no_actions_is_not_the_same_as_not_looked():
+    """調べていないのに「無かった」と書かない。イベント日が分からなければ
+    `contaminated` も決められない。"""
+    none = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
+                   actions=None)["corporate_actions"]
+    assert none["contaminated"] is False, "イベント日があり、開示が0件なら False"
+    blank = dict(RECORD, normalized_identity={"ticker_candidate": "7203"})
+    unknown = B.build(blank, None, None, None, actions=None)["corporate_actions"]
+    assert unknown["contaminated"] is None, "イベント日が無ければ決められない"

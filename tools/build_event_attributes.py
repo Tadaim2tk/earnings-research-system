@@ -31,6 +31,8 @@ RECOVERED = ROOT / "data/market_prices/recovered_sessions.jsonl"
 # 回収ファイルは**なぜ落ちたか**を具体的に書く（`five_digit_tdnet_form`）。属性は
 # **どう扱うか**の閉じた語彙で持つ（`code_format_error`）。粒度が違うので、変換を
 # ここに明示する。黙って通すと、綴りの違う値が `unknown` のまま溜まる。
+ACTIONS = ROOT / "data/analysis/corporate_actions.jsonl"
+
 RECOVERY_TO_RESOLUTION = {
     "five_digit_tdnet_form": "code_format_error",
     "non_tse_venue": "non_tse_venue",
@@ -76,6 +78,12 @@ def main():
             price_source[key] = "recovered"
             ticker_fix[key] = row.get("recovery_reason")
 
+    actions = {}
+    if ACTIONS.exists():
+        for line in ACTIONS.open(encoding="utf-8"):
+            row = json.loads(line)
+            actions.setdefault(row["ticker"], []).append(row)
+
     facts = load_facts(args.facts_version) if args.facts_version else {}
     if args.facts_version and not facts:
         print("版 %s の抽出結果が無い" % args.facts_version, file=sys.stderr)
@@ -102,6 +110,7 @@ def main():
         rows.append(B.build(
             record, timing_row, sessions.get(key), found,
             forecast_revision=(found or {}).get("forecast_revision"),
+            actions=actions.get((key[0] or "")[:4]),
             ticker_resolution=resolution,
             price_source=price_source.get(key),
             # 分割は調整されている。3091 が 2026-06-29 に 1:2 分割していて
