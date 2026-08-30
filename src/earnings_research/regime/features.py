@@ -52,10 +52,14 @@ def window_move(closes: Mapping[str, float], start: str, end: str) -> Optional[f
 
 
 def realised_vol(closes: Mapping[str, float], days: Sequence[str]) -> Optional[float]:
-    """日次騰落の母標準偏差(%)。2日未満なら `None`。"""
+    """日次騰落の母標準偏差(%)。差分が2本に満たなければ `None`。
+
+    以前は値の数（3点未満）でも弾いていたが、**その条件は到達しない**。n個の値
+    から作れる差分は多くてもn−1本なので、値が3点未満なら差分は必ず2本未満になり、
+    下の条件が先に効く。docstring も「2日未満」と書いており、コードの3点とも
+    食い違っていた。数えているのは差分の本数である。
+    """
     values = [closes[d] for d in days if d in closes and math.isfinite(closes[d])]
-    if len(values) < 3:
-        return None
     steps = [(values[i] / values[i - 1] - 1.0) * 100.0
              for i in range(1, len(values)) if values[i - 1]]
     return statistics.pstdev(steps) if len(steps) >= 2 else None

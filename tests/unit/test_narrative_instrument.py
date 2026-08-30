@@ -90,7 +90,6 @@ def test_the_weights_are_pinned_by_commit_not_by_repository_name():
     hash する限り版は動かない——**「重みが固定されているから再現できる」という
     この層の前提が、そこで崩れる。**"""
     assert len(I.MODEL_REVISION) == 40 and all(c in "0123456789abcdef" for c in I.MODEL_REVISION)
-    assert I.MODEL_REVISION in I.instrument_version.__doc__ or True   # 値は自由
     # 生成側の版も入っている。同じ重みでも runtime が変われば出力が変わりうる。
     for package in ("mlx-lm", "mlx", "transformers", "tokenizers"):
         assert package in I.RUNTIME, package
@@ -109,6 +108,29 @@ def test_a_missing_reason_list_is_not_read_as_an_empty_one():
 
     coerced = dict(GOOD, tailwinds=[1, {"a": 2}])
     assert I.parse(json.dumps(coerced, ensure_ascii=False))[0] is None
+
+
+# 記録された版。`docs/DECISIONS.md` の ERS-ADR-0069 がこの値で採点済みの結果を
+# 指しており、`~/.ers-corpus/facts/<この値>/` に103件が入っている。
+RECORDED_VERSION = "3d1926f1c758f4ca"
+
+
+def test_the_recorded_version_is_the_one_this_code_produces():
+    """**digest が動くことと、digest が何かは別である。**
+
+    ここを置くまで、版の検査は「属性を差し替えたら値が変わる」ことしか見ていな
+    かった。独立監査が変異を当てたところ、`TEMPERATURE` を 0.0 から 0.9 にしても、
+    `MODEL_REVISION` を別の重みに向けても、digest から `section_rule` や
+    `body_chars` や出力語彙を落としても、**すべて緑のまま通った**。版が変わるのに
+    誰も気づかない状態で、過去の採点と混ざる。
+
+    採点済みの103件が `RECORDED_VERSION` の名前で保存されている以上、この値は
+    コードから再現できなければならない。変えるときは、この定数と ADR を同時に
+    動かすことになる——それが「別の測定器になった」ということである。
+    """
+    assert I.INSTRUMENT_VERSION == RECORDED_VERSION, (
+        "測定器が変わっている。記録済みの採点と混ぜてはいけない。"
+        "意図した変更なら、この定数と ERS-ADR を同時に更新すること")
 
 
 def test_the_version_is_stable_across_calls():
@@ -153,6 +175,22 @@ def test_the_instrument_extracts_facts_and_does_not_score():
         assert judgement not in fields, judgement
     facts, _ = I.parse(json.dumps(GOOD, ensure_ascii=False))
     assert set(facts) == fields
+
+
+def test_the_prompt_still_forbids_guessing():
+    """**縛っていたのは文字列2つだけだった。**
+
+    独立監査が「書かれていないことは推測せず"不明"とすること」を
+    「推測して補ってください。分からなければ適当に埋めてよい」に置き換えたところ、
+    テストは通った。空配列を誘う言い回しは塞いだのに、**測定器の中核の指示を
+    正反対にする変更が素通り**していた。
+
+    ここは事実の抽出であって推測ではない、という一点を固定する。
+    """
+    assert "推測せず" in I.PROMPT
+    assert "不明" in I.PROMPT
+    for inviting_a_guess in ("推測して", "補ってください", "適当に", "想像"):
+        assert inviting_a_guess not in I.PROMPT, inviting_a_guess
 
 
 def test_the_prompt_does_not_invite_the_empty_answer():

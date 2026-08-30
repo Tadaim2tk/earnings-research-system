@@ -39,6 +39,28 @@ def test_a_falling_silver_is_a_move_too():
     assert len(found) == 1 and found[0]["moved_pct"] == -10.85
 
 
+def test_a_small_move_is_not_a_divergence():
+    """**閾値の下端が一度も踏まれていなかった。** 固定値の動きが全て大きく、
+    `MOVE_THRESHOLD_PCT` を 0 にしても全部通った。0 にすると、**両方とも動いて
+    いない平坦な相場**が「銀が動いて銅が動かない」として報告される——
+    ERS-ADR-0066 が結論の根拠にした信号そのものが、無から出る。"""
+    assert features.divergences({"SI=F": 1.0, "HG=F": 0.5}) == ()
+    assert features.divergences({"SI=F": 0.0, "HG=F": 0.0}) == ()
+    assert features.divergences({"SI=F": features.MOVE_THRESHOLD_PCT - 0.1,
+                                 "HG=F": 0.0}) == ()
+    # 閾値ちょうどは動いた側に数える。
+    assert len(features.divergences({"SI=F": features.MOVE_THRESHOLD_PCT,
+                                     "HG=F": 0.0})) == 1
+
+
+def test_a_noisy_quiet_leg_is_not_quiet():
+    """静かな側が騒いでいたら乖離ではない。上端も踏む。"""
+    assert features.divergences({"SI=F": 19.0,
+                                 "HG=F": features.QUIET_THRESHOLD_PCT + 0.1}) == ()
+    assert len(features.divergences({"SI=F": 19.0,
+                                     "HG=F": features.QUIET_THRESHOLD_PCT})) == 1
+
+
 def test_no_divergence_when_both_move_together():
     both = dict(RESERVED, **{"HG=F": 17.4})
     assert features.divergences(both) == ()
@@ -98,10 +120,14 @@ def test_the_summary_says_which_days_it_actually_measured():
 
 
 def test_volatility_needs_enough_days_to_mean_anything():
+    """境界を1つずつ踏む。`days[:2]` だけだと、値の数の下限と差分の数の下限が
+    同時に効いてしまい、**どちらも固定できていなかった**（両方の変異が生きた）。"""
     days = ["d%d" % i for i in range(6)]
     closes = {d: 100.0 + i for i, d in enumerate(days)}
     assert features.realised_vol(closes, days) is not None
-    assert features.realised_vol(closes, days[:2]) is None
+    assert features.realised_vol(closes, days[:3]) is not None, "3点は測れる"
+    assert features.realised_vol(closes, days[:2]) is None, "2点では測らない"
+    assert features.realised_vol(closes, days[:1]) is None
     assert features.realised_vol({}, days) is None
 
 
@@ -113,10 +139,14 @@ def test_every_role_has_a_series_and_the_missing_one_is_named():
 
 
 def test_the_summary_ranks_by_size_not_by_sign():
+    # 実測の固定値は大きい動きが全て正で、符号順と絶対値順が一致してしまう。
+    # 大きく下げた系列を1つ足さないと、この2つを区別できない。
     closes = {s: {"a": 100.0, "b": 100.0 + v} for s, v in RESERVED.items()}
+    closes["^SOX"] = {"a": 100.0, "b": 40.0}          # -60%
     got = features.summarise(closes, "a", "b")
     tops = [m["symbol"] for m in got["largest_moves"]]
-    assert tops[0] == "XRP-USD"
+    assert tops[0] == "^SOX", "絶対値ではなく符号で並べている"
+    assert "XRP-USD" in tops
     # 実測で使った系列は7つの役割を全部埋めていた。株だけ見ていたときは
     # 埋まっていなかった軸に、答えがあった。
     assert got["insufficient_axes"] is False

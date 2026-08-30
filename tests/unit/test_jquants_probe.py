@@ -27,7 +27,18 @@ def tree() -> ast.Module:
 
 
 def called_names():
-    """Every function called, as a dotted name where one can be recovered."""
+    """Every function called: the dotted name, and the final attribute alone.
+
+    The dotted form alone missed writes. `Path("/tmp/x").write_text(...)` has a
+    Call as its receiver, so the walk up stops there and the recovered name is
+    `write_text` with no leading dot — which `.endswith(".write_text")` does not
+    match. An independent audit put that exact write into the probe and this
+    check stayed silent; what failed was the endpoint test, by accident, because
+    the path string began with `/`.
+
+    So the final attribute is reported on its own as well. A write is a write
+    whether or not the object it is called on can be named.
+    """
     names = set()
     for node in ast.walk(tree()):
         if not isinstance(node, ast.Call):
@@ -40,6 +51,7 @@ def called_names():
             parts.append(target.id)
         if parts:
             names.add(".".join(reversed(parts)))
+            names.add(parts[0])          # 受け手を名指しできなくても、動作は見える
     return names
 
 
@@ -79,8 +91,9 @@ def test_the_probe_writes_nothing():
     # substring check that once stood here rejected it.
     assert "urllib.request.urlopen" in called
     for name in called:
-        assert not name.endswith(".write"), name
-        assert not name.endswith(".write_text"), name
+        for writing in ("write", "write_text", "write_bytes", "writelines",
+                        "mkdir", "makedirs", "touch", "dump"):
+            assert name == writing or not name.endswith("." + writing), name
 
 
 def test_the_key_is_read_from_the_environment_and_never_printed():
