@@ -93,6 +93,9 @@ def test_the_five_digit_index_code_matches_the_four_digit_ledger_code():
 
 
 def test_a_full_width_space_inside_the_title_does_not_create_a_false_absence():
+    # 語の**外側**の全角空白では、正規化を外しても結果が変わらない——固定値が
+    # 主張を確かめていなかった。語の内側に置く。
+    assert ix.is_tanshin("2026年10月期　第２四半期　決算　短信〔日本基準〕")
     assert ix.is_tanshin("2026年10月期　第２四半期（中間期）決算短信〔日本基準〕")
     assert ix.is_tanshin("決算短信")
     assert not ix.is_tanshin("決算説明資料")
@@ -129,6 +132,30 @@ def test_a_full_index_is_treated_as_truncated_not_as_absence():
     assert ix.truncated([{}] * 1627, 1000) is True
     assert ix.truncated([{}] * 999, 1000) is False
     assert ix.truncated([], 1000) is False
+
+
+# 選別モジュールが import してよいもの。**禁止する名前を並べる形では足りない。**
+# 独立監査が `import httpx`（このリポジトリの宣言済み依存）を足したところ、
+# `urllib` だけを弾いていた検査は通った。何を許すかを書く。
+ALLOWED_IMPORTS = frozenset({
+    "hashlib", "json", "re", "unicodedata", "dataclasses", "datetime", "typing",
+})
+
+
+def test_selection_imports_only_what_it_needs():
+    """許可した名前だけを import する。
+
+    取得の道具が1つでも入れば、選別はネットワークに届きうる。禁止リストは
+    書き漏らしたものを通すので、許可リストで書く。
+    """
+    for node in ast.walk(ast.parse(Path(ix.__file__).read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                assert root in ALLOWED_IMPORTS, alias.name
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            assert root in ALLOWED_IMPORTS, node.module
 
 
 def test_selection_reaches_no_network():

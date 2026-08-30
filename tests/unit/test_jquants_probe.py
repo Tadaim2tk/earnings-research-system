@@ -21,13 +21,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "tools/jquants_probe.py"
 
+# 何かを残す呼び出し。名前で見るので、受け手を名指しできるかどうかに依らない。
+WRITING_METHODS = frozenset({
+    "write", "write_text", "write_bytes", "writelines",
+    "mkdir", "makedirs", "touch", "dump", "replace", "rename",
+})
+
 
 def tree() -> ast.Module:
     return ast.parse(PROBE.read_text(encoding="utf-8"))
 
 
 def called_names():
-    """Every function called, as a dotted name where one can be recovered."""
+    """Every function called: the dotted name, and the final attribute alone.
+
+    The dotted form alone missed writes. `Path("/tmp/x").write_text(...)` has a
+    Call as its receiver, so the walk up stops there and the recovered name is
+    `write_text` with no leading dot — which `.endswith(".write_text")` does not
+    match. An independent audit put that exact write into the probe and this
+    check stayed silent; what failed was the endpoint test, by accident, because
+    the path string began with `/`.
+
+    So the final attribute is reported on its own as well. A write is a write
+    whether or not the object it is called on can be named.
+    """
     names = set()
     for node in ast.walk(tree()):
         if not isinstance(node, ast.Call):
@@ -40,6 +57,7 @@ def called_names():
             parts.append(target.id)
         if parts:
             names.add(".".join(reversed(parts)))
+            names.add(parts[0])          # 受け手を名指しできなくても、動作は見える
     return names
 
 
@@ -78,9 +96,16 @@ def test_the_probe_writes_nothing():
     # Reading the network is not writing: urlopen is allowed by name, and the
     # substring check that once stood here rejected it.
     assert "urllib.request.urlopen" in called
+    # 素の名前も、ドット付きも、どちらも落とす。
+    #
+    # 直前の版は `name == writing or not name.endswith("." + writing)` と書いて
+    # いた。**素の名前をそこで許可していた。** 受け手を名指しできない書き込みを
+    # 見るために素の名前を集めておいて、その名前を通す条件を書いたことになる。
+    # 実測: `Path("leak.json").write_text("x")` を入れても9本すべて通った
+    # （絶対パスなら別のテストが偶然拾うが、相対パスでは何も拾わない）。
     for name in called:
-        assert not name.endswith(".write"), name
-        assert not name.endswith(".write_text"), name
+        last = name.rsplit(".", 1)[-1]
+        assert last not in WRITING_METHODS, name
 
 
 def test_the_key_is_read_from_the_environment_and_never_printed():
