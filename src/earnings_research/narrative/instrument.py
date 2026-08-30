@@ -9,6 +9,13 @@
 規則**まで含めて1つの版とし、その digest を `INSTRUMENT_VERSION` とする。どれか
 一つでも変えれば別の測定器であり、過去の採点と混ぜてはいけない。
 
+**業績予想の修正はここで尋ねない。** `outlook_mention` として聞いていたが、業績
+予想の記述は短信の「（３）連結業績予想」にあり、`section.py` が切り出す節の**外**
+である。入力に無いことを尋ねられたモデルは、決算の好調さから「上方」を作った
+——実測で83件中52件が「上方」、原文に修正の語があるのは2件だけだった。短信には
+定型欄があり、86%の文書で規則で読める（`forecast.revision_flag`）。**規則で読める
+ものを推測させない。** 向きは定型欄にも書かれていないので、名乗らない。
+
 **ここは評価ではない。** 4層設計（Evidence / Extracted Facts / Evaluation Policy /
 Evaluation Output）の Extracted Facts にあたる。「スコア7点」を出させると、その点の
 意味がモデルの中にしか無く後から検証できない。会社が何と書いたかを列挙させ、点に
@@ -59,12 +66,10 @@ PROMPT = """次は日本企業の決算短信の「経営成績に関する説�
  "profit_direction":"増加|減少|横ばい|不明",
  "tailwinds":["会社が挙げた追い風を原文の語で、最大6件"],
  "headwinds":["会社が挙げた逆風を原文の語で、最大6件"],
- "one_off":"有|無|不明",
- "outlook_mention":"上方|下方|据置|言及なし"}"""
+ "one_off":"有|無|不明"}"""
 
 DIRECTIONS = ("増加", "減少", "横ばい", "不明")
 PRESENCE = ("有", "無", "不明")
-OUTLOOK = ("上方", "下方", "据置", "言及なし")
 # **反復を潰すのは重複排除の仕事で、件数上限の仕事ではない。** 上限6で落ちた5件を
 # 実際に見たところ、4件は 8〜10 個の別々の逆風（中東情勢／物価上昇／インフレ再燃…）
 # を挙げた正当な列挙で、暴走していたのは1件だけだった——「黒字化」が3回繰り返され
@@ -76,7 +81,6 @@ FIELDS: Dict[str, Tuple[str, ...]] = {
     "sales_direction": DIRECTIONS,
     "profit_direction": DIRECTIONS,
     "one_off": PRESENCE,
-    "outlook_mention": OUTLOOK,
 }
 LISTS = ("tailwinds", "headwinds")
 
