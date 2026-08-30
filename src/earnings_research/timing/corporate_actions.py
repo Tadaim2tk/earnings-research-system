@@ -36,15 +36,32 @@ ACTIONS: Dict[str, str] = {
     "shareholder_benefit": r"株主優待",
     "treasury_stock": r"自己株式",
     "forecast_revision": r"業績予想.{0,8}修正|配当予想.{0,8}修正",
-    "delisting": r"上場廃止|監理銘柄|整理銘柄",
+    # **監理銘柄を上場廃止に混ぜない。** 監理銘柄（確認中/審査中）は注意喚起で
+    # あって廃止ではなく、解除されて上場が続くことが実際に多い。実測で
+    # 「上場維持基準への適合及び監理銘柄(確認中)指定解除」——基準を満たした
+    # 良い知らせ——が上場廃止として数えられていた。整理銘柄は廃止が決まった後
+    # なので `delisting` 側に置く。
+    "delisting": r"上場廃止|整理銘柄",
+    "listing_warning": r"監理銘柄",
 }
 
 # 表題の性質。**同じ「公開買付」でも、開始と中止では値動きの向きが逆になる。**
 STAGES: Dict[str, str] = {
     "correction": r"^[（(【]?訂正",
+    # **解除を指定と同じにしない。** 「指定解除」は指定の取り消しで、向きが逆。
+    # `withdrawal` より前に置く（「解除」は中止・撤回のどれにも当たらない）。
+    "released": r"指定解除|指定の解除|解除に関する",
     "withdrawal": r"中止|撤回|不成立|延期",
     "result": r"結果|完了|終了|払込",
 }
+
+# 東京証券取引所以外の市場だけの話かどうか。**名証だけの上場廃止は、東証に
+# 残っている会社の「消滅」ではない。** 実測で「名古屋証券取引所における当社
+# 株式の上場廃止申請」が14件あり、これを全面廃止と読むと生きている会社が
+# 消えたことになる。
+SECONDARY_MARKETS = (r"名古屋証券取引所|札幌証券取引所|福岡証券取引所|名証|札証|福証"
+                     r"|TOKYOPROMarket|TOKYOPROマーケット")
+SCOPES = ("secondary_market", "unspecified")
 
 MD_NOTE = "表題だけで判定している。種別は言うが中身（比率・成否）は言わない"
 
@@ -60,6 +77,18 @@ def stage_of(title: str) -> str:
         if re.search(pattern, flat):
             return stage
     return "announcement"
+
+
+def scope_of(title: str) -> str:
+    """東京以外の市場だけを名指しているか。
+
+    `unspecified` は**「全面的な廃止だと確かめた」ではない**。市場名が表題に
+    現れなかった、というだけである。
+    """
+    flat = normalise(title)
+    if re.search(SECONDARY_MARKETS, flat) and "東京証券取引所" not in flat:
+        return "secondary_market"
+    return "unspecified"
 
 
 def actions_in(title: str) -> Tuple[str, ...]:
@@ -96,6 +125,7 @@ def collect(items: Sequence[Mapping[str, object]],
             "pubdate": item.get("pubdate"),
             "actions": list(kinds),
             "stage": stage_of(title),
+            "scope": scope_of(title),
             "title": title,
             "document_url": unwrap_url(str(item.get("document_url") or "")),
         })
