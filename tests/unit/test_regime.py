@@ -82,8 +82,10 @@ def test_an_empty_axis_is_stated_not_silently_zero():
 
 
 def test_a_gap_in_the_series_is_not_filled():
+    # 日付は `YYYY-MM-DD` でしか渡せなくなったので、固定値も実データの形にする。
     assert features.window_move({}, "2026-08-01", "2026-08-25") is None
-    assert features.window_move({"a": 0.0, "b": 5.0}, "a", "b") is None
+    assert features.window_move({"2026-08-03": 0.0, "2026-08-25": 5.0},
+                                "2026-08-01", "2026-08-25") is None, "0で割らない"
     assert features.window_move({"2026-09-01": 5.0}, "2026-08-01", "2026-08-25") is None
     assert features.window_move({"2026-07-01": 5.0}, "2026-08-01", "2026-08-25") is None
 
@@ -141,9 +143,10 @@ def test_every_role_has_a_series_and_the_missing_one_is_named():
 def test_the_summary_ranks_by_size_not_by_sign():
     # 実測の固定値は大きい動きが全て正で、符号順と絶対値順が一致してしまう。
     # 大きく下げた系列を1つ足さないと、この2つを区別できない。
-    closes = {s: {"a": 100.0, "b": 100.0 + v} for s, v in RESERVED.items()}
-    closes["^SOX"] = {"a": 100.0, "b": 40.0}          # -60%
-    got = features.summarise(closes, "a", "b")
+    A, B = "2026-08-03", "2026-08-25"
+    closes = {s: {A: 100.0, B: 100.0 + v} for s, v in RESERVED.items()}
+    closes["^SOX"] = {A: 100.0, B: 40.0}              # -60%
+    got = features.summarise(closes, A, B)
     tops = [m["symbol"] for m in got["largest_moves"]]
     assert tops[0] == "^SOX", "絶対値ではなく符号で並べている"
     assert "XRP-USD" in tops
@@ -152,3 +155,51 @@ def test_the_summary_ranks_by_size_not_by_sign():
     assert got["insufficient_axes"] is False
     assert got["missing_roles"] == []
     assert got["divergences"][0]["moved"] == "SI=F"
+
+
+def test_a_malformed_boundary_is_refused_rather_than_silently_reaching_further():
+    """**辞書順で比べているので、書式が崩れると窓が壊れる。**
+
+    実測: `end` を `2026-8-25`（ゼロ埋めが1つ欠けただけ）にすると
+    `"2026-8-25" > "2026-08-27"` が真になり、要求の2日先が終端に選ばれた。
+    ERS-ADR-0066 が結論の根拠にした銀と銅の数字が、両方とも動く
+    （銀 +19.02% → +20.40%、銅 +3.00% → +1.12%）。黙って別の日を測らせない。
+    """
+    closes = {"2026-08-03": 100.0, "2026-08-25": 119.0, "2026-08-27": 120.4}
+    assert features.resolve_endpoints(closes, "2026-08-01", "2026-08-25") == \
+        ("2026-08-03", "2026-08-25")
+    for broken in ("2026-8-25", "2026/08/25", "20260825", "", None, "2026-08"):
+        with pytest.raises(features.MalformedWindow):
+            features.resolve_endpoints(closes, "2026-08-01", broken)
+        with pytest.raises(features.MalformedWindow):
+            features.resolve_endpoints(closes, broken, "2026-08-25")
+
+
+def test_a_stray_key_in_the_series_cannot_become_the_endpoint():
+    """境界を検査しても、**系列の側に日付でないキーが混じれば順序は壊れる**。
+    ASCII では `"a" > "2026-08-25"` なので、そのキーが終端に選ばれる。
+    実データは索引由来なので現状は起きないが、境界だけ守っても片手落ちである。"""
+    # `"2026-08-010"` は辞書順で **窓の内側**（`"2026-08-01"` 以降・`"2026-08-03"` の
+    # 手前）に落ちる。窓の外に落ちるキー（`"a"` など）は `<=` の比較で自然に外れる
+    # ので、ガードを踏まない——最初に書いた固定値がそれで、変異が生き残った。
+    closes = {"2026-08-03": 100.0, "2026-08-25": 119.0,
+              "2026-08-010": 50.0, "a": 999.0, "": 1.0}
+    assert features.resolve_endpoints(closes, "2026-08-01", "2026-08-25") == \
+        ("2026-08-03", "2026-08-25")
+    assert features.window_move(closes, "2026-08-01", "2026-08-25") == pytest.approx(19.0)
+
+
+def test_one_observation_is_not_a_zero_percent_move():
+    """1点から区間の騰落は出ない。以前は 0.00% を返しており、**「動かなかった」と
+    「1日しか見ていない」が区別できなかった**。7つの役割すべてを1点観測の系列で
+    埋めると、`insufficient_axes` は False のまま全系列が +0.00% になった。"""
+    one = {"2026-08-12": 100.0}
+    assert features.resolve_endpoints(one, "2026-08-01", "2026-08-25") is None
+    assert features.window_move(one, "2026-08-01", "2026-08-25") is None
+
+    filled = {sym: dict(one) for sym in
+              ("^N225", "^VIX", "^TNX", "JPY=X", "GC=F", "BTC-USD", "HG=F")}
+    got = features.summarise(filled, "2026-08-01", "2026-08-25")
+    assert got["moves_pct"] == {}, "1点しか無いのに動きを報告している"
+    assert got["insufficient_axes"] is True
+    assert sorted(got["unobserved"]) == sorted(filled)

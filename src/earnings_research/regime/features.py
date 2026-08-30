@@ -6,10 +6,22 @@ TSO の SPEC-CAR-001 が非活性ゲート（clean評価30件以上・4資産以
 """
 
 import math
+import re
 import statistics
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 from earnings_research.regime.series import BY_SYMBOL, DIVERGENCE, missing_roles
+
+# 日付は `YYYY-MM-DD` に限る。**辞書順で比べているので、書式が崩れると窓が壊れる。**
+# 実測: `end` を `2026-8-25`（ゼロ埋め1つ欠け）にすると、`"2026-8-25" > "2026-08-27"`
+# が真になり、要求の2日先が終端に選ばれた。銀 +19.02% → +20.40%、銅 +3.00% → +1.12%
+# と、ERS-ADR-0066 が結論の根拠にした2つの数字が両方動く。
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class MalformedWindow(ValueError):
+    """窓の境界が `YYYY-MM-DD` でない。黙って別の日を測らない。"""
+
 
 # 「動いた」と言える大きさ。これ未満は動いていない側に数える。
 MOVE_THRESHOLD_PCT = 5.0
@@ -28,14 +40,24 @@ def resolve_endpoints(closes: Mapping[str, float], start: str, end: str
     産業金属が全部「観測なし」になり、銀と銅の乖離が出なくなる。
 
     開始は要求日**以降**の最初の観測日、終了は要求日**以前**の最後の観測日。
-    外側へ広げないので、窓の外の値を混ぜない。
+    外側へ広げないので、窓の外の値を混ぜない——**ただし日付が `YYYY-MM-DD` である
+    限りにおいて**。比較は辞書順なので、書式が崩れると順序そのものが壊れる。
+    崩れていたら測らずに `MalformedWindow` を上げる。
+
+    同じ日に寄ってしまった場合（観測が1日しか無い）も `None` を返す。1点から
+    区間の騰落は出ない。以前は `first == last` を通して 0.00% を返しており、
+    **「動かなかった」と「1日しか見ていない」が区別できなかった**。
     """
-    days = sorted(d for d, c in closes.items() if c is not None and math.isfinite(c))
+    for boundary in (start, end):
+        if not isinstance(boundary, str) or not ISO_DATE.match(boundary):
+            raise MalformedWindow("窓の境界は YYYY-MM-DD で渡すこと: %r" % (boundary,))
+    days = sorted(d for d, c in closes.items()
+                  if c is not None and math.isfinite(c) and ISO_DATE.match(str(d)))
     if not days:
         return None
     first = next((d for d in days if d >= start), None)
     last = next((d for d in reversed(days) if d <= end), None)
-    if first is None or last is None or first > last:
+    if first is None or last is None or first >= last:
         return None
     return first, last
 
