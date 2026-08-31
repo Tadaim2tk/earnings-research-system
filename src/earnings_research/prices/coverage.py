@@ -14,6 +14,7 @@
 して除くと、消えた側の損益が丸ごと落ちる。理由を付けて残す。
 """
 
+from datetime import date
 from typing import Mapping, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = "price_coverage_v1"
@@ -32,6 +33,7 @@ COVERAGE_STATES = (
 RETURN_STATES = (
     "measured",
     "no_price_at_entry",        # 建てる日の値が無い
+    "not_yet_observable",       # **まだその日が来ていない。** 終わったのではない
     "ended_before_exit",        # 出口の前に系列が終わった（保有中に消えた）
     "gap_at_exit",              # 系列は続いているが出口の日だけ無い
     "source_unavailable",       # そもそも系列を取れていない
@@ -46,6 +48,29 @@ class UnknownState(ValueError):
     """定義していない状態名を書こうとした。黙って通さない。"""
 
 
+class MalformedDay(ValueError):
+    """日付が `YYYY-MM-DD` でない。黙って辞書順で比べない。"""
+
+
+def _checked_day(value: object) -> str:
+    """`YYYY-MM-DD` の実在する日付として読む。読めなければ落とす。
+
+    **辞書順の比較の前に検査する。** `"2026-8-28"` は `"2026-08-28"` より後ろに
+    並ぶので、窓の内側の日が `starts_after_window` に化ける。`\d` では全角数字も
+    通ってしまうので、`date.fromisoformat` で読んだうえで正準な表記かを確かめる。
+    `regime.align._checked_day` と同じ規約。
+    """
+    if not isinstance(value, str):
+        raise MalformedDay(repr(value))
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise MalformedDay(value) from exc
+    if parsed.isoformat() != value:
+        raise MalformedDay(value)
+    return value
+
+
 def coverage_state(first: Optional[str], last: Optional[str],
                    window_first: str, window_last: str) -> str:
     """銘柄の系列が窓をどこまで覆っているか。
@@ -55,6 +80,14 @@ def coverage_state(first: Optional[str], last: Optional[str],
     """
     if first is None or last is None:
         return "source_unavailable"
+    first = _checked_day(first)
+    last = _checked_day(last)
+    window_first = _checked_day(window_first)
+    window_last = _checked_day(window_last)
+    if first > last:
+        raise MalformedDay("%s..%s" % (first, last))
+    if window_first > window_last:
+        raise MalformedDay("%s..%s" % (window_first, window_last))
     late = first > window_first
     early = last < window_last
     if late and early:
@@ -68,15 +101,28 @@ def coverage_state(first: Optional[str], last: Optional[str],
 
 def return_state(entry_day: Optional[str], exit_day: Optional[str],
                  sessions_after_entry: Optional[int], sessions_needed: int,
-                 series_last: Optional[str]) -> str:
+                 series_last: Optional[str],
+                 observed_through: Optional[str] = None) -> str:
     """1つの出口について、測れたか・測れないならなぜか。
 
     `entry_day` / `exit_day` は系列上で実際に値が取れた日で、取れなければ
     `None`。`sessions_after_entry` は建てた日より後に系列が持っている営業日数。
+    `observed_through` は**データ全体が届いている最後の日**（個々の銘柄ではなく、
+    取得した集合の端）。
 
     **「系列が終わった」は最終日との比較では出せない。** 出口はセッション番号で
     決まるので、必要な本数が系列に残っているかを数える。建てた日が最終日より
     前でも、残りが3本しか無ければ20本の出口には届かない。
+
+    **本数が足りない理由は2つあり、混ぜてはいけない。**
+
+        まだその日が来ていない   → `not_yet_observable`（待てば埋まる）
+        系列が途中で終わった     → `ended_before_exit`（待っても埋まらない）
+
+    直近の決算は、20営業日ぶんの将来がまだ存在しないというだけで、上場は
+    続いている。これを「保有中に消えた」と記録すると、**新しいイベントほど
+    廃止されたように見える**。`observed_through` を渡さなければ区別を主張せず、
+    従来どおり `ended_before_exit` を返す——**推測で埋めない。**
     """
     if series_last is None:
         return "source_unavailable"
@@ -87,6 +133,9 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
     if sessions_after_entry is None:
         return "source_unavailable"
     if sessions_after_entry < sessions_needed:
+        if observed_through is not None:
+            alive = _checked_day(series_last) >= _checked_day(observed_through)
+            return "not_yet_observable" if alive else "ended_before_exit"
         return "ended_before_exit"
     return "gap_at_exit"
 

@@ -89,3 +89,55 @@ def test_absence_reasons_separate_checked_from_unchecked():
     いない」。この2つを同じにすると、調べていない行が「無かった」になる。"""
     assert "none" in C.END_REASONS and "unknown" in C.END_REASONS
     assert C.check("none", C.END_REASONS) != C.check("unknown", C.END_REASONS)
+
+
+def test_a_future_exit_is_not_the_same_as_a_delisting():
+    """**本数が足りない理由は2つあり、混ぜてはいけない。**
+
+    直近の決算は、20営業日ぶんの将来がまだ存在しないというだけで、上場は
+    続いている。これを「保有中に消えた」と記録すると、**新しいイベントほど
+    廃止されたように見える**。待てば埋まるものと、待っても埋まらないものを
+    分ける。
+    """
+    alive = C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28")
+    gone = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
+    assert alive == "not_yet_observable"
+    assert gone == "ended_before_exit"
+
+
+def test_without_a_cutoff_it_does_not_claim_the_distinction():
+    """**推測で埋めない。** データの端を渡さなければ、生きているか終わったかは
+    判定できない。従来どおりの答えを返し、区別を主張しない。"""
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28") == "ended_before_exit"
+
+
+def test_a_series_ending_exactly_at_the_cutoff_is_still_alive():
+    """端ちょうどは生きている側。取得がそこで止まっただけである。"""
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28") == "not_yet_observable"
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-27", "2026-08-28") == "ended_before_exit"
+
+
+def test_dates_are_checked_before_they_are_compared_as_strings():
+    """**辞書順の比較の前に検査する。** `"2026-8-28"` は `"2026-08-28"` より
+    後ろに並ぶので、窓の内側の日が `starts_after_window` に化ける。全角数字も
+    同じ穴を開ける（`regime.align` で先に踏んだ）。"""
+    for bad in ("2026-8-28", "2026-０8-28", "2026-02-30", "20260828", "", 20260828):
+        with pytest.raises(C.MalformedDay):
+            C.coverage_state(bad, "2026-08-28", "2021-01-04", "2026-08-28")
+    # `None` は壊れた日付ではなく「取得していない」。落とさず、そう答える。
+    assert C.coverage_state(None, "2026-08-28", "2021-01-04", "2026-08-28") == "source_unavailable"
+    with pytest.raises(C.MalformedDay):
+        C.return_state("2026-08-20", None, 3, 22, "2026-8-28", "2026-08-28")
+
+
+def test_a_window_that_runs_backwards_stops_rather_than_answering():
+    """端が逆さの窓に答えを返さない。黙って `covered` を名乗らせない。"""
+    with pytest.raises(C.MalformedDay):
+        C.coverage_state("2021-01-04", "2026-08-28", "2026-08-28", "2021-01-04")
+    with pytest.raises(C.MalformedDay):
+        C.coverage_state("2026-08-28", "2021-01-04", "2021-01-04", "2026-08-28")
+
+
+def test_the_new_state_is_in_the_vocabulary():
+    assert "not_yet_observable" in C.RETURN_STATES
+    assert C.check("not_yet_observable", C.RETURN_STATES) == "not_yet_observable"
