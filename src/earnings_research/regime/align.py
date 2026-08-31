@@ -19,10 +19,19 @@
 守らない。ISO日付は辞書順が日付順と一致するので、素の Python で足りる。
 """
 
-from datetime import date
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from datetime import date, timedelta
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = "cross_market_align_v1"
+
+# **相手の立会をいつまで持ち越すか。** 米国が休むのは連続でせいぜい4日
+# （木〜日の感謝祭、金〜月の連休）なので、7日を超える空きは休場ではなく
+# **こちらの取得が欠けている**と見る。
+#
+# これは事実ではなく方針である。上限を置かないと、系列が途中で切れたときに
+# 1本の古い値が何日ぶんも使い回され、**取得の欠けが休場として相関に入り込む**。
+# 上限を超えた日は組まずに落とす——推測で埋めない。
+MAX_CARRY_DAYS = 7
 
 
 class MissingColumn(ValueError):
@@ -51,7 +60,7 @@ def _checked_day(value: object) -> str:
     return value
 
 
-def _series(rows: Iterable[Mapping[str, object]], symbol: str,
+def _series(rows: Sequence[Mapping[str, object]], symbol: str,
             value: str) -> List[Tuple[str, float]]:
     """その銘柄の (日付, 値)。日付順、同じ日は最後の1つ。欠測は落とす。"""
     seen: Dict[str, float] = {}
@@ -75,7 +84,7 @@ def _series(rows: Iterable[Mapping[str, object]], symbol: str,
     return [(day, seen[day]) for day in sorted(seen)]
 
 
-def returns_on_own_days(rows: Iterable[Mapping[str, object]], symbol: str,
+def returns_on_own_days(rows: Sequence[Mapping[str, object]], symbol: str,
                         value: str = "close") -> Tuple[Dict[str, object], ...]:
     """その銘柄が実際に値を持つ日だけで騰落率(%)を作る。
 
@@ -92,37 +101,48 @@ def returns_on_own_days(rows: Iterable[Mapping[str, object]], symbol: str,
 
 
 def follows(jp_returns: Sequence[Mapping[str, object]],
-            us_returns: Sequence[Mapping[str, object]]) -> Tuple[Dict[str, object], ...]:
+            us_returns: Sequence[Mapping[str, object]],
+            max_carry_days: int = MAX_CARRY_DAYS) -> Tuple[Dict[str, object], ...]:
     """日本の各営業日に、**その日より前で直近の**米国の立会を当てる。
 
     同じ日付の米国は拾わない。日本の立会は米国より先に終わるので、同日の米国は
     日本の後の情報である。同日で組むと未来を見たことになる。
 
-    休みを挟む日は、その間で最後に観測された1本が当たる。
+    休みを挟む日は、その間で最後に観測された1本が当たる。ただし
+    `max_carry_days` を超えて古い値は当てない——**そこまで空くのは休場ではなく
+    取得の欠けなので、組まずに落とす。**
     """
     right = sorted(({"date": _checked_day(r["date"]), "ret": float(r["ret"])}
                     for r in us_returns), key=lambda r: r["date"])
     out = []
     at = 0
-    latest: Optional[float] = None
+    latest: Optional[Dict[str, object]] = None
     for row in sorted(jp_returns, key=lambda r: _checked_day(str(r["date"]))):
         day = _checked_day(str(row["date"]))
         while at < len(right) and right[at]["date"] < day:
-            latest = right[at]["ret"]
+            latest = right[at]
             at += 1
         if latest is None:
             continue
-        out.append({"date": day, "jp": float(row["ret"]), "us": latest})
+        # **古い値を無期限に持ち越さない。** 相手の系列が途中で切れると、1本の
+        # 値が何日ぶんも使い回され、取得の欠けが休場として相関に入り込む。
+        gap = date.fromisoformat(day) - date.fromisoformat(str(latest["date"]))
+        if gap > timedelta(days=max_carry_days):
+            continue
+        out.append({"date": day, "jp": float(row["ret"]), "us": float(latest["ret"])})
     return tuple(out)
 
 
-def padded_zero_days(rows: Iterable[Mapping[str, object]], symbol: str,
+def padded_zero_days(rows: Sequence[Mapping[str, object]], symbol: str,
                      value: str = "close") -> int:
     """暦で並べたときに偽の0.00%が何日ぶん生まれるかを数える。
 
     直さずに使ってしまったときの被害を測るために置いてある。その銘柄が値を持つ
     最初の日より後で、他のどれかが動いていて自分が休んでいた日の数。
     """
+    # **2回走査するので、先に実体化する。** generator を渡されると1回目で
+    # 使い切り、2回目が空になって黙って0が返る。
+    rows = list(rows)
     mine = {day for day, _ in _series(rows, symbol, value)}
     if not mine:
         raise MissingColumn(symbol)

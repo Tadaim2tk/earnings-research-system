@@ -109,3 +109,40 @@ def test_a_real_correlation_comes_out_as_a_number():
             {"date": "2026-01-06", "jp": 2.0, "us": 2.0},
             {"date": "2026-01-07", "jp": 3.0, "us": 3.0}]
     assert A.correlation(pair) == pytest.approx(1.0)
+
+
+def test_a_stale_observation_is_not_carried_across_an_acquisition_gap():
+    """**取得の欠けを休場として扱わない。**
+
+    相手の系列が途中で切れると、1本の古い値が何日ぶんも使い回される。米国が
+    休むのは連続でせいぜい4日（木〜日の感謝祭、金〜月の連休）なので、それを
+    超える空きは休場ではなく取得の欠けと見て、組まずに落とす。
+    """
+    jp = [{"date": "2026-01-06", "ret": 1.0}, {"date": "2026-01-07", "ret": 1.0},
+          {"date": "2026-01-20", "ret": 1.0}]
+    us = [{"date": "2026-01-05", "ret": 2.0}]
+    got = A.follows(jp, us)
+    assert [r["date"] for r in got] == ["2026-01-06", "2026-01-07"]
+    assert all(r["us"] == 2.0 for r in got)          # 1〜2日の持ち越しは通す
+    # 1/20 は15日空いているので落ちる。落とさないと 1/5 の値が使い回される。
+
+
+def test_the_carry_limit_is_a_stated_policy_not_a_fact():
+    """上限は方針であって事実ではない。呼ぶ側が変えられる形にしておく。"""
+    jp = [{"date": "2026-01-20", "ret": 1.0}]
+    us = [{"date": "2026-01-05", "ret": 2.0}]
+    assert A.follows(jp, us) == ()
+    assert len(A.follows(jp, us, max_carry_days=30)) == 1
+    assert A.MAX_CARRY_DAYS == 7
+
+
+def test_a_generator_is_not_exhausted_by_the_first_pass():
+    """**2回走査する関数に generator を渡すと、黙って0が返る。**
+
+    1回目で使い切り、2回目が空になる。実体化してから両方を走る。
+    """
+    def stream():
+        for r in rows(*(JP + WEEKEND)):
+            yield r
+    assert A.padded_zero_days(stream(), "^N225") == 2
+    assert A.padded_zero_days(rows(*(JP + WEEKEND)), "^N225") == 2
