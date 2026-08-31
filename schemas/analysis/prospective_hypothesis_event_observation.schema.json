@@ -68,16 +68,35 @@
           ],
           "default": null,
           "title": "Reaction"
+        },
+        "reaction_source_record_id": {
+          "title": "Reaction Source Record Id",
+          "type": "string"
         }
       },
       "required": [
-        "captured_at"
+        "captured_at",
+        "reaction_source_record_id"
       ],
       "title": "PostEventFeatures",
       "type": "object"
     },
     "PreEventFeatures": {
       "properties": {
+        "baseline_id": {
+          "title": "Baseline Id",
+          "type": "string"
+        },
+        "baseline_record_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Baseline Record Hash",
+          "type": "string"
+        },
+        "baseline_version": {
+          "minimum": 1,
+          "title": "Baseline Version",
+          "type": "integer"
+        },
         "captured_at": {
           "format": "date-time",
           "title": "Captured At",
@@ -106,6 +125,11 @@
           ],
           "default": null,
           "title": "Judge"
+        },
+        "locked_at": {
+          "format": "date-time",
+          "title": "Locked At",
+          "type": "string"
         },
         "narrative": {
           "anyOf": [
@@ -157,20 +181,231 @@
         }
       },
       "required": [
-        "captured_at"
+        "captured_at",
+        "baseline_id",
+        "baseline_version",
+        "baseline_record_hash",
+        "locked_at"
       ],
       "title": "PreEventFeatures",
       "type": "object"
     }
   },
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "supersedes_observation_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "supersedes_observation_id"
+        ]
+      },
+      "if": {
+        "properties": {
+          "observation_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "observation_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "supersedes_observation_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D1"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D1"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D5"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D5"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D20"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "returns": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D20"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5",
+                    "D20"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D1"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D5"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "returns": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D20"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    }
+  ],
   "properties": {
     "company_name": {
       "title": "Company Name",
-      "type": "string"
-    },
-    "completed_at": {
-      "format": "date-time",
-      "title": "Completed At",
       "type": "string"
     },
     "earnings_event_id": {
@@ -189,6 +424,25 @@
     },
     "observation_id": {
       "title": "Observation Id",
+      "type": "string"
+    },
+    "observation_stage": {
+      "enum": [
+        "D1",
+        "D5",
+        "D20"
+      ],
+      "title": "Observation Stage",
+      "type": "string"
+    },
+    "observation_version": {
+      "minimum": 1,
+      "title": "Observation Version",
+      "type": "integer"
+    },
+    "observed_through": {
+      "format": "date-time",
+      "title": "Observed Through",
       "type": "string"
     },
     "post_event_features": {
@@ -217,8 +471,8 @@
       "type": "array"
     },
     "schema_version": {
-      "const": "prospective_hypothesis_event_observation_v1",
-      "default": "prospective_hypothesis_event_observation_v1",
+      "const": "prospective_hypothesis_event_observation_v2",
+      "default": "prospective_hypothesis_event_observation_v2",
       "title": "Schema Version",
       "type": "string"
     },
@@ -236,6 +490,18 @@
       "title": "Source Record Ids",
       "type": "array"
     },
+    "supersedes_observation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Observation Id"
+    },
     "ticker": {
       "title": "Ticker",
       "type": "string"
@@ -249,12 +515,14 @@
   },
   "required": [
     "observation_id",
+    "observation_version",
+    "observation_stage",
     "earnings_event_id",
     "company_name",
     "ticker",
     "event_quarter",
     "event_occurred_at",
-    "completed_at",
+    "observed_through",
     "pre_event_features",
     "post_event_features",
     "returns",

@@ -40,7 +40,7 @@
 - `volatility_environment`
 - `dollar_environment`
 
-これらは `event_occurred_at` 以前に固定された値だけを使う。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
+これらは `event_occurred_at` 以前にlockされたbaselineの値だけを使う。baseline ID、version、record hash、`locked_at`を必須とし、`captured_at <= locked_at <= event_occurred_at`を検証する。trial追記時は正本の完全なERS datasetと市場反応記録を必須入力とし、dataset全体のvalidatorを通したうえで、同一eventの唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical record hashを観測値と突合する。D1・D5は市場反応記録の値・観測時刻・ID、D20は事後reviewの値・記録時刻・IDと一致させ、reactionも寄付き反応と翌営業日終値から固定規則で導出する。単独baseline CSV、superseded済みversion、自己申告だけの発表後結果ではtrialを作らない。`rank`は正本の`pre_event_grade`と一致する場合だけ使う。旧`judge`やTSO市場環境など正式mappingのない特徴は未記録として母数外にする。旧OSの分類時点が現行ERSほど厳密でなかったことはhistorical evidenceの限界として残し、prospective試行では発表前固定を必須にする。
 
 ### post_event
 
@@ -50,14 +50,48 @@ reactionは発表後情報である。決算後の継続・反転研究だけに
 
 ## イベント観測
 
-`prospective_hypothesis_event_observation_v1` は次を分離する。
+`prospective_hypothesis_event_observation_v2` は次を分離する。
 
 - 発表前に固定した特徴
+- source baseline ID、version、record hash、lock時刻
 - 発表後に得たreaction
 - D1／D5／D20の期間別リターンと観測時刻
 - 元となったERS record ID
+- D1／D5／D20の観測stage、version、直前observation ID
 
 必要な特徴や対象期間の価格が無い場合、その仮説は当該eventでは`ineligible`になる。欠損、未成熟、corporate action等による比較不能を失敗へ変換しない。
+
+入力不足は文字列メモではなく、仮説ごとに次のように保存する。
+
+```text
+eligible_for_hypothesis = false
+reason = required_pre_event_field_missing
+```
+
+reasonは発表前項目不足、発表後項目不足、期間未成熟、比較不能、既登録trialを区別する。旧`rank`や`judge`を現在の別項目から推測して補わない。
+
+## D1／D5／D20の段階追記
+
+同じeventは、観測が成熟するたびに新しいobservation versionを追加できる。
+
+```text
+D1 observation v1
+-> D5 observation v2, supersedes v1
+-> D20 observation v3, supersedes v2
+```
+
+最初の観測が既にD5まで成熟している場合は、D5をversion 1として開始してよい。その後はversionを1ずつ増やし、stageと`observed_through`を前へ進める。
+
+後続snapshotは累積形式で、以前のreturnを保持する。一度固定した次の値は変更・削除できない。
+
+- company、ticker、event quarter、event発生時刻
+- 発表前特徴のhash
+- 既に記録したreaction
+- 既に成熟したreturnの値、状態、観測時刻、source ID
+
+各仮説のtrial identityは `hypothesis_id + hypothesis_version + earnings_event_id + horizon` で一意にする。D20 snapshotへD5 returnが再掲されてもD5 trialは再作成せず、`trial_already_recorded`として残す。不正に同一trialを二重保存したbundleはstatus再計算時に拒否する。
+
+既存の`prospective_hypothesis_trial_bundle_v1`はappend-only研究履歴として読み取りとstatus再計算を継続する。新規出力はv2だけとし、v1と同じeventを後からv2の段階観測へ変換しない。v1の機械契約は`schemas/analysis/prospective_hypothesis_trial_bundle_v1.schema.json`へ固定する。
 
 ## 比較と判定
 
@@ -117,19 +151,23 @@ python3 -m earnings_research.cli verify-hypothesis-registry \
   --registry data/prospective_hypotheses/legacy_research_v1.json
 ```
 
-イベント完了後は、正規化済み観測からevent単位のtrial fileを新規作成する。同じeventの再追記と既存fileの上書きは拒否する。
+各stageの観測後は、正規化済み観測からevent・stage単位のtrial fileを新規作成する。同じ仮説・event・horizonのtrialと既存fileの上書きは拒否する。同じ実行で全trialからstatus snapshotも再計算する。
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
 python3 -m earnings_research.cli evaluate-hypothesis-event \
   --registry data/prospective_hypotheses/legacy_research_v1.json \
   --observation completed_event.json \
+  --dataset data/current_dataset \
+  --market-reaction outputs/market_reaction.json \
   --trials-dir data/prospective_hypothesis_trials \
   --recorded-at 2026-09-30T18:00:00+09:00 \
-  --output data/prospective_hypothesis_trials/EE-EXAMPLE.json
+  --evaluated-at 2026-09-30T18:00:00+09:00 \
+  --output data/prospective_hypothesis_trials/EE-EXAMPLE-D20.json \
+  --status-output outputs/prospective_hypotheses/status-20260930T180000.json
 ```
 
-状態は全trialから別fileへ再計算する。状態snapshotも既存pathを上書きしない。
+状態だけを再構築する場合は、全trialから別fileへ再計算できる。状態snapshotも既存pathを上書きしない。
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
