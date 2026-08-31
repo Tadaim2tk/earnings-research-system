@@ -111,11 +111,6 @@ def authoritative_dataset(tmp_path):
         if row["earnings_event_id"] == "EVT-ASTER-2026Q1":
             row["baseline_id"] = "BASE-ASTER-003"
         row.update({
-            # **D1/D5 と同じ起点にする。** milestone 側は
-            # `return_from_pre_event_close_pct` なので、D20 だけ `next_open` や
-            # VWAP 起点だと、同じ snapshot に定義の違う数字が並ぶ。見本データは
-            # `next_open` のままだったので、ここで揃える。
-            "return_reference_price_type": "previous_close",
             "open_gap_pct": "1.0",
             "day1_return_pct": "3.0",
             "day5_return_pct": "6.0",
@@ -1387,16 +1382,24 @@ def test_a_reaction_is_not_labelled_when_the_two_numbers_share_no_basis(market_r
 def test_a_d20_return_measured_from_another_price_is_refused(
     tmp_path, authoritative_dataset, market_reactions
 ):
-    """**同じ snapshot に定義の違う数字を並べない。** D1/D5 は前日終値起点なので、
-    D20 が寄り値や VWAP 起点だと、起点を選び直すだけで仮説の判定が変わる。
-    リポジトリの見本データ自体が `next_open` のままだった。"""
+    """**イベントが宣言した起点と食い違う値を受け入れない。**
+
+    起点を選び直すだけで仮説の判定が変わる。ただし「どの起点が正しいか」は
+    実装が決めることではない——`docs/RETURN_BASE_PRICE_POLICY.md` が発表
+    セッションごとに承認しており、`earnings_event.return_base_price_policy` が
+    イベント単位でそれを記録する。最初の実装は `previous_close` を無条件に
+    要求し、**決算の大半を占める `after_close`（承認済みは `next_open`）を
+    塞いでいた。**
+    """
+    # イベントは `next_open` を宣言している（after_close の承認済み方針）。
+    # そこに `vwap_after_announcement` を書けば食い違う。
     review_path = authoritative_dataset / "post_earnings_review_sample.csv"
     fields, rows = _read_csv(review_path)
     for row in rows:
         if row.get("day20_return_pct", "").strip():
-            row["return_reference_price_type"] = "next_open"
+            row["return_reference_price_type"] = "vwap_after_announcement"
     _write_csv(review_path, fields, rows)
-    with pytest.raises(ValueError, match="must be measured from previous_close"):
+    with pytest.raises(ValueError, match="but the event declares next_open"):
         evaluate_observation_file(
             cleared_registry(tmp_path), STAGED_D20, tmp_path / "basis-trials",
             tmp_path / "basis.json", datetime(2026, 10, 1, 18, tzinfo=JST),
@@ -1436,3 +1439,47 @@ def test_a_d20_return_written_too_soon_is_refused(
             tmp_path / "soon.json", datetime(2026, 10, 1, 18, tzinfo=JST),
             authoritative_dataset, market_reactions["aster"],
         )
+
+
+def test_an_event_already_carrying_a_reaction_can_still_be_extended(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**規則を厳しくした結果、既存のイベントが育てられなくなることを避ける。**
+
+    場中発表の反応は起点が揃わないので今後は導出しない。しかし旧実装の下で
+    書かれた D1 bundle には値が入っている。追記の連鎖は「確定した反応を変え
+    ない」ことを要求するので、導出できないことを理由に `None` を強いると、
+    **そのイベントは二度と D5・D20 へ育てられない。** 記録済みの値をそのまま
+    受け入れる。
+    """
+    from earnings_research.prospective_hypotheses import pipeline as P
+    from earnings_research.market_reaction.models import MarketReactionTracking
+
+    tracking = MarketReactionTracking.model_validate_json(
+        market_reactions["aster"].read_text(encoding="utf-8")
+    )
+    recorded = P._reaction_label(tracking)
+    assert recorded is not None
+
+    trials = tmp_path / "compat-trials"
+    registry = cleared_registry(tmp_path)
+    P.evaluate_observation_file(
+        registry, STAGED_D1, trials, trials / "d1.json",
+        datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"],
+    )
+    assert P._recorded_reaction(P.load_trial_bundles(trials), 
+                                CompletedEventObservation.model_validate_json(
+                                    STAGED_D1.read_text(encoding="utf-8"))) == recorded
+
+    # 起点が揃わなくなった後でも、記録済みの反応を保ったまま D5 を追記できる。
+    shifted = json.loads(market_reactions["aster"].read_text(encoding="utf-8"))
+    shifted["event_window_reaction"]["reference_role"] = "pre_announcement_reference"
+    shifted_path = tmp_path / "shifted-reaction.json"
+    shifted_path.write_text(json.dumps(shifted, ensure_ascii=False), encoding="utf-8")
+    assert P._reaction_label(MarketReactionTracking.model_validate(shifted)) is None
+
+    P.evaluate_observation_file(
+        registry, STAGED_D5, trials, trials / "d5.json",
+        datetime(2026, 9, 8, 18, tzinfo=JST), authoritative_dataset, shifted_path,
+    )
+    assert (trials / "d5.json").exists()

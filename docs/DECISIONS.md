@@ -2110,3 +2110,68 @@ Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.m
 trial identityへhorizonを含め、既存trialは再作成しない。累積snapshot内の既登録期間は`trial_already_recorded`、必要な発表前項目が無い場合は`required_pre_event_field_missing`として明示する。期間未成熟、比較不能、発表後項目不足も別reasonで記録し、いずれも失敗や母数へ入れない。event評価CLIは新trialの追記と全trialからのstatus再計算を一度に行う。
 
 Consequences: D1からD5、D20へ同じeventを安全に育てられる。最初の観測がD5またはD20でもversion 1として開始できる。一度記録したtrial、return、発表前情報は変更できず、旧分類項目が無い仮説は永続的に母数外でもその理由が残る。既存v1 trial bundleはread-only互換readerと固定schemaでstatus再計算へ残し、新規出力だけをv2にする。supported後のproduction rule昇格、weight、rank、売買ルールの自動変更は引き続き行わない。
+
+## ERS-ADR-0078
+
+Date: 2026-08-31
+
+Status: Accepted
+
+Approval: PR #56 の Codex レビューが未返信のまま残していたP1指摘3件（起点の不一致、
+D20の起点、D20の成熟）に対する修正を、PR #79 として入れ直す過程で確定した方針を
+記録する。#56 は指摘の修正が push される前に自動マージされたため、main には3件が
+そのまま入っていた。
+
+Note: 番号は0078。0074は #56 が main へ入れた分、0075は PR #78、0076は本PRでの
+#56分の採番し直し、0077は PR #77 が使う。
+
+Context: 3件とも「別々の起点で測った数字を、同じものとして並べていた」形だった。
+
+第一に、`_reaction_label` が直後の反応（`event_window_reaction.return_pct`）と
+翌営業日（`return_from_pre_event_close_pct`）を直接比べていた。前者は場中発表だと
+発表直前価格を起点にすることがあり、後者は常に前日終値起点である。前日終値100・
+発表直前120・直後126・翌日終値110の場合、直後は「発表直前から+5%」、翌日は
+「前日終値から+10%」となり、**急落しているのに `GU継続` が付く**。
+
+第二に、D20 は `return_reference_price_type` を見ずに値を受け入れていた。起点を
+選び直すだけで仮説の判定が変わる。
+
+第三に、`recorded_at`（この review を書いた時刻）を D20 の観測時刻として扱って
+おり、発表翌日に書かれた review でも `day20_return_pct` を埋められた。それが
+訂正できない trial になって status を動かす。
+
+**最初の修正は第二点を取り違えていた。** `previous_close` を無条件に要求したが、
+`docs/RETURN_BASE_PRICE_POLICY.md` の承認済み方針は発表セッションごとに違う
+（before_open は `previous_close`、intraday は `pre_announcement_price`、
+after_close は `next_open`）。決算の大半を占める after_close を、承認済み方針ごと
+塞いでいた。レビューの再指摘で判明した。**方針文書を読まずに定数を置いたのが
+誤りである。**
+
+Decision:
+
+1. `_reaction_label` は `event_window_reaction.reference_role` が
+   `pre_event_close` でなければ `None` を返す。起点を推測して揃えない——揃え方を
+   1つ選ぶと、その選択が判定に入り込む。
+
+2. D20 の `return_reference_price_type` は、**イベントが宣言した
+   `earnings_event.return_base_price_policy` と一致していなければならない**。
+   実装側に定数を持たない。起点が宣言されていない、あるいは `unknown` の場合は
+   拒む。
+
+3. D20 の成熟は下限だけを見る。20営業日は暦で26日を下回らない（週7日に取引は
+   最大5日）。**これは「20営業日が経った証明」ではない。** 取引カレンダーを
+   この層に持ち込まない代わりに「明らかに早すぎるものを弾く」検査として置く。
+   本筋は market_reaction 側に D20 の milestone を足すことで、それは別PRとする。
+
+4. 導出できない反応が、既に記録された反応を上書きしない。旧実装の下で書かれた
+   D1 bundle には場中発表でも値が入っている。追記の連鎖は「確定した反応を変え
+   ない」ことを要求するので、導出できないことを理由に `None` を強いると
+   **そのイベントは二度と D5・D20 へ育てられない**。記録済みの値を受け入れ、
+   新しいイベントにだけ厳しい規則を効かせる。
+
+Consequences: 場中発表のイベントは、今後 `reaction` を持たない観測として記録
+される。既存のイベントは記録済みの反応を保ったまま育つ。D20 は宣言された起点
+以外を受け付けないので、`data/samples/post_earnings_review_sample.csv` の
+`next_open`（after_close の承認済み方針）はそのまま通る。26日の下限は近似で
+あり、休場が多い期間では20営業日に届かない値を通しうる——カレンダーが入ったら
+差し替えること。
