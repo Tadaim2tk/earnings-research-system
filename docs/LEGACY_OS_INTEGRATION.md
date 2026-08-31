@@ -207,7 +207,11 @@ legacy dataset向けに次の集計を再現する。
 
 1. TSO側のsource commit、row hash、recorded time、mapping versionを確認する。
 2. `code`を銘柄identityへ解決する。
-3. event時刻が未確認の行では、event当日値を使わず、発表日前までに確定したpoint-in-time snapshotだけを候補にする。
+3. event時刻が未確認の行では、**東証の寄り付き(09:00 JST)より前に確定した** point-in-time snapshot だけを候補にする。`usable_from_utc <= decision_cutoff_utc <= 09:00 JST` の連鎖で強制する。
+
+   **2026-08-29 に規則を変更した(ERS-ADR-0056)。** それ以前は「発表日前までに確定した snapshot」だったが、committed 254件の実測は **234件が発表日当日**の 07:00〜08:17 JST 確定で、この規則を満たすのは20件だけである。規則とデータは最初から一致していなかった。実装(`cutoff.date() >= event_date`)は不一致を報告する代わりに移行を全件ブロックし、レポートは数週間再生成できないまま古い数字を載せ続けた。
+
+   **この緩和が引き受けたリスク:** 寄り付き前(08:17 JST以前)の開示があった場合、そのイベントの snapshot は開示後の情報を含み得る。旧recordに発表時刻が無い以上、行ごとの検証はできない。snapshot は個別銘柄ではなく市場全体の risk-on/risk-off スコアなので影響は小さいと考えられるが、**これは測定ではなく推測である**。発表時刻を持つ行が得られれば、その行はより厳しい規則で判定できる。
 4. sourceとcutoffを満たす行だけ`legacy_context_link`として別保存する。
 5. join不能、複数候補、時刻不足は`not_linked`として残す。
 

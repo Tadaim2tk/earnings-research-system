@@ -1,0 +1,273 @@
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
+
+from earnings_research.statistics.holdout import (
+    MIN_FOR_RESERVE,
+    HoldoutViolation,
+    evaluate_reserved,
+    split_by_date,
+)
+from earnings_research.statistics.stability import assess
+
+JST = timezone(timedelta(hours=9))
+
+
+def records(count, start=date(2026, 1, 1), value=0.01):
+    return [
+        {"date": (start + timedelta(days=index)).isoformat(), "code": "A%d" % index, "v": value}
+        for index in range(count)
+    ]
+
+
+def test_the_recent_third_is_held_back():
+    split = split_by_date(records(30))
+    assert len(split.reserved) == 10
+    assert len(split.exploration) == 20
+    assert split.cutoff == date(2026, 1, 21)
+
+
+def test_the_reserved_records_are_the_later_ones():
+    split = split_by_date(records(30))
+    assert max(r["date"] for r in split.exploration) < min(r["date"] for r in split.reserved)
+
+
+@pytest.mark.parametrize("count", [0, 1, MIN_FOR_RESERVE - 1])
+def test_too_short_a_record_reserves_nothing_rather_than_emptying_itself(count):
+    split = split_by_date(records(count))
+    assert split.cutoff is None
+    assert len(split.exploration) == count
+    assert split.reserved == []
+
+
+def test_a_record_with_no_usable_date_stays_in_exploration():
+    """Undated rows cannot be placed after a cutoff, so they never leak in."""
+    rows = records(20) + [{"date": "", "code": "X"}, {"date": "not-a-date", "code": "Y"}]
+    split = split_by_date(rows)
+    assert {"X", "Y"} <= {row["code"] for row in split.exploration}
+    assert all(row["date"] for row in split.reserved)
+
+
+@pytest.mark.parametrize("reserve", [0, 1, -0.5, 1.5])
+def test_an_impossible_reserve_is_refused(reserve):
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        split_by_date(records(30), reserve=reserve)
+
+
+def test_the_reserved_period_answers_only_to_a_definition_frozen_before_it():
+    split = split_by_date(records(30))
+    before = datetime(2026, 1, 10, tzinfo=JST)
+    assert evaluate_reserved(split, before, len) == 10
+
+
+@pytest.mark.parametrize("day", [date(2026, 1, 21), date(2026, 2, 1)])
+def test_a_definition_frozen_after_the_cutoff_has_already_seen_the_answer(day):
+    split = split_by_date(records(30))
+    with pytest.raises(HoldoutViolation, match="frozen"):
+        evaluate_reserved(split, day, len)
+
+
+def test_nothing_reserved_means_nothing_to_confirm_against():
+    split = split_by_date(records(3))
+    with pytest.raises(HoldoutViolation, match="nothing is reserved"):
+        evaluate_reserved(split, date(2020, 1, 1), len)
+
+
+# --- 前半後半の一致 -----------------------------------------------------------
+
+def dated(values, start=date(2026, 1, 1)):
+    return [
+        {"date": (start + timedelta(days=index)).isoformat(), "code": "A%d" % index, "v": value}
+        for index, value in enumerate(values)
+    ]
+
+
+def value_of(row):
+    return row.get("v")
+
+
+def test_a_relationship_present_throughout_is_consistent():
+    result = assess(dated([0.02] * 20), value_of)
+    assert result.verdict == "consistent"
+    assert result.first.median > 0 and result.second.median > 0
+
+
+def test_a_relationship_that_only_worked_early_is_named():
+    """Decay and luck both leave this shape."""
+    result = assess(dated([0.05] * 10 + [-0.05] * 10), value_of)
+    assert result.verdict == "reversed"
+    assert result.first.median > 0 > result.second.median
+
+
+def test_the_halves_are_split_by_date_not_by_position():
+    shuffled = dated([0.05] * 10 + [-0.05] * 10)
+    result = assess(list(reversed(shuffled)), value_of)
+    assert result.verdict == "reversed"
+    assert result.boundary == date(2026, 1, 11)
+
+
+@pytest.mark.parametrize("count", [0, 4, 9])
+def test_too_few_observations_to_split_says_so(count):
+    assert assess(dated([0.01] * count), value_of).verdict == "too_short"
+
+
+def test_rows_without_an_outcome_are_not_counted():
+    rows = dated([0.02] * 20) + [{"date": "2026-03-01", "code": "Z", "v": None}]
+    assert assess(rows, value_of).first.n + assess(rows, value_of).second.n == 20
+
+
+def test_repeated_names_are_carried_into_each_half():
+    rows = dated([0.02] * 20)
+    for row in rows:
+        row["code"] = "SAME"
+    result = assess(rows, value_of, cluster_of=lambda row: row["code"])
+    assert result.first.n_independent == 1
+
+
+def test_a_sign_difference_neither_half_can_support_is_not_a_reversal():
+    """The condition that keeps a chance sign flip from retiring a hypothesis.
+
+    Split a record with no effect in two and the halves disagree about half the
+    time. Both halves here straddle zero, so neither is claiming a direction and
+    there is nothing to have reversed.
+    """
+    noisy = [-0.05, -0.04, -0.03, -0.02, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+    result = assess(dated(noisy + [-value for value in noisy]), value_of)
+    assert (result.first.median > 0) != (result.second.median > 0)
+    assert result.first.median_interval.excludes_zero() is False
+    assert result.verdict == "inconclusive"
+
+
+def test_a_reversal_needs_both_halves_to_exclude_zero():
+    result = assess(dated([0.05] * 10 + [-0.05] * 10), value_of)
+    assert result.verdict == "reversed"
+    assert result.as_dict()["halves_exclude_zero"] == [True, True]
+
+
+def test_one_half_speaking_alone_is_not_enough():
+    """Half asserting a direction against a half that cannot is inconclusive."""
+    quiet = [0.05, 0.04, 0.03, 0.02, -0.01, -0.02, -0.03, -0.04, -0.05, -0.06]
+    result = assess(dated([0.05] * 10 + quiet), value_of)
+    assert result.first.median_interval.excludes_zero() is True
+    assert result.second.median_interval.excludes_zero() is False
+    assert result.verdict == "inconclusive"
+
+
+def test_a_half_sitting_exactly_on_zero_is_flat_not_reversed():
+    result = assess(dated([0.05] * 10 + [-0.02, 0.02] * 5), value_of)
+    assert result.second.median == 0
+    assert result.verdict == "flat"
+
+
+def test_the_evidence_behind_the_verdict_is_reported():
+    result = assess(dated([0.05] * 10 + [-0.05] * 10), value_of)
+    payload = result.as_dict()
+    assert payload["first_half"]["median_interval"]["low"] is not None
+    assert payload["second_half"]["median_interval"]["high"] is not None
+    assert payload["halves_exclude_zero"] == [True, True]
+
+
+def test_a_season_landing_on_one_day_reserves_nothing_rather_than_everything():
+    """Ties reach past the cut index, so the cut index is not the cut.
+
+    Left alone this reserves every dated row and runs the statistics on the
+    undated remainder while still reporting a chronological split.
+    """
+    split = split_by_date([{"date": "2026-02-13", "v": 0.01} for _ in range(30)])
+    assert split.cutoff is None
+    assert len(split.exploration) == 30
+    assert split.reserved == []
+    assert "no earlier period" in split.reason
+
+
+def test_a_cutoff_that_would_reserve_too_little_is_refused():
+    """A reserve too small to report from is not a reserve, it is a gap."""
+    split = split_by_date(records(20), reserve=0.05)
+    assert split.cutoff is None
+    assert "below the" in split.reason
+    assert len(split.exploration) == 20
+
+
+def test_undated_rows_are_counted_where_the_split_is_reported():
+    split = split_by_date(records(24) + [{"date": "", "v": 0.01}] * 6)
+    assert split.as_dict()["undated_count"] == 6
+    assert split.as_dict()["exploration_count"] == 22
+
+
+def test_a_datetime_is_narrowed_to_its_day():
+    """date is a superclass of datetime, so an unnarrowed value compares badly."""
+    rows = [{"date": datetime(2026, 1, 1, 15, 0, tzinfo=JST) + timedelta(days=n), "v": 0.01} for n in range(30)]
+    split = split_by_date(rows)
+    assert split.cutoff == date(2026, 1, 21)
+    assert len(split.reserved) == 10
+
+
+def test_a_freeze_date_written_as_text_is_read():
+    split = split_by_date(records(30))
+    assert evaluate_reserved(split, "2025-12-01", len) == 10
+
+
+def test_an_unreadable_freeze_date_is_refused_rather_than_assumed():
+    split = split_by_date(records(30))
+    with pytest.raises(HoldoutViolation):
+        evaluate_reserved(split, "sometime last year", len)
+
+
+def test_the_verdict_does_not_depend_on_the_order_the_rows_arrived_in():
+    """A whole earnings season lands on one day, and cutting at the position
+    left that day on both sides. Shuffling twenty-four same-day rows gave
+    reversed 573 times out of 2000 and inconclusive 1425 — the answer was the
+    CSV's sort order, and it decides whether a hypothesis is retired."""
+    rows = [
+        {"date": "2026-02-13", "code": "T%d" % index, "v": 0.05 if index < 12 else -0.05}
+        for index in range(24)
+    ]
+    verdicts = set()
+    for offset in range(len(rows)):
+        verdicts.add(assess(rows[offset:] + rows[:offset], value_of).verdict)
+    assert verdicts == {"too_short"}
+
+
+def test_a_reversal_across_two_real_dates_is_still_found():
+    """The control: snapping to the date boundary must not disarm the check."""
+    rows = [
+        {"date": "2026-02-13" if index < 12 else "2026-03-13",
+         "code": "T%d" % index, "v": 0.05 if index < 12 else -0.05}
+        for index in range(24)
+    ]
+    assert assess(rows, value_of).verdict == "reversed"
+
+
+def test_one_company_appearing_often_cannot_reverse_on_its_own():
+    """Twelve rows of one name were twelve independent trials to the interval,
+    so a single company's twelve quarters could retire a hypothesis while the
+    sign test on the same summary said p=1.0."""
+    rows = [
+        {"date": "2026-%02d-01" % (month + 1), "code": "SAME",
+         "v": 0.05 if month < 6 else -0.05}
+        for month in range(12)
+    ]
+    result = assess(rows, value_of, cluster_of=lambda row: row["code"])
+    assert result.first.n_independent == 1
+    assert result.verdict == "inconclusive"
+
+
+@pytest.mark.parametrize("count", [10, 11])
+def test_a_record_too_short_to_reverse_says_so_rather_than_pretending(count):
+    """A half of five can never produce a median interval at 95%, so below
+    twelve the answer was fixed before the data was read."""
+    rows = dated([0.05] * (count // 2) + [-0.05] * (count - count // 2))
+    result = assess(rows, value_of)
+    assert result.verdict == "too_short"
+    assert result.as_dict()["first_half"] is None
+    assert result.as_dict()["boundary"] is None
+    assert result.as_dict()["halves_exclude_zero"] == [None, None]
+
+
+def test_an_odd_number_of_records_splits_where_it_says_it_does():
+    """Moving the middle row to the other half changed both medians and the
+    boundary, and 55% of the real cells have an odd count."""
+    rows = dated([0.02] * 21)
+    result = assess(rows, value_of)
+    assert (result.first.n, result.second.n) == (10, 11)
+    assert result.boundary == date(2026, 1, 11)

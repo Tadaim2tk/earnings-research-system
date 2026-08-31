@@ -10,10 +10,12 @@ import shutil
 import subprocess
 import tempfile
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+
+from .labels import fold_signs
 
 DATASET_ORIGIN = "earnings-research-os"
 RECORD_MODE = "legacy_observational"
@@ -95,7 +97,7 @@ def _choice(value: str, allowed):
 
 
 def _surprise(value: str):
-    normalized = (value or "").strip().translate(str.maketrans({"＋": "+", "−": "-", "–": "-", "‑": "-"}))
+    normalized = fold_signs(value)
     if normalized in ("1", "2"):
         normalized = "+" + normalized
     return normalized if normalized in SURPRISES else None
@@ -261,8 +263,13 @@ def build_context_views(records, link_bytes: bytes, context_bytes: bytes):
             raise ValueError("TSO link usable-from timestamp does not match its context snapshot")
         cutoff = _utc_datetime(link["decision_cutoff_utc"])
         event_date = date.fromisoformat(raw["date"])
-        if cutoff.date() >= event_date:
-            raise ValueError("TSO decision cutoff is not anchored to a prior legacy event date")
+        opening = _market_open_utc(event_date)
+        if cutoff > opening:
+            raise ValueError(
+                "TSO decision cutoff %s is after the market opened on %s, so the "
+                "context it selects can already contain the reaction"
+                % (link["decision_cutoff_utc"], raw["date"])
+            )
         usable = _utc_datetime(context["usable_from_utc"])
         if usable > cutoff:
             raise ValueError("TSO context became usable after the legacy decision cutoff")
@@ -285,6 +292,36 @@ def build_context_views(records, link_bytes: bytes, context_bytes: bytes):
             "market_context": context,
         })
     return views, links, contexts
+
+
+JST = timezone(timedelta(hours=9))
+
+
+def _market_open_utc(event_date: date) -> datetime:
+    """09:00 JST on the event date — the first moment a Tokyo price can move.
+
+    What this establishes, with the `usable <= cutoff` check beside it, is a
+    chain: the context snapshot was usable before the cutoff, and the cutoff is
+    at or before the open. So no snapshot reaching these views contains a
+    single tick of the session the event falls in.
+
+    That is narrower than it first appears, and the difference matters. An
+    earlier draft of this justified the rule by saying earnings are disclosed
+    after the 15:00 JST close. The record cannot support that: `records.csv`
+    has 29 columns and none of them is an announcement time, and the evidence
+    actually available — that the analyst's labels were committed after 15:00 —
+    says when a person wrote them down, not when a company disclosed. A
+    disclosure before 08:17 JST would not be excluded by anything here.
+
+    LEGACY_OS_INTEGRATION.md chose a stricter proxy for exactly that reason:
+    with the time unverified, use no event-day snapshot at all. Measured
+    against the committed links, 234 of 254 are event-day, fixed between 07:00
+    and 08:17 JST — so that rule and this data have never agreed, and the
+    calendar-day check that enforced it blocked the migration outright rather
+    than reporting the disagreement. The rule is relaxed to the open here, and
+    the doc says so and says what it costs; it is not relaxed quietly.
+    """
+    return datetime.combine(event_date, time(9, 0), tzinfo=JST).astimezone(timezone.utc)
 
 
 def _utc_datetime(value: str) -> datetime:

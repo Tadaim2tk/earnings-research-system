@@ -2,7 +2,7 @@
 
 ## 目的と調査境界
 
-日本株の決算後return検証に必要なdaily OHLC、minute bar、corporate action、announcement timestampの候補を比較する。本書は2026-07-23時点の公開情報による一次調査であり、契約、account作成、API接続、有料申込み、scrapingは行っていない。
+日本株の決算後return検証に必要なdaily OHLC、minute bar、corporate action、announcement timestampの候補を比較する。2026-08-29 に Evidence（開示本文）と Population（当日の決算発表企業一覧）の節を追加した — 本文は著作物であり、価格の数値とは保存・再利用の判断が違う。本書は2026-07-23時点の公開情報による一次調査であり、契約、account作成、API接続、有料申込み、scrapingは行っていない。
 
 価格データを技術的に取得できることと、ERSへ保存・再利用できることは別問題である。`storage_allowed` や `redistribution_allowed` が公開情報だけで確定しない場合は、利用規約またはproviderへの問い合わせ完了まで `unknown` とする。
 
@@ -20,6 +20,159 @@
 | `Monex Trader chart` | third-party market data via broker | yes / display | yes / display | official tablet pageは最大200 bars。長期保持は不明 | unknown | medium。画面上の1-minute OHLCをTDnet時刻と手動照合 | manual | yes / brokerage account | tool is shown as free; account条件あり | yes | unknown | unknown | API/export前提ではない。表示期間・corporate action・licenseが研究DB要件を満たすか不明 | audit付き `manual reference price` のfallbackのみ | manual_fallback_pending_terms |
 | `JPX FLEX Historical` | official / JPXI | daily market information plus tick-derived OHLC | tick data。minuteは利用者側集計 | last 30 days / all-period / specified one-month spot。data since 2011 | no automatic adjusted series confirmed。base/issue informationとの別処理が必要 | high。exchange timestamp付きtick | Web API / S3 files | yes / contract | regular single entity JPY 100,000 monthly; all-period JPY 300,000 monthly, tax excluded | yes | internal use under contract | no unless separately approved | PCAP中心で大容量。個人pilotには費用・処理とも過剰 | 将来、tick-level再現性が必須になった場合のみ再検討 | deferred_overkill |
 | `J-Quants Pro` | official / JPXI | yes | minute/tickは個別dataset・契約確認要 | daily OHLC since 2008-05-07 | yes。unadjusted/adjusted/factor | high。TDnet/Snowflake等の法人向けdataと連携可能 | API / SFTP / Snowflake | yes / corporate contract | dataset別見積り | yes | internal use under license | no unless approved external-distribution contract | corporate users only。現在の個人pilotには不適合 | ERSが法人運用へ移行した場合の将来候補 | deferred_corporate_only |
+
+## Evidence / Population 取得元レビュー
+
+2026-08-29 追加。上の表は価格データ用で、Evidence（決算短信・適時開示の本文）と
+Population（その日の決算発表企業一覧）には別の観点が要る。本文は著作物であり、
+価格の数値とは保存・再利用の判断が違う。
+
+**本節は候補の比較であって、採用の記録ではない。** 上と同じ方法論に従い、公開情報
+だけで書く。契約・account作成・API接続・scrapingは行っていない。公開情報だけで
+確定しない欄は `unknown` とし、推測で埋めない。`unknown` のまま残っている欄がある
+限り、その候補からの自動取得は開始しない。
+
+### 判断すべき8項目
+
+| 項目 | 何を確かめるか | 埋まらないと何が起きるか |
+| --- | --- | --- |
+| `automated_access_permitted` | 利用条件が自動取得を許すか。明示の禁止・許可・沈黙のどれか | `AGENTS.md` の source terms 確認を満たさない |
+| `robots_and_rate_limit` | robots.txt の記述、公表されている頻度制限、API の有無 | 許可されていても迷惑をかける取得になる |
+| `availability_window` | 当日分・過去分がそれぞれいつまで参照できるか | 「今日取らないと失われる」が本当か判断できない |
+| `content_storage_allowed` | **本文**を保存してよいか。metadata・URLだけに制約があるか | Evidence Bundle の `content` を持てるかが決まらない |
+| `primary_source_authority` | 一次資料としての正本性。発行者自身か、転載か | primary と fallback の区別が付かない |
+| `published_at_fidelity` | 開示時刻をどこまで正確に取れるか。分単位か、日付だけか | Timing Provenance の `timing_class` が決まらない |
+| `refetchable_later` | 同一イベントを将来また取得できるか | 取り直しが効くのか、一度きりなのかで運用が変わる |
+| `fallback_allowed` | 取得失敗時に別sourceで代替してよいか | 代替を primary と同一扱いする事故が起きる |
+
+### 用途を分けて承認する
+
+**同じsourceでも用途によって利用条件が違い得る。** 「企業一覧を読む」ことと「本文を
+自動取得して恒久保存する」ことは別の許諾であり、`approved` を source 単位の1ビットに
+すると片方の承認がもう片方を通してしまう。用途は3つ:
+
+| 用途 | 何をするか |
+| --- | --- |
+| `population_discovery` | その日の決算発表企業一覧を読み、母集団を確定する |
+| `evidence_capture` | 開示本文を自動取得し、恒久保存する |
+| `timing_provenance` | 発表時刻を読み取り、`announced_at` の出所にする |
+
+承認は `(source, 用途)` の組ごとに与える。**未定義のstatusは承認ではない** — `approved`
+だけが承認であり、綴り違いや新語や注釈付きの値は通さない。
+
+`approved_candidate` は承認ではない。技術・利用条件の上では第一候補だが、**契約・課金の
+判断が残っている**という意味であり、捕捉を解禁しない。
+
+### 保存先の制約（2026-08-29 追加）
+
+**このリポジトリは public である。** TDnet API の利用条件は、自分の分析用途での自動
+取得・蓄積を利用例として挙げる一方、第三者への再配信や、JPXと同様のサービスになる
+第三者向け自動蓄積環境の提供を認めていない。
+
+したがって **`content` を public repository にコミットする現行の Evidence Bundle 設計は、
+契約しても使えない** — 保存した瞬間に再配信になる。ERS-ADR-0060 で `data/evidence/` を
+committed artifact として設計したのは、この制約を確認する前だった。
+
+分ける:
+
+| 置き場所 | 何を置くか |
+| --- | --- |
+| **private store**（repository外） | `content` そのもの |
+| **public repository** | `content_sha256`、URL、取得時刻、`capture_status`、provenance |
+| **外部成果物**（note等） | 派生した分析、引用可能範囲、provenance のみ。原文は出さない |
+
+公開側に残る hash と provenance だけで、**同じ本文を読み直したときに同一であることは
+証明できる**。本文そのものを公開する必要はない。この分離は adapter 実装より前に決める
+必要がある — 後から分けると、一度公開した本文は取り消せない。
+
+### 候補
+
+| source | 用途 | official | automated_access_permitted | robots_and_rate_limit | availability_window | content_storage_allowed | primary_source_authority | published_at_fidelity | refetchable_later | fallback_allowed | review_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `TDnet API`（契約型） | `population_discovery` | official / JPX | yes。約款に従う前提。**契約・課金の判断が残る** | API。公開Web巡回ではない | 5年間 | not_applicable。一覧の読み取りに本文保存は伴わない | highest | 開示日・開示時刻を含むインデックス情報 | yes。5年以内 | — | `approved_candidate` |
+| `TDnet API`（契約型） | `evidence_capture` | official / JPX | yes。自分の分析用途での自動取得・蓄積は利用例として明示 | API | 5年間 | **internal のみ。第三者への再配信・第三者向け自動蓄積環境の提供は不可** | highest。開示資料そのもの | not_applicable | yes。5年以内 | — | `approved_candidate` |
+| `TDnet API`（契約型） | `timing_provenance` | official / JPX | yes | API | 5年間 | not_applicable。時刻だけを読む | highest。法的な公表時刻 | **開示時刻がインデックス情報に含まれる** | yes | — | `approved_candidate` |
+| `公開TDnet適時開示情報閲覧サービス`（スクレイピング） | `population_discovery` | official / JPX | **no。自動利用には正規APIが別途提供されている** | 公開Web巡回は採用しない | 31日 | no | highest | not_applicable | 31日を過ぎると不可 | — | `not_approved` |
+| `公開TDnet適時開示情報閲覧サービス`（スクレイピング） | `evidence_capture` | official / JPX | **no。自動利用には正規APIが別途提供されている** | 公開Web巡回は採用しない | 31日 | no | highest | not_applicable | 31日を過ぎると不可 | — | `not_approved` |
+| `公開TDnet適時開示情報閲覧サービス`（スクレイピング） | `timing_provenance` | official / JPX | **no。自動利用には正規APIが別途提供されている** | 公開Web巡回は採用しない | 31日 | no | highest | high | 31日を過ぎると不可 | — | `not_approved` |
+| `会社公式IRページ` | `evidence_capture` | official / 発行会社 | unknown。**会社ごとに異なるため包括承認はしない** | unknown。会社ごと | unknown。掲載期間の統一規則は無い | unknown。個社ごと | high | not_applicable | unknown | fallback候補 | `pending_per_site_review` |
+| `会社公式IRページ` | `timing_provenance` | official / 発行会社 | unknown | unknown | unknown | not_applicable | high | **低。掲載はTDnet開示後に行われ、法的な公表時刻と一致しない** | unknown | **corroboration のみ。primary にしない** | `corroboration_only` |
+| `J-Quants API`（個人向け） | `population_discovery` | official / JPXI | unknown。TDnet Document Data や決算発表予定日を含むが、**取得データの配布・分析結果の継続的な第三者提供に制約がある** | API | unknown | unknown | high | unknown | unknown | — | `pending_terms_review` |
+
+**どの組も `approved` ではない。** `approved_candidate` は技術・利用条件の上での第一候補
+という意味であり、契約・課金の判断が残っているため捕捉を解禁しない。`data/evidence/` は
+0件のままである。
+
+**次にやるべきことは adapter 実装ではない。** TDnet API の現在の料金・契約プランを確認し、
+このERSの規模で採用する価値があるかを判断する。採用するなら3用途を `approved` へ変更し、
+併せて上の保存先の分離を実装してから adapter へ進む。
+
+### 役割の分離
+
+```
+Population source   その日の決算発表企業一覧
+Primary evidence    開示の一次資料
+Fallback evidence   primary が取れなかったときの代替
+```
+
+**fallback で取れた資料を primary と同一扱いしない。** `EvidenceBundle` は既に
+`source_type` と `discovery_method` を持つので、モデル側の変更は要らない。本レビュー
+で `source_type` の値域を確定させれば足りる。
+
+なお上の「暫定推奨」2項は announcement occurrence について「会社公式IRをprimary候補、
+TDnetをsecondary候補」としている。**これは開示が起きた事実の確認元の話であり、本節の
+Evidence（本文）の primary/fallback とは別の問題**なので、矛盾ではない。ただし両者が
+別々に決まると混乱するため、Timing Provenance の設計時にどちらを使うか明示する。
+
+### 決定（2026-08-29）
+
+| source | 用途 | 判断 |
+| --- | --- | --- |
+| TDnet API（契約型） | 3用途すべて | `approved_candidate` — 技術・利用条件の上では第一候補。**契約・課金の判断が残る** |
+| 公開TDnet閲覧サービスのスクレイピング | 全用途 | `not_approved` — 自動利用には正規APIが別途ある |
+| 会社公式IR | `evidence_capture` | `pending_per_site_review` — 会社ごとに条件が違うため包括承認しない |
+| 会社公式IR | `timing_provenance` | `corroboration_only` — 掲載はTDnet開示後で、法的な公表時刻と一致しない |
+| J-Quants API（個人向け） | `population_discovery` | `pending_terms_review` — 配布・第三者提供の制約を契約条件まで詰める必要がある |
+
+**Timing Provenance の primary は TDnet の開示時刻とする。** 会社IRの掲載日時から推定
+しない。TDnet API のインデックス情報は開示日と開示時刻を含む。
+
+### 参照した公開情報（2026-08-29 取得）
+
+判断の根拠を後から再現できるように、読んだページと取得日を残す。**利用条件は改定される**ので、
+昇格の前にこの表を取り直す。
+
+| source | 参照 | 取得日 | そこから読み取ったこと |
+| --- | --- | --- | --- |
+| TDnet API | JPX 適時開示情報配信サービス（TDnet）の公式案内および API 利用に関する規定 | 2026-08-29 | 開示日・**開示時刻**・銘柄コード・表題を含むインデックス情報と開示資料の取得。利用例として自分の分析用途での自動取得・蓄積が挙げられている。第三者への再配信、およびJPXと同様のサービスとなる第三者向け自動蓄積環境の提供は認められていない。取得可能期間は5年間 |
+| 公開TDnet適時開示情報閲覧サービス | JPX 適時開示情報閲覧サービス | 2026-08-29 | 掲載期間31日。自動利用向けには別途API が提供されている |
+| J-Quants プラン | `https://jpx-jquants.com/#plan` | 2026-08-29 | **Free ¥0 / 直近12週間を除く2年間**。含む: 上場銘柄情報・株価四本値(日次)・**財務情報（サマリーのみ）**・**決算発表予定日**・取引カレンダー。**TDnet/開示書類は含まず**、月額 ¥11,000 のアドオン。Light ¥1,650 / Standard ¥3,300 / Premium ¥16,500 |
+| J-Quants 財務情報 | `https://jpx-jquants.com/ja/spec/fin-details`、`/fins/statements` リファレンス | 2026-08-29 | レスポンスに **`DisclosedDate` / `DisclosedTime`**（v2 では `DiscDate` / `DiscTime`）。`DisclosedTime` は `"12:00:00"` 形式。**プラン別の項目可否は公開ページに記載が無く `unknown`** |
+| J-Quants 認証 | J-Quants ダッシュボードの API Keys 画面 | 2026-08-29 | **API Key 方式**。以前想定していた refresh token / ID token の2段階ではない |
+
+**この表を根拠に `approved` へ昇格させる前に、同じページを取り直して差分を確認する。**
+
+### 未確定のまま残っていること
+
+**Free の「財務情報（サマリーのみ）」に `DisclosedTime` が含まれるか。** プラン別の項目一覧が
+公開されていないため、公開情報だけでは確定できない。1回のAPI呼び出しで判明する。
+
+これが含まれるなら、**費用ゼロで timing provenance が成立する** — ただし12週間の遅延が付く。
+254件（2026-06-10〜08-25）はすべて直近12週間の中にあるため今は1件も取れず、**2026-09-02 から
+順に入り、2026-11-17 に全件が揃う**。
+
+含まれないなら、無料で取れるのは「決算発表予定日」だけになる。**予定は確認ではない** —
+事前に読んだ予定表を開示の確認に使うことは `EventTiming` の
+`source_observed_at >= announced_at` が拒否する（ERS-ADR-0062）。その場合、timing provenance に
+無料の道は無い。
+
+### この節が埋まるまでにしないこと
+
+- 候補からの自動取得
+- 本文の保存
+- capture adapter の実装
+
+`data/evidence/` は0件のままにする。
 
 ## 暫定推奨
 

@@ -8,7 +8,14 @@ from datetime import date
 from pathlib import Path
 
 from .importer import build_import, write_atomic_tree
-from .publishing import build_reports, write_reports
+from .publishing import (
+    ENTRY_MANIFEST,
+    ENTRY_PRICES,
+    build_reports,
+    reporting_date,
+    with_entry_prices,
+    write_reports,
+)
 
 
 def migrate_legacy_os(
@@ -21,11 +28,29 @@ def migrate_legacy_os(
     reports_output: Path,
     migration_recorded_at: str,
     as_of_date: date,
+    entry_prices: Path = ENTRY_PRICES,
+    entry_manifest: Path = ENTRY_MANIFEST,
 ):
     files, manifest, records, context_views = build_import(
         source_repo, source_commit, source_run_id, tso_repo, tso_commit, migration_recorded_at
     )
-    raw_rows = [record["raw_record"] for record in records]
+    raw_rows = with_entry_prices(
+        [record["raw_record"] for record in records], entry_prices, entry_manifest
+    )
+    # The reports produced here are verified afterwards against the same
+    # reports rebuilt from the committed migration, and that rebuild derives
+    # its as-of from the record. A caller supplying a different one produced
+    # files that failed their own verification on the next run, and rebuilding
+    # them moved the weekly reporting window without saying so. Refused rather
+    # than quietly overridden: the caller stated a date, and being told it
+    # disagrees with the record is more use than having it replaced.
+    derived = reporting_date(raw_rows)
+    if as_of_date != derived:
+        raise ValueError(
+            "--as-of-date %s does not match the last day the record covers (%s); "
+            "the published reports are verified against a date derived from the "
+            "record, so the two have to agree" % (as_of_date, derived)
+        )
     source_outputs, reports, parity = build_reports(
         Path(source_repo), manifest["frozen_source_commit"], raw_rows, context_views, as_of_date
     )
@@ -100,7 +125,12 @@ def verify_legacy_migration(output_root: Path, reports_output: Path):
     if not all(item.get("byte_equal") for item in parity.get("outputs", {}).values()):
         raise ValueError("legacy publishing parity is not complete")
     aggregation = json.loads((reports_output / "aggregation_summary.json").read_text(encoding="utf-8"))
-    if aggregation.get("record_count") != expected_count or aggregation.get("prospective_records_included") != 0:
+    # record_count became the explored subset when the reserve was introduced,
+    # so the migration's completeness is asserted against the total instead. A
+    # summary that lost rows on the way in still fails; one that merely holds
+    # some back does not.
+    counted = aggregation.get("record_count_including_reserved", aggregation.get("record_count"))
+    if counted != expected_count or aggregation.get("prospective_records_included") != 0:
         raise ValueError("legacy aggregation count or cohort is invalid")
     return {
         "status": "verified",

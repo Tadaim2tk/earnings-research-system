@@ -131,13 +131,27 @@ J-Quantsは技術候補として残すが、保存、AI処理、二次利用、�
 
 ### Price Source
 
+規則を二つに分ける。**前向き運用**（prospective pilot、baseline、lock、実売買に至る経路）と、**退役済み史料の研究**（`data/historical_research/` 配下の凍結記録に対する後知恵の集計）は、負っているリスクが違う。前者は誤りが将来の意思決定に入るが、後者は既に終わったイベントを数え直すだけである。
+
+#### 前向き運用（変更なし）
+
 - 目標は、Humanが利用条件を承認したsourceからAIが必要な価格項目だけを取得することである。
 - providerは本書では正式採用しない。candidate選定時に具体的sourceと取得方法を決め、利用条件を個別確認する。
 - `automated_access_permitted=true` が未確認のsourceをAIが定期取得しない。
-- Yahoo!ファイナンスは自動取得に使わず、Humanによる限定的なmanual fallback候補に限る。
+- **Yahoo!ファイナンスは前向き運用の自動取得に使わず、Humanによる限定的なmanual fallback候補に限る。**
 - J-Quantsは技術候補だが、契約、保存、AI処理、自動取得のHuman承認前は採用済みと扱わない。
 - price source未確定のままbaselineを開始せず、event時点までに確定できないcandidateは見送る。
-- 利用条件未確認の価格、chart screenshot、raw row、derived VWAPを保存しない。
+- 利用条件未確認の価格、chart screenshot、raw row、derived VWAPを、前向き運用の入力として保存しない。
+
+#### 退役済み史料の研究（2026-08-29 追加、ERS-ADR-0058）
+
+- 凍結記録に対する**後知恵の集計に限り**、日足OHLCの自動取得と保存を認める。
+- 保存するのは日足のセッション列（日付・始値・終値）のみとする。tick、板、chart screenshot、derived VWAPは含めない。
+- 取得したデータは `data/market_prices/` に置き、provider・銘柄表記・取得時刻・窓・digestを manifest に記録する。
+- **前向き運用の入力にしない。** baseline、lock、evidence、scoring、実売買のどの経路にも接続しない。
+- 取得は一度きりの史料補完であり、定期取得ではない。記録が伸びたときの追補は同じ扱いで行う。
+
+**この規則は 2026-08-29 に改定された。** それ以前は Yahoo! ファイナンスからの自動取得と raw row の保存を無条件に禁じており、`legacy_event_sessions.jsonl` の取得はその時点の規則に反していた。取得を先に行い、規則との衝突は Codex レビューの指摘で判明した。順序が逆である。規則を後から広げて既成事実を追認した経緯を、消さずにここに残す。
 
 将来price recordへ保持する最小候補は次とする。今回はschemaを追加しない。
 

@@ -24,9 +24,13 @@ from earnings_research.earnings_evaluation import (
 from earnings_research.market_reaction import track_files, write_reaction
 from earnings_research.post_event_learning import review_files, write_review
 from earnings_research.baseline_carryover import prepare_files, write_carryover
+from earnings_research.evidence.store import verify as verify_evidence_capture
 from earnings_research.legacy_research import (
     migrate_legacy_os,
+    rebuild_reports,
     verify_legacy_migration,
+    verify_reports,
+    write_reports,
     verify_research_outputs,
     write_research_outputs,
 )
@@ -34,7 +38,11 @@ from earnings_research.prospective_hypotheses import (
     build_registry_file,
     evaluate_observation_and_status_file,
     summarize_trials_file,
+    evaluate_source_validity_file,
     verify_registry_file,
+    verify_source_validity_file,
+    verify_rule_freeze_files,
+    verify_successor_registry,
 )
 
 from earnings_research.monitoring.notifications import WORKFLOW_FAILURE_REASONS
@@ -50,6 +58,13 @@ from earnings_research.monitoring.operational_cli import (
     verify_state,
 )
 from earnings_research.validation.validator import load_spec, validate_dataset, validate_file
+
+
+def _entry_paths(args):
+    """The fetched-session paths for this call, defaulted to the committed ones."""
+    from earnings_research.legacy_research.publishing import ENTRY_MANIFEST, ENTRY_PRICES
+
+    return (args.entry_prices or ENTRY_PRICES, args.entry_manifest or ENTRY_MANIFEST)
 
 
 def main(argv=None) -> int:
@@ -226,6 +241,11 @@ def main(argv=None) -> int:
     legacy_parser.add_argument("--reports-output", required=True, type=Path)
     legacy_parser.add_argument("--migration-recorded-at", required=True)
     legacy_parser.add_argument("--as-of-date", required=True, type=date.fromisoformat)
+    # Where the fetched sessions live. Defaulted rather than required, because
+    # every real run uses the committed file; a test or a re-fetch under review
+    # needs to point somewhere else without editing a module constant.
+    legacy_parser.add_argument("--entry-prices", type=Path, default=None)
+    legacy_parser.add_argument("--entry-manifest", type=Path, default=None)
 
     legacy_verify_parser = subparsers.add_parser(
         "verify-legacy-migration",
@@ -248,6 +268,24 @@ def main(argv=None) -> int:
     legacy_research_verify_parser.add_argument("--input-root", required=True, type=Path)
     legacy_research_verify_parser.add_argument("--output-dir", required=True, type=Path)
 
+    reports_parser = subparsers.add_parser(
+        "rebuild-legacy-reports",
+        help="Regenerate the published reports from the committed migration alone.",
+    )
+    reports_parser.add_argument("--input-root", required=True, type=Path)
+    reports_parser.add_argument("--output-dir", required=True, type=Path)
+    reports_parser.add_argument("--entry-prices", type=Path, default=None)
+    reports_parser.add_argument("--entry-manifest", type=Path, default=None)
+
+    reports_verify_parser = subparsers.add_parser(
+        "verify-legacy-reports",
+        help="Refuse committed reports the current code would not produce.",
+    )
+    reports_verify_parser.add_argument("--input-root", required=True, type=Path)
+    reports_verify_parser.add_argument("--output-dir", required=True, type=Path)
+    reports_verify_parser.add_argument("--entry-prices", type=Path, default=None)
+    reports_verify_parser.add_argument("--entry-manifest", type=Path, default=None)
+
     hypothesis_registry_parser = subparsers.add_parser(
         "build-hypothesis-registry",
         help="Freeze legacy learning candidates as prospective hypothesis definitions.",
@@ -262,6 +300,42 @@ def main(argv=None) -> int:
     )
     hypothesis_verify_parser.add_argument("--knowledge", required=True, type=Path)
     hypothesis_verify_parser.add_argument("--registry", required=True, type=Path)
+
+    source_validity_parser = subparsers.add_parser(
+        "evaluate-source-validity",
+        help="Judge every frozen hypothesis under the current contamination rules.",
+    )
+    source_validity_parser.add_argument("--registry", required=True, type=Path)
+    source_validity_parser.add_argument("--ledger", required=True, type=Path)
+    source_validity_parser.add_argument("--evaluated-at", required=True)
+
+    source_validity_verify_parser = subparsers.add_parser(
+        "verify-source-validity",
+        help="Refuse a registry not judged under the current contamination rules.",
+    )
+    source_validity_verify_parser.add_argument("--registry", required=True, type=Path)
+    source_validity_verify_parser.add_argument("--ledger", required=True, type=Path)
+
+    stop_rule_parser = subparsers.add_parser(
+        "verify-successor-registry",
+        help="Refuse a successor registry that widened an inherited stop rule.",
+    )
+    stop_rule_parser.add_argument("--previous-registry", required=True, type=Path)
+    stop_rule_parser.add_argument("--registry", required=True, type=Path)
+
+    evidence_parser = subparsers.add_parser(
+        "verify-evidence-capture",
+        help="Refuse a capture that lost a property it cannot get back.",
+    )
+    evidence_parser.add_argument("--manifest", required=True, type=Path)
+    evidence_parser.add_argument("--bundles", required=True, type=Path)
+
+    rule_freeze_parser = subparsers.add_parser(
+        "verify-rule-freeze",
+        help="Refuse a decision rule changed after its hypothesis began gathering evidence.",
+    )
+    rule_freeze_parser.add_argument("--registry-dir", required=True, type=Path)
+    rule_freeze_parser.add_argument("--trials-dir", required=True, type=Path)
 
     hypothesis_evaluate_parser = subparsers.add_parser(
         "evaluate-hypothesis-event",
@@ -441,6 +515,8 @@ def main(argv=None) -> int:
                 reports_output=args.reports_output,
                 migration_recorded_at=args.migration_recorded_at,
                 as_of_date=args.as_of_date,
+                **({"entry_prices": args.entry_prices} if args.entry_prices else {}),
+                **({"entry_manifest": args.entry_manifest} if args.entry_manifest else {}),
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
@@ -464,6 +540,26 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Legacy research analysis failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "rebuild-legacy-reports":
+        try:
+            reports = rebuild_reports(args.input_root, *_entry_paths(args))
+            write_reports(args.output_dir, reports)
+            print(json.dumps({"status": "written", "reports": sorted(reports)},
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Legacy report rebuild failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-legacy-reports":
+        try:
+            print(json.dumps(verify_reports(args.input_root, args.output_dir, *_entry_paths(args)),
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Legacy report verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "verify-legacy-research":
@@ -503,6 +599,61 @@ def main(argv=None) -> int:
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
             print("Hypothesis registry verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "evaluate-source-validity":
+        try:
+            result = evaluate_source_validity_file(
+                args.registry, args.ledger, datetime.fromisoformat(args.evaluated_at)
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Source validity evaluation failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-source-validity":
+        try:
+            print(json.dumps(
+                verify_source_validity_file(args.registry, args.ledger),
+                ensure_ascii=False, sort_keys=True,
+            ))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Source validity verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-evidence-capture":
+        try:
+            print(json.dumps(verify_evidence_capture(args.manifest, args.bundles),
+                             ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Evidence capture verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-rule-freeze":
+        try:
+            print(json.dumps(
+                verify_rule_freeze_files(args.registry_dir, args.trials_dir),
+                ensure_ascii=False, sort_keys=True,
+            ))
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            print("Decision rule freeze verification failed:", file=sys.stderr)
+            print("- %s" % exc, file=sys.stderr)
+            return 1
+    if args.command == "verify-successor-registry":
+        try:
+            registry = verify_successor_registry(args.previous_registry, args.registry)
+            print(json.dumps({
+                "registry_id": registry.registry_id,
+                "registry_version": registry.registry_version,
+                "status": "successor_retires_nothing",
+            }, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print("Successor registry verification failed:", file=sys.stderr)
             print("- %s" % exc, file=sys.stderr)
             return 1
     if args.command == "evaluate-hypothesis-event":
