@@ -151,9 +151,21 @@ def main():
     }, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print("\n回収 %d件 → %s" % (len(rows), out))
-    print("回収しない %d件:" % len(skipped))
-    for c, d, w in skipped:
+    # **意図して回収しないものと、回収に失敗したものを分ける。** `NOT_AN_EVENT` は
+    # 「そもそもイベントではない」と分かっている行で、これは想定どおり。一方、
+    # 期待していた銘柄が取れなかった場合は、黙って成果物を書いて成功を名乗ると、
+    # 後段が**気づかないまま少ない被覆で走る**。
+    intentional = [x for x in skipped if x[0] in NOT_AN_EVENT]
+    failed = [x for x in skipped if x[0] not in NOT_AN_EVENT]
+    print("意図して回収しない %d件:" % len(intentional))
+    for c, d, w in intentional:
         print("  %-10s %s  %s" % (c, d, w))
+    if failed:
+        print("\n**回収できなかった %d件**（期待していたが取れなかった）:" % len(failed),
+              file=sys.stderr)
+        for c, d, w in failed:
+            print("  %-10s %s  %s" % (c, d, w), file=sys.stderr)
+        return 1
     return 0
 
 

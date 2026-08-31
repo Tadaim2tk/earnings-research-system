@@ -56,15 +56,27 @@ def load_facts(version: str):
     return out
 
 
-def _actions_for(actions, ticker, event_date, window):
-    """その銘柄・その日の会社の行為。**窓の外なら「調べていない」。**
+def _last_exit_date(session_rows):
+    """その行の最後の出口の日付。セッション列が無ければ `None`。"""
+    if not session_rows:
+        return None
+    days = [s.get("date") for s in session_rows.values() if s.get("date")]
+    return max(days) if days else None
 
-    `window` が `None`（成果物が無い）か、イベント日が manifest の範囲外なら
-    `None` を返す。範囲内なら、該当が無くても `[]`——見て、無かった。
+
+def _actions_for(actions, ticker, event_date, last_exit, window):
+    """その銘柄・その期間の会社の行為。**窓の外なら「調べていない」。**
+
+    `window` が `None`（成果物が無い）か、**イベント日から最後の出口までが
+    manifest の範囲に収まっていなければ** `None` を返す。イベント日だけを見ると、
+    価格側を伸ばしたときに保有期間の後半が未探索のまま「該当なし」を名乗る。
+    範囲内なら、該当が無くても `[]`——見て、無かった。
     """
     if window is None or window[0] is None or window[1] is None:
         return None
-    if not event_date or not (window[0] <= event_date <= window[1]):
+    if not event_date or event_date < window[0]:
+        return None
+    if (last_exit or event_date) > window[1]:
         return None
     return actions.get(ticker, [])
 
@@ -86,17 +98,23 @@ def main():
     # 中断した抽出で既定の成果物を置き換え、記録済みの測定が `not_extracted` に
     # なる。既存の成果物が持つ件数を下回る版では書かせない。
     if args.facts_version and Path(args.out).resolve() == DEFAULT_OUT.resolve():
-        have = len(load_facts(args.facts_version))
-        recorded = 0
+        # **件数ではなく、鍵の集合で見る。** 件数が足りていても、記録済みの
+        # `(ticker, event_date)` が1つ落ちて別の1件が入れ替わりに増えていれば、
+        # 落ちた測定は `not_extracted` に置き換わる。
+        have = set(load_facts(args.facts_version))
+        recorded = set()
         if DEFAULT_OUT.exists():
             for line in DEFAULT_OUT.open(encoding="utf-8"):
-                if json.loads(line).get("narrative", {}).get("instrument_version"):
-                    recorded += 1
-        if have < recorded:
-            print("版 %s の抽出結果は %d件で、記録済みの %d件を下回る。"
-                  "中断した抽出で置き換えると測定が消える。抽出を完了させるか、"
-                  "--out で別の宛先を指定すること。" % (args.facts_version, have, recorded),
-                  file=sys.stderr)
+                row = json.loads(line)
+                if row.get("narrative", {}).get("instrument_version"):
+                    recorded.add((row["identity"]["ticker"], row["identity"]["event_date"]))
+        missing = recorded - have
+        if missing:
+            sample = ", ".join("%s/%s" % k for k in sorted(missing)[:3])
+            print("版 %s に、記録済みの測定 %d件が無い（例: %s）。"
+                  "そのまま書くと落ちた分が not_extracted になる。抽出を完了させるか、"
+                  "--out で別の宛先を指定すること。"
+                  % (args.facts_version, len(missing), sample), file=sys.stderr)
             return 2
     if not args.facts_version and Path(args.out).resolve() == DEFAULT_OUT.resolve():
         print("--facts-version が要る。省くと narrative が空になり、%s の"
@@ -169,7 +187,8 @@ def main():
         rows.append(B.build(
             record, timing_row, sessions.get(key), found,
             forecast_revision=(found or {}).get("forecast_revision"),
-            actions=_actions_for(actions, (key[0] or "")[:4], key[1], actions_window),
+            actions=_actions_for(actions, (key[0] or "")[:4], key[1],
+                                 _last_exit_date(sessions.get(key)), actions_window),
             ticker_resolution=resolution,
             price_source=price_source.get(key),
             # 分割は調整されている。3091 が 2026-06-29 に 1:2 分割していて

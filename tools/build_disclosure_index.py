@@ -67,9 +67,9 @@ def main():
     fetched = skipped = 0
     failed = []
     while day <= stop:
-        if day.weekday() >= 5:
-            day += timedelta(days=1)
-            continue
+        # **週末を飛ばさない。** 飛ばしたまま manifest が連続した範囲を名乗ると、
+        # 土日に出たTOBや分割の開示が「調べて無かった」に化ける。次の立会に効く
+        # 材料なので、落とすと `contaminated=false` を誤って付ける。
         path = OUT / ("%s.json.gz" % day)
         if path.exists():
             skipped += 1

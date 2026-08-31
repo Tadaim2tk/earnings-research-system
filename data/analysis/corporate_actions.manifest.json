@@ -1,10 +1,10 @@
 {
   "end": "2026-08-28",
-  "fetched_at": "2026-08-31T14:38:29.628971+09:00",
+  "fetched_at": "2026-08-31T14:52:35.688118+09:00",
   "note": "表題だけで判定している。種別は言うが中身（比率・成否）は言わない",
-  "rows": 428,
+  "rows": 429,
   "schema_version": "corporate_actions_v1",
-  "sha256": "8195c0222ac086e9ff3da47eb489d4e0dab1c8bdde3e5890391e88ee2fde25e4",
+  "sha256": "68ebe2f18aa81961815277954ae5e19f7abab82f66c9a0b5f30cc34435833d45",
   "source": "tdnet_index_json",
   "start": "2026-06-01",
   "tickers": 248

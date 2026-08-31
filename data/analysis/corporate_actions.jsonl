@@ -132,6 +132,7 @@
 {"actions": ["treasury_stock"], "pubdate": "2026-06-26 15:00:00", "scope": "unspecified", "stage": "result", "ticker": "2659", "title_sha256": "6908b399da4718e0d819dfdfd783cd62f1c680743c0b70e89f71616727f71443"}
 {"actions": ["treasury_stock"], "pubdate": "2026-06-26 15:00:00", "scope": "unspecified", "stage": "correction", "ticker": "6059", "title_sha256": "d8fd826f11e02fd580402e4b80470bace3ea1ba37999274739ed4797cc08b597"}
 {"actions": ["treasury_stock"], "pubdate": "2026-06-26 09:30:00", "scope": "unspecified", "stage": "result", "ticker": "365A", "title_sha256": "5895ade1b9d5427bc3d61c8616ed85102e00a9ee17e32d187017d2c3420f6e6d"}
+{"actions": ["treasury_stock"], "pubdate": "2026-06-27 14:00:00", "scope": "unspecified", "stage": "announcement", "ticker": "9989", "title_sha256": "65542e4ca2385dbca35099462cf7f8bfd2545a53561c92c8cd46040fedcece8d"}
 {"actions": ["treasury_stock"], "pubdate": "2026-06-29 17:00:00", "scope": "unspecified", "stage": "announcement", "ticker": "6981", "title_sha256": "65542e4ca2385dbca35099462cf7f8bfd2545a53561c92c8cd46040fedcece8d"}
 {"actions": ["warrant"], "pubdate": "2026-06-29 16:00:00", "scope": "unspecified", "stage": "announcement", "ticker": "3627", "title_sha256": "f09a5b2e411408369d5b8e1538b208dae688718b5b4d5309d75559c47e7906fb"}
 {"actions": ["forecast_revision"], "pubdate": "2026-06-29 15:30:00", "scope": "unspecified", "stage": "announcement", "ticker": "3377", "title_sha256": "858080570e0f7b4027db9dbdb0f8ae4c636341ffa0720c8bb9892291a5d08079"}
