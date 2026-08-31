@@ -289,13 +289,25 @@ def test_an_action_before_the_entry_does_not_contaminate():
 
 
 def test_no_actions_is_not_the_same_as_not_looked():
-    """調べていないのに「無かった」と書かない。イベント日が分からなければ
-    `contaminated` も決められない。"""
-    none = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
-                   actions=None)["corporate_actions"]
-    assert none["contaminated"] is False, "イベント日があり、開示が0件なら False"
+    """**調べていないのに「無かった」と書かない。**
+
+    この試験は元々その名前で書かれながら、`actions=None`（＝一度も見ていない）
+    に `contaminated is False`（＝見て、無かった）を要求していた。**docstring と
+    assert が逆を言っていた。** 会社の行為の成果物が無い状態で組むと、全イベント
+    が「同日に別材料なし」を名乗ることになる。
+    """
+    not_looked = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
+                         actions=None)["corporate_actions"]
+    assert not_looked["contaminated"] is None, "見ていないなら決められない"
+    assert not_looked["coverage"] == "not_checked"
+
+    searched = B.build(RECORD, matched("2026-08-07T15:30:00+09:00"), SESSIONS, None,
+                       actions=[])["corporate_actions"]
+    assert searched["contaminated"] is False, "見て、該当が無かったなら False"
+    assert searched["coverage"] == "checked"
+
     blank = dict(RECORD, normalized_identity={"ticker_candidate": "7203"})
-    unknown = B.build(blank, None, None, None, actions=None)["corporate_actions"]
+    unknown = B.build(blank, None, None, None, actions=[])["corporate_actions"]
     assert unknown["contaminated"] is None, "イベント日が無ければ決められない"
 
 

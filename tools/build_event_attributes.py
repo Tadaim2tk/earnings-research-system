@@ -94,7 +94,12 @@ def main():
             price_source[key] = "recovered"
             ticker_fix[key] = row.get("recovery_reason")
 
+    # **成果物が無いことと、その銘柄に該当が無いことを同じ `None` で渡さない。**
+    # 前者は「一度も見ていない」、後者は「見て、無かった」。混ぜると、会社の
+    # 行為を一度も調べていない組み方でも全イベントが「同日に別材料なし」を
+    # 名乗る。
     actions = {}
+    actions_checked = ACTIONS.exists()
     if ACTIONS.exists():
         for line in ACTIONS.open(encoding="utf-8"):
             row = json.loads(line)
@@ -126,7 +131,7 @@ def main():
         rows.append(B.build(
             record, timing_row, sessions.get(key), found,
             forecast_revision=(found or {}).get("forecast_revision"),
-            actions=actions.get((key[0] or "")[:4]),
+            actions=(actions.get((key[0] or "")[:4], []) if actions_checked else None),
             ticker_resolution=resolution,
             price_source=price_source.get(key),
             # 分割は調整されている。3091 が 2026-06-29 に 1:2 分割していて

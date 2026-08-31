@@ -72,6 +72,17 @@ def main():
     rows, failed = [], []
     day = date.fromisoformat(args.start)
     stop = date.fromisoformat(args.end)
+    # **その日の開示がまだ出そろっていない日を「調べて何も無かった」にしない。**
+    # `--end` が当日や未来だと、空の応答を完全な被覆として manifest に書く。
+    # 実際に起きた: `corporate_actions.manifest.json` が `end=2026-08-31` を
+    # 名乗る一方 `fetched_at` は 2026-08-30T13:23 で、**その後に出た開示が
+    # 「確かめた不在」として扱われる**状態になっていた。
+    today_jst = datetime.now(JST).date()
+    if stop >= today_jst:
+        print("--end は %s 以前の完了した日にすること（JSTで本日は %s）。"
+              "当日を含めると、まだ出ていない開示を『無かった』と記録する。"
+              % (today_jst - timedelta(days=1), today_jst), file=sys.stderr)
+        return 2
     while day <= stop:
         if day.weekday() >= 5:
             day += timedelta(days=1)

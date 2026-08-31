@@ -195,9 +195,17 @@ def corporate_actions_block(actions: Optional[Sequence[Mapping[str, Any]]],
     で分ける。決算の反応を測りたいなら、同日の別材料と保有中の材料は切れなければ
     ならない。
     """
+    if actions is None:
+        # **調べていないことを「無かった」と書かない。** 会社の行為の成果物が
+        # 無い状態で組むと、全イベントに `None` が渡る。ここで `False` を返すと
+        # 「同日に別材料は出ていない」と主張したことになるが、**源を一度も見て
+        # いない**。空の列（調べて該当なし）と区別する。
+        return {"same_day": [], "before_entry": [], "during_hold": [],
+                "contaminated": None, "coverage": "not_checked"}
     if not actions:
         return {"same_day": [], "before_entry": [], "during_hold": [],
-                "contaminated": None if event_date is None else False}
+                "contaminated": None if event_date is None else False,
+                "coverage": "checked"}
     same_day, before_entry, during_hold = [], [], []
     last_exit = max(exit_dates.values()) if exit_dates else None
     for action in actions:
@@ -216,6 +224,7 @@ def corporate_actions_block(actions: Optional[Sequence[Mapping[str, Any]]],
         elif entry_date and (last_exit is None or when <= last_exit):
             during_hold.append(entry)
     return {
+        "coverage": "checked",
         "same_day": same_day,
         "before_entry": before_entry,
         "during_hold": during_hold,
