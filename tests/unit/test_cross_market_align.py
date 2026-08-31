@@ -62,13 +62,38 @@ def test_a_holiday_on_one_side_reaches_further_back_rather_than_dropping():
     assert pair[0]["us"] == pytest.approx(100 * (220 - 210) / 210, abs=1e-6)
 
 
-def test_a_gap_on_the_japanese_side_measures_the_whole_gap():
+def test_a_short_gap_measures_the_whole_gap():
     """**隣り合う観測どうしで割る。** 暦上の隣ではないので、休みを挟めばその
-    区間まるごとの騰落になる——それが「前の立会からいくら動いたか」である。"""
+    区間まるごとの騰落になる——それが「前の立会からいくら動いたか」である。
+    通常の連休（年末年始・ゴールデンウィーク）はここに収まる。"""
     got = A.returns_on_own_days(rows(("^N225", "2026-01-05", 100.0),
-                                     ("^N225", "2026-01-13", 110.0)), "^N225")
+                                     ("^N225", "2026-01-12", 110.0)), "^N225")
     assert len(got) == 1
     assert got[0]["ret"] == pytest.approx(10.0)
+
+
+def test_a_long_gap_is_not_folded_into_one_return():
+    """**1本の騰落が跨いだ区間そのものを縛る。**
+
+    系列の途中が欠けていると、1月5日→1月20日の動きが「1月20日の騰落」として
+    1本にまとまる。日付は新しいので `follows` の持ち越し上限をすり抜け、
+    **複数営業日ぶんの動きが1営業日ぶんの動きと相関を取られる。** 持ち越しを
+    縛るだけでは、系列の内側の欠けを止められない。
+    """
+    long_gap = rows(("^N225", "2026-01-05", 100.0), ("^N225", "2026-01-20", 110.0))
+    assert A.returns_on_own_days(long_gap, "^N225") == ()
+    assert len(A.returns_on_own_days(long_gap, "^N225", max_span_days=30)) == 1
+
+
+def test_a_non_finite_observation_has_no_correlation():
+    """**`NaN` や `inf` を通さない。** 1つ混じると総和が汚染され、`nan` が
+    float として返る。測れない統計を数字の見た目で出さない。"""
+    pair = [{"date": "2026-01-05", "jp": 1.0, "us": float("nan")},
+            {"date": "2026-01-06", "jp": 2.0, "us": 2.0},
+            {"date": "2026-01-07", "jp": 3.0, "us": 3.0}]
+    assert A.correlation(pair) is None
+    pair[0]["us"] = float("inf")
+    assert A.correlation(pair) is None
 
 
 def test_a_missing_column_stops_rather_than_returning_an_empty_frame():

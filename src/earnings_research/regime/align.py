@@ -19,6 +19,7 @@
 守らない。ISO日付は辞書順が日付順と一致するので、素の Python で足りる。
 """
 
+import math
 from datetime import date, timedelta
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -32,6 +33,9 @@ SCHEMA_VERSION = "cross_market_align_v1"
 # 1本の古い値が何日ぶんも使い回され、**取得の欠けが休場として相関に入り込む**。
 # 上限を超えた日は組まずに落とす——推測で埋めない。
 MAX_CARRY_DAYS = 7
+
+# 同じ上限を、**1本の騰落が跨いでよい区間**にも使う。持ち越しだけを縛っても、
+# 系列の途中が欠けていれば1本の中に何営業日ぶんもの動きが畳み込まれる。
 
 
 class MissingColumn(ValueError):
@@ -85,7 +89,8 @@ def _series(rows: Sequence[Mapping[str, object]], symbol: str,
 
 
 def returns_on_own_days(rows: Sequence[Mapping[str, object]], symbol: str,
-                        value: str = "close") -> Tuple[Dict[str, object], ...]:
+                        value: str = "close",
+                        max_span_days: int = MAX_CARRY_DAYS) -> Tuple[Dict[str, object], ...]:
     """その銘柄が実際に値を持つ日だけで騰落率(%)を作る。
 
     **隣り合う観測どうしで割る。** 暦上の隣ではないので、休みを挟めばその区間
@@ -93,8 +98,16 @@ def returns_on_own_days(rows: Sequence[Mapping[str, object]], symbol: str,
     """
     points = _series(rows, symbol, value)
     out = []
-    for (_, before), (day, now) in zip(points, points[1:]):
+    for (prev_day, before), (day, now) in zip(points, points[1:]):
         if before == 0:
+            continue
+        # **1本の騰落が跨いだ区間そのものを縛る。** 系列の途中が欠けていると、
+        # 1月5日→1月20日の動きが「1月20日の騰落」として1本にまとまる。日付は
+        # 新しいので `follows` の持ち越し上限をすり抜け、**複数営業日ぶんの
+        # 動きが1営業日ぶんの動きと相関を取られる**。休場と取得の欠けを、
+        # ここでも同じにしない。
+        span = date.fromisoformat(day) - date.fromisoformat(prev_day)
+        if span > timedelta(days=max_span_days):
             continue
         out.append({"date": day, "ret": 100.0 * (now / before - 1.0)})
     return tuple(out)
@@ -165,10 +178,15 @@ def correlation(pairs: Sequence[Mapping[str, object]],
         return None
     xs = [float(r["jp"]) for r in rows]
     ys = [float(r["us"]) for r in rows]
+    # **有限でない値を通さない。** `NaN` や `inf` が1つ混じると総和が汚染され、
+    # `nan` が float として返る。測れない統計を数字の見た目で出さない。
+    if not all(math.isfinite(v) for v in xs + ys):
+        return None
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
     sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     sxx = sum((x - mx) ** 2 for x in xs)
     syy = sum((y - my) ** 2 for y in ys)
     if sxx == 0 or syy == 0:
         return None
-    return sxy / (sxx * syy) ** 0.5
+    got = sxy / (sxx * syy) ** 0.5
+    return got if math.isfinite(got) else None

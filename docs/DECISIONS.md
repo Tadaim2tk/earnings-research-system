@@ -2097,7 +2097,7 @@ Codexの指摘2件。
 
 Date: 2026-08-26
 
-Note: 起案時は ERS-ADR-0041 として書かれたが、同番号が別の決定（legacy aggregation summary v2、2026-08-28）で先に確定したため、内容を変えずに 0074 へ採番し直した。
+Note: 起案時は ERS-ADR-0041 として書かれたが、同番号が別の決定（legacy aggregation summary v2、2026-08-28）で先に確定したため、内容を変えずに0074へ採番し直した。その後、同番号を PR #77 が起案していたため、そちらを0077へ移した。**確定したこちら側の番号は動かさない。**
 
 Status: Accepted
 
@@ -2111,11 +2111,74 @@ trial identityへhorizonを含め、既存trialは再作成しない。累積sna
 
 Consequences: D1からD5、D20へ同じeventを安全に育てられる。最初の観測がD5またはD20でもversion 1として開始できる。一度記録したtrial、return、発表前情報は変更できず、旧分類項目が無い仮説は永続的に母数外でもその理由が残る。既存v1 trial bundleはread-only互換readerと固定schemaでstatus再計算へ残し、新規出力だけをv2にする。supported後のproduction rule昇格、weight、rank、売買ルールの自動変更は引き続き行わない。
 
+## ERS-ADR-0078
+
 ## ERS-ADR-0075
+
 
 Date: 2026-08-31
 
 Status: Accepted
+
+Approval: PR #56 の Codex レビューが未返信のまま残していたP1指摘3件（起点の不一致、
+D20の起点、D20の成熟）に対する修正を、PR #79 として入れ直す過程で確定した方針を
+記録する。#56 は指摘の修正が push される前に自動マージされたため、main には3件が
+そのまま入っていた。
+
+Note: 番号は0078。0074は PR #56 が main へ入れた分で**触らない**（確定した決定の
+識別子を書き換えると、それを引いた記録が解決できなくなる）。0075は PR #78、
+0077は PR #77 が使う。0076は使わない。
+
+Context: 3件とも「別々の起点で測った数字を、同じものとして並べていた」形だった。
+
+第一に、`_reaction_label` が直後の反応（`event_window_reaction.return_pct`）と
+翌営業日（`return_from_pre_event_close_pct`）を直接比べていた。前者は場中発表だと
+発表直前価格を起点にすることがあり、後者は常に前日終値起点である。前日終値100・
+発表直前120・直後126・翌日終値110の場合、直後は「発表直前から+5%」、翌日は
+「前日終値から+10%」となり、**急落しているのに `GU継続` が付く**。
+
+第二に、D20 は `return_reference_price_type` を見ずに値を受け入れていた。起点を
+選び直すだけで仮説の判定が変わる。
+
+第三に、`recorded_at`（この review を書いた時刻）を D20 の観測時刻として扱って
+おり、発表翌日に書かれた review でも `day20_return_pct` を埋められた。それが
+訂正できない trial になって status を動かす。
+
+**最初の修正は第二点を取り違えていた。** `previous_close` を無条件に要求したが、
+`docs/RETURN_BASE_PRICE_POLICY.md` の承認済み方針は発表セッションごとに違う
+（before_open は `previous_close`、intraday は `pre_announcement_price`、
+after_close は `next_open`）。決算の大半を占める after_close を、承認済み方針ごと
+塞いでいた。レビューの再指摘で判明した。**方針文書を読まずに定数を置いたのが
+誤りである。**
+
+Decision:
+
+1. `_reaction_label` は `event_window_reaction.reference_role` が
+   `pre_event_close` でなければ `None` を返す。起点を推測して揃えない——揃え方を
+   1つ選ぶと、その選択が判定に入り込む。
+
+2. D20 の `return_reference_price_type` は、**イベントが宣言した
+   `earnings_event.return_base_price_policy` と一致していなければならない**。
+   実装側に定数を持たない。起点が宣言されていない、あるいは `unknown` の場合は
+   拒む。
+
+3. D20 の成熟は下限だけを見る。20営業日は暦で26日を下回らない（週7日に取引は
+   最大5日）。**これは「20営業日が経った証明」ではない。** 取引カレンダーを
+   この層に持ち込まない代わりに「明らかに早すぎるものを弾く」検査として置く。
+   本筋は market_reaction 側に D20 の milestone を足すことで、それは別PRとする。
+
+4. 導出できない反応が、既に記録された反応を上書きしない。旧実装の下で書かれた
+   D1 bundle には場中発表でも値が入っている。追記の連鎖は「確定した反応を変え
+   ない」ことを要求するので、導出できないことを理由に `None` を強いると
+   **そのイベントは二度と D5・D20 へ育てられない**。記録済みの値を受け入れ、
+   新しいイベントにだけ厳しい規則を効かせる。
+
+Consequences: 場中発表のイベントは、今後 `reaction` を持たない観測として記録
+される。既存のイベントは記録済みの反応を保ったまま育つ。D20 は宣言された起点
+以外を受け付けないので、`data/samples/post_earnings_review_sample.csv` の
+`next_open`（after_close の承認済み方針）はそのまま通る。26日の下限は近似で
+あり、休場が多い期間では20営業日に届かない値を通しうる——カレンダーが入ったら
+差し替えること。
 
 Approval: 5年分（決算101,803件、株価4,797銘柄）へ窓を広げる作業の中で、測定側の
 規約を2つ固定した。Humanは作業の継続を承認しており、本ADRはその過程で確定した
@@ -2162,11 +2225,17 @@ Decision: `regime/align.py` と `prices/coverage.py` を追加する。
     coverage: covered / starts_after_window / ends_before_window
               / partial_both_ends / source_unavailable
     return:   measured / no_price_at_entry / not_yet_observable
-              / ended_before_exit / gap_at_exit / source_unavailable
+              / end_unconfirmed / ended_before_exit / gap_at_exit
+              / source_unavailable
 
 `source_unavailable` は「その会社の株価が存在しない」ではなく「取りに行って
 取れなかった」を表す。`not_yet_observable` は「まだその日が来ていない」で、
-`ended_before_exit`（系列が途中で終わった）と分ける——直近の決算は20営業日ぶんの
+`ended_before_exit`（系列が途中で終わった）と分ける。**さらに `end_unconfirmed`
+を置く**——端より前で系列が切れていることは終了の証拠ではなく、休場・売買停止・
+その銘柄だけの取得の欠けが同じ形を作る。外から確かめた事実（上場廃止の告知など）
+が無ければ `ended_before_exit` と書かず、`end_unconfirmed` に留める。証拠なしに
+「終わった」と書くと、上場が続いている銘柄が消えた側のコホートに入り、直そうと
+した生存バイアスを逆向きに入れる——直近の決算は20営業日ぶんの
 将来がまだ存在しないだけで上場は続いており、混ぜると**新しいイベントほど廃止
 されたように見える**。データ全体の端を渡さない呼び出しでは区別を主張せず、
 従来どおり `ended_before_exit` を返す（推測で埋めない）。
@@ -2178,6 +2247,10 @@ Decision: `regime/align.py` と `prices/coverage.py` を追加する。
 
 Consequences: 5年分のイベント101,803件について、6つの出口ごとに測れたか・測れない
 ならなぜかが記録される。落とさないので、上場廃止になった銘柄の決算も母数に残る。
+1本の騰落が跨いでよい区間にも、持ち越しと同じ上限（7日）を掛ける。持ち越しだけを
+縛っても、系列の途中が欠けていれば1本の中に何営業日ぶんもの動きが畳み込まれ、
+日付は新しいので上限をすり抜ける。相関は有限でない入力と結果を拒む。
+
 `align.py` の値は書き直し前後で一致を確認済み（20系列・5年半で年ごとの相関12個が
 すべて同値、偽の0%の681日も同数）。TSOへは `docs/PROMPT_TO_TSO_2026-08-30.md`
 で同じ穴の確認を依頼した。

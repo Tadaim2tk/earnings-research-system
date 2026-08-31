@@ -149,6 +149,11 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
     if sessions_after_entry is None:
         return "source_unavailable"
     if sessions_after_entry < sessions_needed:
+        # **確かめた終了を先に見る。** 端の比較を先にすると、確定した最終立会が
+        # たまたまデータの端と同じ日だった銘柄が「まだ来ていない」側に入る。
+        # 実際には出口へ届かない。
+        if series_ended is True:
+            return "ended_before_exit"
         if observed_through is None:
             return "ended_before_exit"
         if _checked_day(series_last) >= _checked_day(observed_through):
@@ -157,8 +162,6 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
         # 休場・売買停止・その銘柄だけの取得の欠けが、同じ形を作る。証拠なしに
         # `ended_before_exit` と書くと、上場が続いている銘柄が「消えた」側の
         # コホートに入り、**直そうとした生存バイアスを逆向きに入れる**。
-        if series_ended is True:
-            return "ended_before_exit"
         return "end_unconfirmed"
     return "gap_at_exit"
 

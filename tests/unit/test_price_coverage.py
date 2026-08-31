@@ -173,3 +173,14 @@ def test_a_measured_exit_is_still_checked_for_impossible_dates():
         C.return_state("2026-02-03", "2026-01-05", 140, 22, "2026-08-28")
     with pytest.raises(C.MalformedDay):
         C.return_state("2026-1-5", "2026-02-03", 140, 22, "2026-08-28")
+
+
+def test_a_confirmed_ending_at_the_cutoff_is_still_an_ending():
+    """**確かめた終了を、端の比較より先に見る。**
+
+    確定した最終立会がたまたまデータの端と同じ日だった銘柄を「まだ来ていない」
+    側に入れない。実際には出口へ届かない。
+    """
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28",
+                          series_ended=True) == "ended_before_exit"
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28") == "not_yet_observable"

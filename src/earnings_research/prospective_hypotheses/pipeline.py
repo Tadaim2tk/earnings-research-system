@@ -4,7 +4,7 @@ import csv
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .evaluator import (
@@ -369,7 +369,41 @@ def _verify_authoritative_baseline(dataset_dir, observation):
     return row
 
 
+# 起点。`next_business_day_close` の値が `return_from_pre_event_close_pct` なので、
+# 直後の反応も前日終値起点でなければ比べられない。
+REACTION_REFERENCE_ROLE = "pre_event_close"
+
+# D20 の起点は、イベントが宣言した方針（`earnings_event.return_base_price_policy`）
+# と一致していなければならない。**定数で決め打ちしない。**
+# `docs/RETURN_BASE_PRICE_POLICY.md` の承認済み方針は発表セッションごとに違う:
+#
+#     before_open   previous_close
+#     intraday      pre_announcement_price
+#     after_close   next_open（最初に売買できる反応）
+#
+# 最初の実装は `previous_close` を無条件に要求し、**決算の大半を占める
+# `after_close` を承認済み方針ごと塞いでいた**。狙いは「1つのsnapshotで起点を
+# 混ぜないこと」であって、特定の起点を強いることではない。
+
+# 20営業日は暦で26日を下回らない（週7日に取引は最大5日）。**下限であって
+# 成熟の証明ではない。**
+MIN_D20_ELAPSED = timedelta(days=26)
+
+
 def _reaction_label(tracking):
+    """直後の反応と翌営業日の関係から、反応の型を決める。
+
+    **起点が違う2つを比べない。** 場中発表では `event_window_reaction` が
+    発表直前価格を起点にすることがあり、その値を前日終値起点の翌営業日と直接
+    比べると符号が反転しうる。例: 前日終値100、発表直前120、直後126、翌日終値110。
+    直後は「発表直前から+5%」、翌日は「前日終値から+10%」となり、**急落した
+    のに `GU継続` と付く。**
+
+    起点が揃っていなければ `None` を返す——呼ぶ側は観測が申告した反応と
+    一致しないとして拒む。**推測して揃えない。**
+    """
+    if tracking.event_window_reaction.reference_role != REACTION_REFERENCE_ROLE:
+        return None
     immediate = tracking.event_window_reaction.return_pct
     next_day = next(
         item for item in tracking.milestones
@@ -382,7 +416,40 @@ def _reaction_label(tracking):
     return "GD反発" if next_day > immediate else "GD継続"
 
 
-def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation):
+def _recorded_reaction(existing, observation):
+    """同じイベントの直前の観測が記録した反応。無ければ `None`。"""
+    prior = [
+        item for item in existing
+        if isinstance(item, HypothesisTrialBundle)
+        and item.earnings_event_id == observation.earnings_event_id
+        and item.reaction is not None
+    ]
+    if not prior:
+        return None
+    return sorted(prior, key=lambda item: item.observation_version)[-1].reaction
+
+
+def _declared_return_basis(dataset_dir, observation):
+    """そのイベントが宣言した起点。
+
+    `docs/RETURN_BASE_PRICE_POLICY.md` は発表セッションごとに違う起点を承認して
+    おり、`earnings_event.return_base_price_policy` がイベント単位でそれを記録
+    する。**ここで定数を持たない。** 持つと、承認済みの方針を実装側が塞ぐ。
+    """
+    rows = [
+        row for row in _read_dataset_table(dataset_dir, "earnings_event")
+        if row.get("earnings_event_id", "").strip() == observation.earnings_event_id
+    ]
+    if len(rows) != 1:
+        raise ValueError("authoritative earnings_event must resolve to exactly one row")
+    declared = rows[0].get("return_base_price_policy", "").strip()
+    if not declared or declared == "unknown":
+        raise ValueError("earnings_event does not declare a return base price policy")
+    return declared
+
+
+def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation,
+                                   recorded_reaction=None):
     tracking = MarketReactionTracking.model_validate_json(
         Path(market_reaction_path).read_text(encoding="utf-8")
     )
@@ -396,7 +463,17 @@ def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observatio
         raise ValueError("event observation source_record_ids must include market reaction tracking_id")
     if observation.post_event_features.reaction_source_record_id != tracking.tracking_id:
         raise ValueError("reaction source must reference the authoritative market reaction tracking")
-    if observation.post_event_features.reaction != _reaction_label(tracking):
+    derived = _reaction_label(tracking)
+    if derived is None and recorded_reaction is not None:
+        # **既に記録された反応を、後から None に書き換えさせない。**
+        # 場中発表の反応は起点が揃わないので今後は導出しないが、旧実装の下で
+        # 書かれた D1 bundle には値が入っている。追記の連鎖は「確定した反応を
+        # 変えない」ことを要求するので、導出できないことを理由に None を強いると
+        # **そのイベントは二度と D5・D20 へ育てられなくなる。** 記録済みの値を
+        # そのまま受け入れ、新しいイベントにだけ厳しい規則を効かせる。
+        if observation.post_event_features.reaction != recorded_reaction:
+            raise ValueError("event observation reaction does not match the recorded reaction")
+    elif observation.post_event_features.reaction != derived:
         raise ValueError("event observation reaction does not match authoritative market reaction values")
 
     next_day_milestone = next(
@@ -439,6 +516,36 @@ def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observatio
             ):
                 raise ValueError("D20 post-event review does not match the observation event and baseline")
             raw_value = review.get("day20_return_pct", "").strip()
+            if raw_value:
+                # **起点を確かめる。** D1/D5 は前日終値起点（milestone の
+                # `return_from_pre_event_close_pct`）なので、D20 が寄り値や
+                # VWAP を起点にしていると、**同じ snapshot に定義の違う数字が
+                # 並ぶ**。起点を選び直すだけで仮説の判定が変わってしまう。
+                basis = review.get("return_reference_price_type", "").strip()
+                declared = _declared_return_basis(dataset_dir, observation)
+                if not basis:
+                    raise ValueError("D20 return has no stated reference price basis")
+                if basis != declared:
+                    raise ValueError(
+                        "D20 return is measured from %s but the event declares %s"
+                        % (basis, declared)
+                    )
+                # **成熟を確かめる。** review の `recorded_at` は「この review を
+                # 書いた時刻」であって「20営業日目」ではない。発表直後に書かれた
+                # review でも `day20_return_pct` を埋められ、それが訂正できない
+                # trial になって status を動かす。
+                #
+                # 取引カレンダーをここに持ち込まないので、**下限だけを見る**。
+                # 20営業日は暦で26日を下回らない（週7日に取引は最大5日）。これは
+                # 「20営業日が経った証明」ではなく「明らかに早すぎるものを弾く」
+                # 検査である。カレンダーが入ったら本来の判定に差し替えること。
+                elapsed = item.observed_at - observation.event_occurred_at
+                if elapsed < MIN_D20_ELAPSED:
+                    raise ValueError(
+                        "D20 return recorded %d days after the announcement; "
+                        "twenty sessions cannot have elapsed in fewer than %d"
+                        % (elapsed.days, MIN_D20_ELAPSED.days)
+                    )
             expected_status = "comparable" if raw_value else "not_comparable"
             expected_value = float(raw_value) / 100 if raw_value else None
             try:
@@ -603,7 +710,9 @@ def evaluate_observation_file(
             raise ValueError("UNVERIFIED must be passed for both the dataset and the market reaction")
     else:
         _verify_authoritative_baseline(dataset_dir, observation)
-        _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation)
+        _verify_authoritative_outcomes(
+            dataset_dir, market_reaction_path, observation,
+            _recorded_reaction(load_trial_bundles(trials_dir), observation))
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(
@@ -643,7 +752,9 @@ def evaluate_observation_and_status_file(
             raise ValueError("UNVERIFIED must be passed for both the dataset and the market reaction")
     else:
         _verify_authoritative_baseline(dataset_dir, observation)
-        _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observation)
+        _verify_authoritative_outcomes(
+            dataset_dir, market_reaction_path, observation,
+            _recorded_reaction(load_trial_bundles(trials_dir), observation))
     existing = load_trial_bundles(trials_dir)
     _validate_observation_chain(existing, observation)
     bundle = evaluate_observation(
