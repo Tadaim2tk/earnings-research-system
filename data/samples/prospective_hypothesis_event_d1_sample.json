@@ -1,0 +1,48 @@
+{
+  "company_name": "Aster Cloud Works",
+  "earnings_event_id": "EVT-ASTER-2026Q1",
+  "event_occurred_at": "2026-08-08T15:30:00+09:00",
+  "event_quarter": "2026-Q1",
+  "observation_id": "HPO-FICTIONAL-STAGED-D1",
+  "observation_stage": "D1",
+  "observation_version": 1,
+  "observed_through": "2026-09-01T17:00:00+09:00",
+  "post_event_features": {
+    "captured_at": "2026-09-01T15:30:00+09:00",
+    "reaction": "GU継続",
+    "reaction_source_record_id": "MRT-ASTER-HYP"
+  },
+  "pre_event_features": {
+    "baseline_id": "BASE-ASTER-003",
+    "baseline_record_hash": "4b5690a5a45519aa2a4c92b545dd1cd7508bda1ec4c10e84654654d6535b7cfe",
+    "baseline_version": 3,
+    "captured_at": "2026-08-07T21:00:00+09:00",
+    "dollar_environment": null,
+    "judge": null,
+    "locked_at": "2026-08-07T21:20:00+09:00",
+    "narrative": null,
+    "rank": "C",
+    "risk_balance": null,
+    "volatility_environment": null
+  },
+  "production_rules_modified": false,
+  "prospective_record": true,
+  "returns": [
+    {
+      "horizon": "D1",
+      "observed_at": "2026-09-01T15:30:00+09:00",
+      "return_value": 0.03,
+      "source_record_id": "MRT-ASTER-HYP",
+      "status": "comparable"
+    }
+  ],
+  "schema_version": "prospective_hypothesis_event_observation_v2",
+  "scoring_weights_modified": false,
+  "source_record_ids": [
+    "BASE-ASTER-003",
+    "MRT-ASTER-HYP"
+  ],
+  "supersedes_observation_id": null,
+  "ticker": "ASTR",
+  "trade_decision_included": false
+}
