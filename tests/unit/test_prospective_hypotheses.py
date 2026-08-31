@@ -111,6 +111,11 @@ def authoritative_dataset(tmp_path):
         if row["earnings_event_id"] == "EVT-ASTER-2026Q1":
             row["baseline_id"] = "BASE-ASTER-003"
         row.update({
+            # **D1/D5 と同じ起点にする。** milestone 側は
+            # `return_from_pre_event_close_pct` なので、D20 だけ `next_open` や
+            # VWAP 起点だと、同じ snapshot に定義の違う数字が並ぶ。見本データは
+            # `next_open` のままだったので、ここで揃える。
+            "return_reference_price_type": "previous_close",
             "open_gap_pct": "1.0",
             "day1_return_pct": "3.0",
             "day5_return_pct": "6.0",
@@ -1353,3 +1358,81 @@ def test_the_trial_bundle_schema_accepts_what_the_pipeline_writes():
     )
     bundle = evaluate_observation(registry(), observation(), datetime(2026, 10, 1, 12, tzinfo=JST))
     jsonschema.validate(json.loads(bundle.model_dump_json()), schema)
+
+
+# --- 起点をまたいで比べない -------------------------------------------------
+
+def test_a_reaction_is_not_labelled_when_the_two_numbers_share_no_basis(market_reactions):
+    """**場中発表で符号が反転する。**
+
+    `event_window_reaction` は発表直前価格を起点にすることがあり、翌営業日は
+    前日終値起点である。例: 前日終値100、発表直前120、直後126、翌日終値110。
+    直後は「発表直前から+5%」、翌日は「前日終値から+10%」となり、**急落した
+    のに `GU継続` と付く**。起点が違うなら判定しない。
+    """
+    from earnings_research.market_reaction.models import MarketReactionTracking
+    from earnings_research.prospective_hypotheses import pipeline as P
+    tracking = MarketReactionTracking.model_validate_json(
+        market_reactions["aster"].read_text(encoding="utf-8")
+    )
+    assert tracking.event_window_reaction.reference_role == P.REACTION_REFERENCE_ROLE
+    labelled = P._reaction_label(tracking)
+    assert labelled is not None
+
+    shifted = tracking.model_copy(deep=True)
+    shifted.event_window_reaction.reference_role = "pre_announcement_reference"
+    assert P._reaction_label(shifted) is None, "起点が違えば判定しない"
+
+
+def test_a_d20_return_measured_from_another_price_is_refused(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**同じ snapshot に定義の違う数字を並べない。** D1/D5 は前日終値起点なので、
+    D20 が寄り値や VWAP 起点だと、起点を選び直すだけで仮説の判定が変わる。
+    リポジトリの見本データ自体が `next_open` のままだった。"""
+    review_path = authoritative_dataset / "post_earnings_review_sample.csv"
+    fields, rows = _read_csv(review_path)
+    for row in rows:
+        if row.get("day20_return_pct", "").strip():
+            row["return_reference_price_type"] = "next_open"
+    _write_csv(review_path, fields, rows)
+    with pytest.raises(ValueError, match="must be measured from previous_close"):
+        evaluate_observation_file(
+            cleared_registry(tmp_path), STAGED_D20, tmp_path / "basis-trials",
+            tmp_path / "basis.json", datetime(2026, 10, 1, 18, tzinfo=JST),
+            authoritative_dataset, market_reactions["aster"],
+        )
+
+
+def test_a_d20_return_written_too_soon_is_refused(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**`recorded_at` は「この review を書いた時刻」であって「20営業日目」では
+    ない。** 発表直後に書かれた review でも `day20_return_pct` を埋められ、それが
+    訂正できない trial になって status を動かす。
+
+    取引カレンダーを持ち込まないので下限だけを見る——20営業日は暦で26日を
+    下回らない。**「経った証明」ではなく「明らかに早すぎるものを弾く」検査**。
+    """
+    from earnings_research.prospective_hypotheses import pipeline as P
+    assert P.MIN_D20_ELAPSED.days == 26
+    payload = json.loads(STAGED_D20.read_text(encoding="utf-8"))
+    d20 = next(item for item in payload["returns"] if item["horizon"] == "D20")
+    too_soon = "2026-08-20T15:30:00+09:00"
+    d20["observed_at"] = too_soon
+    path = tmp_path / "premature.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    review_path = authoritative_dataset / "post_earnings_review_sample.csv"
+    fields, rows = _read_csv(review_path)
+    for row in rows:
+        if row.get("day20_return_pct", "").strip():
+            row["recorded_at"] = too_soon
+    _write_csv(review_path, fields, rows)
+
+    with pytest.raises(ValueError, match="twenty sessions cannot have elapsed"):
+        evaluate_observation_file(
+            cleared_registry(tmp_path), path, tmp_path / "soon-trials",
+            tmp_path / "soon.json", datetime(2026, 10, 1, 18, tzinfo=JST),
+            authoritative_dataset, market_reactions["aster"],
+        )
