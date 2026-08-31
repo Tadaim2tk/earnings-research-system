@@ -74,15 +74,26 @@ def disclosure_block(timing: Optional[Mapping[str, Any]],
 ENTRY_GAP_OUTLIER_PCT = 4.19
 
 
+def _uncovered(entry_date: Optional[str]) -> Dict[str, Any]:
+    """建てられなかった行。**部分的に取れた行と同じ形を返す。**
+
+    `fully_covered` を省くと、`where(price__fully_covered=False)` がこの行を
+    拾えない。実測で、8件の `no_session` が「覆えていない」の集計から漏れ、
+    107件あるはずが99件と出ていた。**欄を落とすことは False ではない。**
+    """
+    return {"entry_date": entry_date, "entry_open": None, "returns": {},
+            "covered": [], "prev_session_close": None, "entry_gap_pct": None,
+            "entry_gap_is_outlier": None, "fully_covered": False}
+
+
 def price_block(sessions: Optional[Mapping[int, Mapping[str, Any]]]) -> Dict[str, Any]:
     """約定と出口。**リターンは計算するが、集計はしない。**"""
     if not sessions or ENTRY_OFFSET not in sessions:
-        return {"entry_date": None, "entry_open": None, "returns": {}, "covered": []}
+        return _uncovered(None)
     entry = sessions[ENTRY_OFFSET]
     open_ = entry.get("open")
     if not open_ or not math.isfinite(open_):
-        return {"entry_date": entry.get("date"), "entry_open": None,
-                "returns": {}, "covered": []}
+        return _uncovered(entry.get("date"))
     returns, covered = {}, []
     for offset in EXIT_OFFSETS:
         leg = sessions.get(offset)
@@ -194,7 +205,10 @@ def corporate_actions_block(actions: Optional[Sequence[Mapping[str, Any]]],
         if not when:
             continue
         kinds = list(action.get("actions") or [])
-        entry = {"date": when, "actions": kinds, "stage": action.get("stage")}
+        # `scope` を落とすと、名証だけの上場廃止が全面廃止と区別できなくなる。
+        # `corporate_actions.collect` がわざわざ分けているものを、ここで潰さない。
+        entry = {"date": when, "actions": kinds, "stage": action.get("stage"),
+                 "scope": action.get("scope")}
         if event_date and when == event_date:
             same_day.append(entry)
         elif entry_date and when < entry_date:

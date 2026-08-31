@@ -297,3 +297,43 @@ def test_no_actions_is_not_the_same_as_not_looked():
     blank = dict(RECORD, normalized_identity={"ticker_candidate": "7203"})
     unknown = B.build(blank, None, None, None, actions=None)["corporate_actions"]
     assert unknown["contaminated"] is None, "イベント日が無ければ決められない"
+
+
+def test_a_row_with_no_price_still_says_it_is_not_fully_covered():
+    """**欄を落とすことは False ではない。**
+
+    価格が1本も無い経路だけ `fully_covered` を省いていた。すると
+    `where(price__fully_covered=False)` がその行を拾えない。実測で、8件の
+    `no_session` が「覆えていない」の集計から漏れ、107件あるはずが99件と
+    出ていた。母数が黙って縮む。
+    """
+    absent = B.price_block(None)
+    partial = B.price_block({schema.ENTRY_OFFSET: {"date": "2026-06-12", "open": 100.0}})
+    assert absent["fully_covered"] is False
+    assert partial["fully_covered"] is False
+    assert sorted(absent) == sorted(partial), "取れなかった行も同じ形を返す"
+
+
+def test_a_row_whose_entry_open_is_missing_returns_the_same_shape():
+    """建ての寄りが無い経路も同じ。日付だけは分かるので残す。"""
+    got = B.price_block({schema.ENTRY_OFFSET: {"date": "2026-06-12", "open": None}})
+    assert got["entry_date"] == "2026-06-12"
+    assert got["entry_open"] is None
+    assert got["fully_covered"] is False
+    assert got["entry_gap_is_outlier"] is None
+
+
+def test_the_scope_of_a_corporate_action_survives_into_the_attributes():
+    """**名証だけの上場廃止を、全面廃止と区別できなくしない。**
+
+    `corporate_actions.collect` が `scope` をわざわざ分けているのに、属性へ
+    束ねるときに落としていた。落とすと、東証に残っている会社の「消滅」として
+    読めてしまう。
+    """
+    actions = [{"pubdate": "2026-06-10 15:00:00", "actions": ["delisting"],
+                "stage": "announcement", "scope": "secondary_market"},
+               {"pubdate": "2026-06-10 15:00:00", "actions": ["tender_offer"],
+                "stage": "announcement", "scope": "unspecified"}]
+    got = B.corporate_actions_block(actions, "2026-06-10", "2026-06-12", {})
+    scopes = [entry["scope"] for entry in got["same_day"]]
+    assert scopes == ["secondary_market", "unspecified"]

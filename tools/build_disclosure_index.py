@@ -84,9 +84,15 @@ def main():
 
     print("取得 %d日 / 既存を飛ばした %d日 / 取れなかった %d日" % (fetched, skipped, len(failed)))
     if failed:
-        print("\n取れなかった日（空ファイルは置いていない。もう一度走らせれば拾い直す）:")
+        # **0 で終えない。** 束ねて回すと「成功した」と読まれ、欠けた日を持った
+        # まま下流が走る。空ファイルを置かない判断と、終了コードを揃える。
+        print("\n取れなかった日（空ファイルは置いていない。もう一度走らせれば拾い直す）:",
+              file=sys.stderr)
         for d, why in failed[:40]:
-            print("  %s %s" % (d, why))
+            print("  %s %s" % (d, why), file=sys.stderr)
+        if len(failed) > 40:
+            print("  ほか %d日" % (len(failed) - 40), file=sys.stderr)
+        return 1
     print("索引の取得終了", flush=True)
     return 0
 

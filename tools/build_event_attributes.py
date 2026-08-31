@@ -3,10 +3,15 @@
 **新しく測らない。** 台帳・索引・セッション列・測定器の出力を、出どころを保った
 まま束ねるだけである。
 
-    python tools/build_event_attributes.py
+    python tools/build_event_attributes.py --facts-version <測定器の版>
 
 出力は `data/analysis/event_attributes.jsonl`。文書の本文もタイトルも入らない
 （`~/.ers-corpus/` に置いてある。このリポジトリは public である）。
+
+**`--facts-version` を省いたまま既定の出力先へは書かない。** 省くと narrative は
+空になり、記録済みの102件の測定が `not_extracted` で置き換わる。ふつうの作り直しの
+つもりで歴史的記録を消すことになるので、断る。測定器なしで組みたいときは
+`--out` で別の宛先を明示すること。
 """
 
 import argparse
@@ -57,6 +62,17 @@ def main():
                     help="測定器の版。省略すると narrative は空になる")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     args = ap.parse_args()
+
+    # **測定器の版を指定せずに、記録済みの出力先を上書きしない。**
+    # 版を省くと narrative が全件 `not_extracted` になる。既定の宛先には
+    # 102件の測定が入っているので、ふつうの作り直しのつもりで歴史的記録を
+    # 消すことになる（AGENTS.md「記録・確定値・決定・訂正・取消・レビューを
+    # 上書きしない」）。測定器なしで組みたいなら宛先を明示させる。
+    if not args.facts_version and Path(args.out).resolve() == DEFAULT_OUT.resolve():
+        print("--facts-version が要る。省くと narrative が空になり、%s の"
+              "測定が消える。測定器なしで組むなら --out で別の宛先を指定すること。"
+              % DEFAULT_OUT.relative_to(ROOT), file=sys.stderr)
+        return 2
 
     timing = {}
     for line in TIMING.open(encoding="utf-8"):
