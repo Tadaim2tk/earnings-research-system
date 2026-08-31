@@ -147,7 +147,12 @@ def padded_zero_days(rows: Sequence[Mapping[str, object]], symbol: str,
     if not mine:
         raise MissingColumn(symbol)
     first = min(mine)
-    everyone = {_checked_day(str(row["date"])) for row in rows}
+    # **どの銘柄も値を持たない日は、暦の行として残らない。** `pivot_table` は
+    # 観測が1つも無い日付を作らないので、そこを数えると偽の0%が過大に出る。
+    everyone = {
+        _checked_day(str(row["date"])) for row in rows
+        if row.get(value) is not None and row.get(value) == row.get(value)
+    }
     return sum(1 for day in everyone if day > first and day not in mine)
 
 

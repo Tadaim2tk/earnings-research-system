@@ -34,6 +34,7 @@ RETURN_STATES = (
     "measured",
     "no_price_at_entry",        # 建てる日の値が無い
     "not_yet_observable",       # **まだその日が来ていない。** 終わったのではない
+    "end_unconfirmed",          # 系列が端より前で切れているが、終了の証拠は無い
     "ended_before_exit",        # 出口の前に系列が終わった（保有中に消えた）
     "gap_at_exit",              # 系列は続いているが出口の日だけ無い
     "source_unavailable",       # そもそも系列を取れていない
@@ -102,7 +103,8 @@ def coverage_state(first: Optional[str], last: Optional[str],
 def return_state(entry_day: Optional[str], exit_day: Optional[str],
                  sessions_after_entry: Optional[int], sessions_needed: int,
                  series_last: Optional[str],
-                 observed_through: Optional[str] = None) -> str:
+                 observed_through: Optional[str] = None,
+                 series_ended: Optional[bool] = None) -> str:
     """1つの出口について、測れたか・測れないならなぜか。
 
     `entry_day` / `exit_day` は系列上で実際に値が取れた日で、取れなければ
@@ -123,20 +125,41 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
     続いている。これを「保有中に消えた」と記録すると、**新しいイベントほど
     廃止されたように見える**。`observed_through` を渡さなければ区別を主張せず、
     従来どおり `ended_before_exit` を返す——**推測で埋めない。**
+
+    **端より前で切れていることも、終了の証拠ではない。** 休場・売買停止・その
+    銘柄だけの取得の欠けが同じ形を作る。`series_ended=True`（上場廃止の開示など
+    外から確かめた事実）が無ければ `end_unconfirmed` に留める。証拠なしに
+    「終わった」と書くと、上場が続いている銘柄が消えた側のコホートに入り、
+    直そうとした生存バイアスを逆向きに入れることになる。
     """
     if series_last is None:
         return "source_unavailable"
     if entry_day is None:
         return "no_price_at_entry"
+    _checked_day(entry_day)
     if exit_day is not None:
+        # **`measured` の経路でも日付を検査する。** ここを素通りさせると、
+        # `"2026-02-30"` や出口が建てより前の行が、もっともらしいコホートへ
+        # そのまま入る。
+        entry_checked = _checked_day(entry_day)
+        exit_checked = _checked_day(exit_day)
+        if exit_checked < entry_checked:
+            raise MalformedDay("%s..%s" % (entry_checked, exit_checked))
         return "measured"
     if sessions_after_entry is None:
         return "source_unavailable"
     if sessions_after_entry < sessions_needed:
-        if observed_through is not None:
-            alive = _checked_day(series_last) >= _checked_day(observed_through)
-            return "not_yet_observable" if alive else "ended_before_exit"
-        return "ended_before_exit"
+        if observed_through is None:
+            return "ended_before_exit"
+        if _checked_day(series_last) >= _checked_day(observed_through):
+            return "not_yet_observable"
+        # **端より前で切れていることは、終了の証拠ではない。**
+        # 休場・売買停止・その銘柄だけの取得の欠けが、同じ形を作る。証拠なしに
+        # `ended_before_exit` と書くと、上場が続いている銘柄が「消えた」側の
+        # コホートに入り、**直そうとした生存バイアスを逆向きに入れる**。
+        if series_ended is True:
+            return "ended_before_exit"
+        return "end_unconfirmed"
     return "gap_at_exit"
 
 

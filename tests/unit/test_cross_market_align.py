@@ -146,3 +146,13 @@ def test_a_generator_is_not_exhausted_by_the_first_pass():
             yield r
     assert A.padded_zero_days(stream(), "^N225") == 2
     assert A.padded_zero_days(rows(*(JP + WEEKEND)), "^N225") == 2
+
+
+def test_a_date_where_nothing_traded_is_not_a_padded_zero():
+    """**どの銘柄も値を持たない日は、暦の行として残らない。**
+
+    `pivot_table` は観測が1つも無い日付を作らないので、そこを数えると偽の0%が
+    過大に出る。取得が欠けた行を、埋めによる汚染として数えない。
+    """
+    blank = [{"symbol": "BTC-USD", "date": "2026-01-07", "close": None}]
+    assert A.padded_zero_days(rows(*(JP + WEEKEND)) + blank, "^N225") == 2

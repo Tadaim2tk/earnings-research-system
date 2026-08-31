@@ -100,9 +100,14 @@ def test_a_future_exit_is_not_the_same_as_a_delisting():
     分ける。
     """
     alive = C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28")
-    gone = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
+    # **終了は証拠があって初めて言える。** 端より前で切れているだけなら
+    # `end_unconfirmed`——休場・売買停止・その銘柄だけの取得の欠けが同じ形を作る。
+    unconfirmed = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
+    confirmed = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                               series_ended=True)
     assert alive == "not_yet_observable"
-    assert gone == "ended_before_exit"
+    assert unconfirmed == "end_unconfirmed"
+    assert confirmed == "ended_before_exit"
 
 
 def test_without_a_cutoff_it_does_not_claim_the_distinction():
@@ -114,7 +119,7 @@ def test_without_a_cutoff_it_does_not_claim_the_distinction():
 def test_a_series_ending_exactly_at_the_cutoff_is_still_alive():
     """端ちょうどは生きている側。取得がそこで止まっただけである。"""
     assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28") == "not_yet_observable"
-    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-27", "2026-08-28") == "ended_before_exit"
+    assert C.return_state("2026-08-20", None, 3, 22, "2026-08-27", "2026-08-28") == "end_unconfirmed"
 
 
 def test_dates_are_checked_before_they_are_compared_as_strings():
@@ -141,3 +146,30 @@ def test_a_window_that_runs_backwards_stops_rather_than_answering():
 def test_the_new_state_is_in_the_vocabulary():
     assert "not_yet_observable" in C.RETURN_STATES
     assert C.check("not_yet_observable", C.RETURN_STATES) == "not_yet_observable"
+
+
+def test_ending_before_the_cutoff_is_not_evidence_of_a_delisting():
+    """**逆向きの生存バイアスを入れない。**
+
+    端より前で系列が切れていることは、休場・売買停止・その銘柄だけの取得の
+    欠けでも起きる。証拠なしに「終わった」と書くと、上場が続いている銘柄が
+    消えた側のコホートに入る。
+    """
+    without = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
+    with_evidence = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                                   series_ended=True)
+    assert without == "end_unconfirmed"
+    assert with_evidence == "ended_before_exit"
+    assert "end_unconfirmed" in C.RETURN_STATES
+
+
+def test_a_measured_exit_is_still_checked_for_impossible_dates():
+    """**`measured` の経路を素通りさせない。** ここを抜けると `"2026-02-30"` や
+    出口が建てより前の行が、もっともらしいコホートへそのまま入る。"""
+    assert C.return_state("2026-01-05", "2026-02-03", 140, 22, "2026-08-28") == "measured"
+    with pytest.raises(C.MalformedDay):
+        C.return_state("2026-01-05", "2026-02-30", 140, 22, "2026-08-28")
+    with pytest.raises(C.MalformedDay):
+        C.return_state("2026-02-03", "2026-01-05", 140, 22, "2026-08-28")
+    with pytest.raises(C.MalformedDay):
+        C.return_state("2026-1-5", "2026-02-03", 140, 22, "2026-08-28")
