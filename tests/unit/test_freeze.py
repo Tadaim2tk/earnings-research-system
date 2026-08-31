@@ -30,6 +30,7 @@ from earnings_research.prospective_hypotheses.models import (
     HypothesisRegistry,
 )
 from earnings_research.prospective_hypotheses.pipeline import (
+    UNVERIFIED,
     evaluate_observation_file,
     load_trial_bundles,
     verify_rule_freeze_files,
@@ -167,8 +168,12 @@ def record(tmp_path, registry_path, index, recorded_at):
     payload = source / ("obs-%03d.json" % index)
     payload.write_text(observation(index).model_dump_json(indent=2), encoding="utf-8")
     trials = tmp_path / "trials"
+    # **合成イベント（`EE-SYNTHETIC-*`）は正本に存在しない。** ここで見たいのは
+    # 規則がいつ凍るかであって、観測が正本と一致するかではない。突合を飛ばす
+    # ことを合図で明示する——既定値で黙って飛ばす形にはしない。
     return evaluate_observation_file(
-        registry_path, payload, trials, trials / ("bundle-%03d.json" % index), recorded_at
+        registry_path, payload, trials, trials / ("bundle-%03d.json" % index), recorded_at,
+        UNVERIFIED, UNVERIFIED,
     )
 
 

@@ -36,7 +36,7 @@ from earnings_research.legacy_research import (
 )
 from earnings_research.prospective_hypotheses import (
     build_registry_file,
-    evaluate_observation_file,
+    evaluate_observation_and_status_file,
     summarize_trials_file,
     evaluate_source_validity_file,
     verify_registry_file,
@@ -343,9 +343,13 @@ def main(argv=None) -> int:
     )
     hypothesis_evaluate_parser.add_argument("--registry", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--observation", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--dataset", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--market-reaction", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--trials-dir", required=True, type=Path)
     hypothesis_evaluate_parser.add_argument("--recorded-at", required=True)
+    hypothesis_evaluate_parser.add_argument("--evaluated-at", required=True)
     hypothesis_evaluate_parser.add_argument("--output", required=True, type=Path)
+    hypothesis_evaluate_parser.add_argument("--status-output", required=True, type=Path)
 
     hypothesis_summary_parser = subparsers.add_parser(
         "summarize-hypothesis-registry",
@@ -654,17 +658,23 @@ def main(argv=None) -> int:
             return 1
     if args.command == "evaluate-hypothesis-event":
         try:
-            bundle = evaluate_observation_file(
+            bundle, snapshot = evaluate_observation_and_status_file(
                 args.registry,
                 args.observation,
                 args.trials_dir,
                 args.output,
+                args.status_output,
                 datetime.fromisoformat(args.recorded_at),
+                datetime.fromisoformat(args.evaluated_at),
+                args.dataset,
+                args.market_reaction,
             )
             print(json.dumps({
                 "earnings_event_id": bundle.earnings_event_id,
                 "trial_count": len(bundle.trials),
                 "output": str(args.output),
+                "status_output": str(args.status_output),
+                "status_hypothesis_count": len(snapshot.hypotheses),
             }, ensure_ascii=False, sort_keys=True))
             return 0
         except (OSError, ValueError, RuntimeError) as exc:

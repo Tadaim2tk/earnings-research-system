@@ -1,5 +1,114 @@
 {
   "$defs": {
+    "HorizonReturn": {
+      "properties": {
+        "horizon": {
+          "enum": [
+            "D1",
+            "D5",
+            "D20"
+          ],
+          "title": "Horizon",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "return_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Value"
+        },
+        "source_record_id": {
+          "title": "Source Record Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "comparable",
+            "not_comparable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "horizon",
+        "status",
+        "observed_at",
+        "source_record_id"
+      ],
+      "title": "HorizonReturn",
+      "type": "object"
+    },
+    "HypothesisEligibility": {
+      "properties": {
+        "appended_trial_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appended Trial Id"
+        },
+        "eligible_for_hypothesis": {
+          "title": "Eligible For Hypothesis",
+          "type": "boolean"
+        },
+        "evaluation_horizon": {
+          "enum": [
+            "D1",
+            "D5",
+            "D20"
+          ],
+          "title": "Evaluation Horizon",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "hypothesis_version": {
+          "minimum": 1,
+          "title": "Hypothesis Version",
+          "type": "integer"
+        },
+        "reason": {
+          "enum": [
+            "eligible",
+            "required_pre_event_field_missing",
+            "required_post_event_field_missing",
+            "horizon_not_matured",
+            "horizon_not_comparable",
+            "trial_already_recorded"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "hypothesis_version",
+        "evaluation_horizon",
+        "eligible_for_hypothesis",
+        "reason"
+      ],
+      "title": "HypothesisEligibility",
+      "type": "object"
+    },
     "HypothesisTrial": {
       "properties": {
         "append_only": {
@@ -136,20 +245,275 @@
       "type": "object"
     }
   },
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "supersedes_observation_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "supersedes_observation_id"
+        ]
+      },
+      "if": {
+        "properties": {
+          "observation_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "observation_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "supersedes_observation_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D1"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "return_snapshots": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D1"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D5"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "return_snapshots": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D5"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "observation_stage": {
+            "const": "D20"
+          }
+        },
+        "required": [
+          "observation_stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "return_snapshots": {
+            "contains": {
+              "properties": {
+                "horizon": {
+                  "const": "D20"
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "items": {
+              "properties": {
+                "horizon": {
+                  "enum": [
+                    "D1",
+                    "D5",
+                    "D20"
+                  ]
+                }
+              },
+              "required": [
+                "horizon"
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "return_snapshots": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D1"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "return_snapshots": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D5"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    },
+    {
+      "properties": {
+        "return_snapshots": {
+          "contains": {
+            "properties": {
+              "horizon": {
+                "const": "D20"
+              }
+            },
+            "required": [
+              "horizon"
+            ]
+          },
+          "maxContains": 1,
+          "minContains": 0
+        }
+      }
+    }
+  ],
   "properties": {
+    "company_name": {
+      "title": "Company Name",
+      "type": "string"
+    },
     "earnings_event_id": {
       "title": "Earnings Event Id",
       "type": "string"
     },
-    "ineligible_hypotheses": {
-      "additionalProperties": {
-        "type": "string"
+    "event_occurred_at": {
+      "format": "date-time",
+      "title": "Event Occurred At",
+      "type": "string"
+    },
+    "event_quarter": {
+      "pattern": "^\\d{4}-Q[1-4]$",
+      "title": "Event Quarter",
+      "type": "string"
+    },
+    "hypothesis_eligibility": {
+      "items": {
+        "$ref": "#/$defs/HypothesisEligibility"
       },
-      "title": "Ineligible Hypotheses",
-      "type": "object"
+      "title": "Hypothesis Eligibility",
+      "type": "array"
     },
     "observation_id": {
       "title": "Observation Id",
+      "type": "string"
+    },
+    "observation_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Observation Sha256",
+      "type": "string"
+    },
+    "observation_stage": {
+      "enum": [
+        "D1",
+        "D5",
+        "D20"
+      ],
+      "title": "Observation Stage",
+      "type": "string"
+    },
+    "observation_version": {
+      "minimum": 1,
+      "title": "Observation Version",
+      "type": "integer"
+    },
+    "observed_through": {
+      "format": "date-time",
+      "title": "Observed Through",
+      "type": "string"
+    },
+    "pre_event_features_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pre Event Features Sha256",
       "type": "string"
     },
     "rank_rule_changes_generated": {
@@ -157,6 +521,18 @@
       "default": 0,
       "title": "Rank Rule Changes Generated",
       "type": "integer"
+    },
+    "reaction": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reaction"
     },
     "recorded_at": {
       "format": "date-time",
@@ -176,10 +552,33 @@
       "title": "Registry Version",
       "type": "integer"
     },
+    "return_snapshots": {
+      "items": {
+        "$ref": "#/$defs/HorizonReturn"
+      },
+      "title": "Return Snapshots",
+      "type": "array"
+    },
     "schema_version": {
-      "const": "prospective_hypothesis_trial_bundle_v1",
-      "default": "prospective_hypothesis_trial_bundle_v1",
+      "const": "prospective_hypothesis_trial_bundle_v2",
+      "default": "prospective_hypothesis_trial_bundle_v2",
       "title": "Schema Version",
+      "type": "string"
+    },
+    "supersedes_observation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supersedes Observation Id"
+    },
+    "ticker": {
+      "title": "Ticker",
       "type": "string"
     },
     "trading_rules_generated": {
@@ -207,10 +606,20 @@
     "registry_version",
     "registry_sha256",
     "observation_id",
+    "observation_sha256",
+    "observation_version",
+    "observation_stage",
     "earnings_event_id",
+    "company_name",
+    "ticker",
+    "event_quarter",
+    "event_occurred_at",
+    "observed_through",
+    "pre_event_features_sha256",
+    "return_snapshots",
     "recorded_at",
     "trials",
-    "ineligible_hypotheses"
+    "hypothesis_eligibility"
   ],
   "title": "HypothesisTrialBundle",
   "type": "object"

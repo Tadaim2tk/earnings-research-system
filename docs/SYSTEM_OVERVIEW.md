@@ -43,7 +43,7 @@ The exact 254-row source snapshot, its 53-commit field history, 254 TSO point-in
 
 The research knowledge layer measures rank, narrative, judge, reaction, market context, combinations, and D1-to-D20 transitions without mixing missing horizons or treating repeated companies as independent. It emits learning candidates only; it does not change scoring, ranks, trading rules, or TSO. See [LEGACY_RESEARCH_KNOWLEDGE.md](LEGACY_RESEARCH_KNOWLEDGE.md).
 
-The prospective hypothesis registry freezes those learning candidates before new trials, separates pre-event inputs from post-event reaction paths, appends one immutable trial bundle per completed event, and derives current status from the full trial history. It never promotes a supported hypothesis into scoring, rank, or trading rules automatically. See [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md).
+The prospective hypothesis registry freezes those learning candidates before new trials, separates pre-event inputs from post-event reaction paths, appends immutable D1/D5/D20 trial stages without duplicating a hypothesis-event-horizon, and derives current status from the full trial history. It never promotes a supported hypothesis into scoring, rank, or trading rules automatically. See [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md).
 
 ## Obsidian Knowledge Layer
 

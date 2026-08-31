@@ -2092,3 +2092,21 @@ Codexの指摘2件。
     業績予想からの修正の有無 有・無              → 有
 
 3つとも「欄が読めなかった」が正しい。特に `有・無` は**選択肢の表示**であって、どちらが選ばれたかを言っていない。区切り記号の直後の1文字だけを見て、その次に有無や区切りが続くなら採らない形にした。**実データの網羅は変わらない**（有30 / 無59 / 欄なし14）。
+
+## ERS-ADR-0074
+
+Date: 2026-08-26
+
+Note: 起案時は ERS-ADR-0041 として書かれたが、同番号が別の決定（legacy aggregation summary v2、2026-08-28）で先に確定したため、内容を変えずに 0074 へ採番し直した。
+
+Status: Accepted
+
+Approval: Humanは、新しいprospective決算についてD1、D5、D20の成熟時点ごとに該当仮説のtrialをappend-onlyで追加し、各回に全trialからstatusを再計算する運用を承認した。旧rankやjudgeが無い場合は推測せず母数外にする。
+
+Context: ERS-ADR-0037の初期実装は同一eventに1つのtrial bundleだけを許可したため、D5やD20が後から成熟する通常の価格追跡を追加できなかった。全期間が揃うまで待つとD5仮説の評価が遅れ、累積snapshotをそのまま再評価すると同一event・同一hypothesis・同一horizonの二重登録が起こり得る。また入力不足の理由は自由文で、母数外の理由を機械集計しにくかった。
+
+Decision: [PROSPECTIVE_HYPOTHESIS_REGISTRY.md](PROSPECTIVE_HYPOTHESIS_REGISTRY.md)に従い、event observationをv2、trial bundleをv2とする。observationはversion、supersedes ID、D1／D5／D20 stage、observed-through時刻を持つ。発表前特徴はsource baseline ID、version、record hash、lock時刻を必須とし、trial追記時に正本の完全なERS datasetをvalidationし、唯一の未supersede baseline tail、event occurrence、company identity、version、lock状態・時刻、canonical hashと突合する。D1・D5は正本の市場反応記録、D20は正本の事後reviewへ値・時刻・source IDを突合し、reactionは市場反応値から固定規則で導出する。後続versionはevent identity、発表前特徴hash、確定済みreaction、成熟済みreturnを変更・削除できない。stageと時刻は前進のみ許可する。Pydanticと外部JSON Schemaの双方でversion predecessor、stage horizon、horizon重複を同じ条件で拒否する。
+
+trial identityへhorizonを含め、既存trialは再作成しない。累積snapshot内の既登録期間は`trial_already_recorded`、必要な発表前項目が無い場合は`required_pre_event_field_missing`として明示する。期間未成熟、比較不能、発表後項目不足も別reasonで記録し、いずれも失敗や母数へ入れない。event評価CLIは新trialの追記と全trialからのstatus再計算を一度に行う。
+
+Consequences: D1からD5、D20へ同じeventを安全に育てられる。最初の観測がD5またはD20でもversion 1として開始できる。一度記録したtrial、return、発表前情報は変更できず、旧分類項目が無い仮説は永続的に母数外でもその理由が残る。既存v1 trial bundleはread-only互換readerと固定schemaでstatus再計算へ残し、新規出力だけをv2にする。supported後のproduction rule昇格、weight、rank、売買ルールの自動変更は引き続き行わない。
