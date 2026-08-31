@@ -21,7 +21,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from earnings_research.timing import tdnet_index as ix  # noqa: E402
 
 OUT = Path(os.path.expanduser("~/.ers-corpus/tdnet_full"))
+JST = timezone(timedelta(hours=9))
 UA = "EarningsResearchSystem-Research/1.0"
 PAUSE = 0.8
 
@@ -54,6 +55,15 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     day, stop = date.fromisoformat(args.start), date.fromisoformat(args.end)
+    # **その日の開示が出そろう前に取ると、空の応答を「確かめた不在」にする。**
+    # しかも一度書くと既存として飛ばすので、後から出た開示は永久に入らない。
+    # `build_corporate_actions.py` と同じ検査をここにも置く。
+    today_jst = datetime.now(JST).date()
+    if stop >= today_jst:
+        print("--end は %s 以前の完了した日にすること（JSTで本日は %s）。"
+              "当日を含めると、まだ出ていない開示を『無かった』として固定する。"
+              % (today_jst - timedelta(days=1), today_jst), file=sys.stderr)
+        return 2
     fetched = skipped = 0
     failed = []
     while day <= stop:

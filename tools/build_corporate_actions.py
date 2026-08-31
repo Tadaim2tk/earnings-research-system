@@ -107,6 +107,20 @@ def main():
             print("  %s %s" % (d, why), file=sys.stderr)
         return 1
 
+    # **表題とURLをリポジトリに置かない。** ERS-ADR-0079 は、取得元が保存・
+    # 再配布について何も述べていないことを受けて「リポジトリ側は manifest と
+    # digest だけを持つ」と決めた。**その決定を書いた同じPRで、428行すべてに
+    # 表題と本文URLを入れていた。** このリポジトリは public である。
+    #
+    # 照合できるようにするため、表題の digest は残す。原文は
+    # `~/.ers-corpus/tdnet_full/` に在る。
+    published = []
+    for row in rows:
+        keep = {k: v for k, v in row.items() if k not in ("title", "document_url")}
+        keep["title_sha256"] = hashlib.sha256(
+            (row.get("title") or "").encode("utf-8")).hexdigest()
+        published.append(keep)
+    rows = published
     body = "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body, encoding="utf-8")

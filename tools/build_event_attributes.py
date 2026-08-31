@@ -56,6 +56,19 @@ def load_facts(version: str):
     return out
 
 
+def _actions_for(actions, ticker, event_date, window):
+    """その銘柄・その日の会社の行為。**窓の外なら「調べていない」。**
+
+    `window` が `None`（成果物が無い）か、イベント日が manifest の範囲外なら
+    `None` を返す。範囲内なら、該当が無くても `[]`——見て、無かった。
+    """
+    if window is None or window[0] is None or window[1] is None:
+        return None
+    if not event_date or not (window[0] <= event_date <= window[1]):
+        return None
+    return actions.get(ticker, [])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--facts-version", default=None,
@@ -68,6 +81,23 @@ def main():
     # 102件の測定が入っているので、ふつうの作り直しのつもりで歴史的記録を
     # 消すことになる（AGENTS.md「記録・確定値・決定・訂正・取消・レビューを
     # 上書きしない」）。測定器なしで組みたいなら宛先を明示させる。
+    # **「空でない」は「揃っている」ではない。** `extract_narrative_facts.py` は
+    # 途中までの抽出を明示的に許しているので、1件でも在れば通る検査だと、
+    # 中断した抽出で既定の成果物を置き換え、記録済みの測定が `not_extracted` に
+    # なる。既存の成果物が持つ件数を下回る版では書かせない。
+    if args.facts_version and Path(args.out).resolve() == DEFAULT_OUT.resolve():
+        have = len(load_facts(args.facts_version))
+        recorded = 0
+        if DEFAULT_OUT.exists():
+            for line in DEFAULT_OUT.open(encoding="utf-8"):
+                if json.loads(line).get("narrative", {}).get("instrument_version"):
+                    recorded += 1
+        if have < recorded:
+            print("版 %s の抽出結果は %d件で、記録済みの %d件を下回る。"
+                  "中断した抽出で置き換えると測定が消える。抽出を完了させるか、"
+                  "--out で別の宛先を指定すること。" % (args.facts_version, have, recorded),
+                  file=sys.stderr)
+            return 2
     if not args.facts_version and Path(args.out).resolve() == DEFAULT_OUT.resolve():
         print("--facts-version が要る。省くと narrative が空になり、%s の"
               "測定が消える。測定器なしで組むなら --out で別の宛先を指定すること。"
@@ -99,7 +129,15 @@ def main():
     # 行為を一度も調べていない組み方でも全イベントが「同日に別材料なし」を
     # 名乗る。
     actions = {}
-    actions_checked = ACTIONS.exists()
+    # **ファイルが在ることは「その期間を調べた」ではない。** manifest の
+    # `start`/`end` が実際に見た範囲で、その外のイベントは調べていない。
+    # 例: 会社の行為の corpus は 2026-08-28 で終わっているので、価格側だけ
+    # 伸ばして組み直すと、それ以降のイベントが「調べて該当なし」を名乗る。
+    actions_window = None
+    manifest = ACTIONS.with_suffix(".manifest.json")
+    if ACTIONS.exists() and manifest.exists():
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        actions_window = (m.get("start"), m.get("end"))
     if ACTIONS.exists():
         for line in ACTIONS.open(encoding="utf-8"):
             row = json.loads(line)
@@ -131,7 +169,7 @@ def main():
         rows.append(B.build(
             record, timing_row, sessions.get(key), found,
             forecast_revision=(found or {}).get("forecast_revision"),
-            actions=(actions.get((key[0] or "")[:4], []) if actions_checked else None),
+            actions=_actions_for(actions, (key[0] or "")[:4], key[1], actions_window),
             ticker_resolution=resolution,
             price_source=price_source.get(key),
             # 分割は調整されている。3091 が 2026-06-29 に 1:2 分割していて
