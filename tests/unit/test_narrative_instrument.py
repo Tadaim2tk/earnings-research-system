@@ -10,7 +10,7 @@ from earnings_research.narrative.section import narrative_section, prose_score
 GOOD = {
     "sales_direction": "増加", "profit_direction": "減少",
     "tailwinds": ["調味料セグメントの増収"], "headwinds": ["原材料コストの上昇"],
-    "one_off": "無", "outlook_mention": "上方",
+    "one_off": "無",
 }
 
 # 実測に近い形。目次が先に来て、本文は後ろにある。
@@ -73,6 +73,10 @@ def test_every_part_of_the_instrument_is_in_its_version():
         ("MAX_TOKENS", 400),
         ("ENABLE_THINKING", True),
         ("MAX_REASONS", 8),
+        ("FIELDS", {"sales_direction": I.DIRECTIONS}),
+        ("LISTS", ("tailwinds",)),
+        ("SECTION_RULE_VERSION", "narrative_section_v9"),
+        ("BODY_CHARS", 3000),
         ("MODEL_REVISION", "0" * 40),
         ("RUNTIME", {"mlx-lm": "9.9.9"}),
     ):
@@ -112,7 +116,7 @@ def test_a_missing_reason_list_is_not_read_as_an_empty_one():
 
 # 記録された版。`docs/DECISIONS.md` の ERS-ADR-0069 がこの値で採点済みの結果を
 # 指しており、`~/.ers-corpus/facts/<この値>/` に103件が入っている。
-RECORDED_VERSION = "3d1926f1c758f4ca"
+RECORDED_VERSION = "f5b1f896125fc8e8"
 
 
 def test_the_recorded_version_is_the_one_this_code_produces():
@@ -177,6 +181,17 @@ def test_the_instrument_extracts_facts_and_does_not_score():
     assert set(facts) == fields
 
 
+def test_the_forecast_revision_is_not_asked_of_the_model():
+    """業績予想の記述は `section.py` が切り出す節の**外**にある。入力に無いことを
+    尋ねると、モデルは決算の好調さから答えを作る——実測で83件中52件が「上方」、
+    原文に修正の語があるのは2件だけだった。定型欄から規則で読む
+    （`forecast.revision_flag`、86%の文書で読める）。"""
+    assert "outlook_mention" not in I.FIELDS
+    assert "outlook" not in I.PROMPT
+    assert "上方" not in I.PROMPT and "下方" not in I.PROMPT
+    assert not hasattr(I, "OUTLOOK")
+
+
 def test_the_prompt_still_forbids_guessing():
     """**縛っていたのは文字列2つだけだった。**
 
@@ -210,6 +225,10 @@ def test_the_direction_vocabulary_stayed_closed():
     その安定が失われるので、閉じたままにする。"""
     assert I.DIRECTIONS == ("増加", "減少", "横ばい", "不明")
     assert "不明" in I.DIRECTIONS, "答えられないことを言える語が要る"
+    # **答えられないことを言える語を全項目に置く。** `outlook_mention` にだけ
+    # それが無く、根拠が構造的に存在しない項目で推測を強いていた。
+    for name, vocabulary in I.FIELDS.items():
+        assert "不明" in vocabulary, name
     for vocabulary in I.FIELDS.values():
         assert len(vocabulary) == len(set(vocabulary))
         assert all(isinstance(v, str) and v for v in vocabulary)
