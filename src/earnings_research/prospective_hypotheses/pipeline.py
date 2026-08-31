@@ -4,7 +4,7 @@ import csv
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .evaluator import (
@@ -369,7 +369,32 @@ def _verify_authoritative_baseline(dataset_dir, observation):
     return row
 
 
+# 起点。`next_business_day_close` の値が `return_from_pre_event_close_pct` なので、
+# 直後の反応も前日終値起点でなければ比べられない。
+REACTION_REFERENCE_ROLE = "pre_event_close"
+
+# D20 も D1/D5 と同じ起点でなければ、同じ snapshot に定義の違う数字が並ぶ。
+D20_RETURN_REFERENCE = "previous_close"
+
+# 20営業日は暦で26日を下回らない（週7日に取引は最大5日）。**下限であって
+# 成熟の証明ではない。**
+MIN_D20_ELAPSED = timedelta(days=26)
+
+
 def _reaction_label(tracking):
+    """直後の反応と翌営業日の関係から、反応の型を決める。
+
+    **起点が違う2つを比べない。** 場中発表では `event_window_reaction` が
+    発表直前価格を起点にすることがあり、その値を前日終値起点の翌営業日と直接
+    比べると符号が反転しうる。例: 前日終値100、発表直前120、直後126、翌日終値110。
+    直後は「発表直前から+5%」、翌日は「前日終値から+10%」となり、**急落した
+    のに `GU継続` と付く。**
+
+    起点が揃っていなければ `None` を返す——呼ぶ側は観測が申告した反応と
+    一致しないとして拒む。**推測して揃えない。**
+    """
+    if tracking.event_window_reaction.reference_role != REACTION_REFERENCE_ROLE:
+        return None
     immediate = tracking.event_window_reaction.return_pct
     next_day = next(
         item for item in tracking.milestones
@@ -439,6 +464,33 @@ def _verify_authoritative_outcomes(dataset_dir, market_reaction_path, observatio
             ):
                 raise ValueError("D20 post-event review does not match the observation event and baseline")
             raw_value = review.get("day20_return_pct", "").strip()
+            if raw_value:
+                # **起点を確かめる。** D1/D5 は前日終値起点（milestone の
+                # `return_from_pre_event_close_pct`）なので、D20 が寄り値や
+                # VWAP を起点にしていると、**同じ snapshot に定義の違う数字が
+                # 並ぶ**。起点を選び直すだけで仮説の判定が変わってしまう。
+                basis = review.get("return_reference_price_type", "").strip()
+                if basis != D20_RETURN_REFERENCE:
+                    raise ValueError(
+                        "D20 return must be measured from %s, not %s"
+                        % (D20_RETURN_REFERENCE, basis or "an unstated basis")
+                    )
+                # **成熟を確かめる。** review の `recorded_at` は「この review を
+                # 書いた時刻」であって「20営業日目」ではない。発表直後に書かれた
+                # review でも `day20_return_pct` を埋められ、それが訂正できない
+                # trial になって status を動かす。
+                #
+                # 取引カレンダーをここに持ち込まないので、**下限だけを見る**。
+                # 20営業日は暦で26日を下回らない（週7日に取引は最大5日）。これは
+                # 「20営業日が経った証明」ではなく「明らかに早すぎるものを弾く」
+                # 検査である。カレンダーが入ったら本来の判定に差し替えること。
+                elapsed = item.observed_at - observation.event_occurred_at
+                if elapsed < MIN_D20_ELAPSED:
+                    raise ValueError(
+                        "D20 return recorded %d days after the announcement; "
+                        "twenty sessions cannot have elapsed in fewer than %d"
+                        % (elapsed.days, MIN_D20_ELAPSED.days)
+                    )
             expected_status = "comparable" if raw_value else "not_comparable"
             expected_value = float(raw_value) / 100 if raw_value else None
             try:
