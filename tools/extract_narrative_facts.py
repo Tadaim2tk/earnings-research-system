@@ -29,11 +29,50 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from earnings_research.narrative import forecast  # noqa: E402
 from earnings_research.narrative import instrument as I  # noqa: E402
 from earnings_research.narrative.section import narrative_section  # noqa: E402
 
 DOCUMENTS = Path.home() / ".ers-corpus/documents"
 FACTS = Path.home() / ".ers-corpus/facts"
+
+
+def build_record(document, section, output, extracted_at):
+    """1文書ぶんの記録を組む。**モデルを呼ばないので、そのまま試せる。**
+
+    `facts` は**モデルが答えたもの**、`forecast_revision` は**定型欄から規則で
+    読んだもの**である。同じ辞書に混ぜず、出どころが読めるようにする。
+
+    `outlook_mention` を測定器から外したとき（ERS-ADR-0073）、この関数が無くて
+    規則側を呼ぶ経路を作らなかった。**間違った値を、何も無い状態に置き換えただけ
+    になっていた。** 同じ形は ERS-ADR-0066 の Amendment でも踏んでいる——検証で
+    使った関数を出荷しなかった件である。
+    """
+    record = {
+        "ticker": document.get("ticker"),
+        "event_date": document.get("event_date"),
+        "announced_at": document.get("announced_at"),
+        "text_sha256": document.get("text_sha256"),
+        "instrument_version": I.INSTRUMENT_VERSION,
+        "model": I.MODEL,
+        "extracted_at": extracted_at,
+        # 規則で読む。モデルを通さないので `instrument_version` には属さない。
+        "forecast_revision": forecast.revision_flag(document.get("text", "")),
+        "forecast_revision_source": "standard_field_rule",
+    }
+    if section is None:
+        record["status"] = "no_section"
+        return record
+    record["section_chars"] = len(section)
+    facts, why = I.parse(output)
+    if facts is None:
+        record["status"] = "unreadable"
+        record["reason"] = why
+        record["raw_output"] = (output or "")[:2000]
+    else:
+        record["status"] = "extracted"
+        record["facts"] = facts
+    return record
 
 
 def runtime_mismatch():
@@ -98,38 +137,22 @@ def main():
 
         document = json.loads(path.read_text(encoding="utf-8"))
         section = narrative_section(document.get("text", ""))
-        record = {
-            "ticker": document.get("ticker"),
-            "event_date": document.get("event_date"),
-            "announced_at": document.get("announced_at"),
-            "text_sha256": document.get("text_sha256"),
-            "instrument_version": I.INSTRUMENT_VERSION,
-            "model": I.MODEL,
-            "extracted_at": datetime.now().astimezone().isoformat(),
-        }
-        if section is None:
-            record["status"] = "no_section"
-            no_section += 1
-        else:
+        output = None
+        if section is not None:
             messages = [{"role": "user", "content": I.build_prompt(section)}]
             prompt = tokeniser.apply_chat_template(
                 messages, add_generation_prompt=True,
                 enable_thinking=I.ENABLE_THINKING, tokenize=False)
             output = generate(model, tokeniser, prompt=prompt,
                               max_tokens=I.MAX_TOKENS, sampler=sampler, verbose=False)
-            facts, why = I.parse(output)
-            record["section_chars"] = len(section)
-            if facts is None:
-                record["status"] = "unreadable"
-                record["reason"] = why
-                # 生の出力を残す。理由だけだと「読めなかった」が行き止まりに
-                # なり、上限が妥当なのかモデルが暴走したのかを後から判断できない。
-                record["raw_output"] = output[:2000]
-                unreadable += 1
-            else:
-                record["status"] = "extracted"
-                record["facts"] = facts
-                done += 1
+        record = build_record(document, section, output,
+                              datetime.now().astimezone().isoformat())
+        if record["status"] == "no_section":
+            no_section += 1
+        elif record["status"] == "unreadable":
+            unreadable += 1
+        else:
+            done += 1
         tmp = target.with_suffix(".part")
         tmp.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         tmp.replace(target)
