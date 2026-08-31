@@ -1353,3 +1353,133 @@ def test_the_trial_bundle_schema_accepts_what_the_pipeline_writes():
     )
     bundle = evaluate_observation(registry(), observation(), datetime(2026, 10, 1, 12, tzinfo=JST))
     jsonschema.validate(json.loads(bundle.model_dump_json()), schema)
+
+
+# --- 起点をまたいで比べない -------------------------------------------------
+
+def test_a_reaction_is_not_labelled_when_the_two_numbers_share_no_basis(market_reactions):
+    """**場中発表で符号が反転する。**
+
+    `event_window_reaction` は発表直前価格を起点にすることがあり、翌営業日は
+    前日終値起点である。例: 前日終値100、発表直前120、直後126、翌日終値110。
+    直後は「発表直前から+5%」、翌日は「前日終値から+10%」となり、**急落した
+    のに `GU継続` と付く**。起点が違うなら判定しない。
+    """
+    from earnings_research.market_reaction.models import MarketReactionTracking
+    from earnings_research.prospective_hypotheses import pipeline as P
+    tracking = MarketReactionTracking.model_validate_json(
+        market_reactions["aster"].read_text(encoding="utf-8")
+    )
+    assert tracking.event_window_reaction.reference_role == P.REACTION_REFERENCE_ROLE
+    labelled = P._reaction_label(tracking)
+    assert labelled is not None
+
+    shifted = tracking.model_copy(deep=True)
+    shifted.event_window_reaction.reference_role = "pre_announcement_reference"
+    assert P._reaction_label(shifted) is None, "起点が違えば判定しない"
+
+
+def test_a_d20_return_measured_from_another_price_is_refused(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**イベントが宣言した起点と食い違う値を受け入れない。**
+
+    起点を選び直すだけで仮説の判定が変わる。ただし「どの起点が正しいか」は
+    実装が決めることではない——`docs/RETURN_BASE_PRICE_POLICY.md` が発表
+    セッションごとに承認しており、`earnings_event.return_base_price_policy` が
+    イベント単位でそれを記録する。最初の実装は `previous_close` を無条件に
+    要求し、**決算の大半を占める `after_close`（承認済みは `next_open`）を
+    塞いでいた。**
+    """
+    # イベントは `next_open` を宣言している（after_close の承認済み方針）。
+    # そこに `vwap_after_announcement` を書けば食い違う。
+    review_path = authoritative_dataset / "post_earnings_review_sample.csv"
+    fields, rows = _read_csv(review_path)
+    for row in rows:
+        if row.get("day20_return_pct", "").strip():
+            row["return_reference_price_type"] = "vwap_after_announcement"
+    _write_csv(review_path, fields, rows)
+    with pytest.raises(ValueError, match="but the event declares next_open"):
+        evaluate_observation_file(
+            cleared_registry(tmp_path), STAGED_D20, tmp_path / "basis-trials",
+            tmp_path / "basis.json", datetime(2026, 10, 1, 18, tzinfo=JST),
+            authoritative_dataset, market_reactions["aster"],
+        )
+
+
+def test_a_d20_return_written_too_soon_is_refused(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**`recorded_at` は「この review を書いた時刻」であって「20営業日目」では
+    ない。** 発表直後に書かれた review でも `day20_return_pct` を埋められ、それが
+    訂正できない trial になって status を動かす。
+
+    取引カレンダーを持ち込まないので下限だけを見る——20営業日は暦で26日を
+    下回らない。**「経った証明」ではなく「明らかに早すぎるものを弾く」検査**。
+    """
+    from earnings_research.prospective_hypotheses import pipeline as P
+    assert P.MIN_D20_ELAPSED.days == 26
+    payload = json.loads(STAGED_D20.read_text(encoding="utf-8"))
+    d20 = next(item for item in payload["returns"] if item["horizon"] == "D20")
+    too_soon = "2026-08-20T15:30:00+09:00"
+    d20["observed_at"] = too_soon
+    path = tmp_path / "premature.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    review_path = authoritative_dataset / "post_earnings_review_sample.csv"
+    fields, rows = _read_csv(review_path)
+    for row in rows:
+        if row.get("day20_return_pct", "").strip():
+            row["recorded_at"] = too_soon
+    _write_csv(review_path, fields, rows)
+
+    with pytest.raises(ValueError, match="twenty sessions cannot have elapsed"):
+        evaluate_observation_file(
+            cleared_registry(tmp_path), path, tmp_path / "soon-trials",
+            tmp_path / "soon.json", datetime(2026, 10, 1, 18, tzinfo=JST),
+            authoritative_dataset, market_reactions["aster"],
+        )
+
+
+def test_an_event_already_carrying_a_reaction_can_still_be_extended(
+    tmp_path, authoritative_dataset, market_reactions
+):
+    """**規則を厳しくした結果、既存のイベントが育てられなくなることを避ける。**
+
+    場中発表の反応は起点が揃わないので今後は導出しない。しかし旧実装の下で
+    書かれた D1 bundle には値が入っている。追記の連鎖は「確定した反応を変え
+    ない」ことを要求するので、導出できないことを理由に `None` を強いると、
+    **そのイベントは二度と D5・D20 へ育てられない。** 記録済みの値をそのまま
+    受け入れる。
+    """
+    from earnings_research.prospective_hypotheses import pipeline as P
+    from earnings_research.market_reaction.models import MarketReactionTracking
+
+    tracking = MarketReactionTracking.model_validate_json(
+        market_reactions["aster"].read_text(encoding="utf-8")
+    )
+    recorded = P._reaction_label(tracking)
+    assert recorded is not None
+
+    trials = tmp_path / "compat-trials"
+    registry = cleared_registry(tmp_path)
+    P.evaluate_observation_file(
+        registry, STAGED_D1, trials, trials / "d1.json",
+        datetime(2026, 9, 1, 18, tzinfo=JST), authoritative_dataset, market_reactions["aster"],
+    )
+    assert P._recorded_reaction(P.load_trial_bundles(trials), 
+                                CompletedEventObservation.model_validate_json(
+                                    STAGED_D1.read_text(encoding="utf-8"))) == recorded
+
+    # 起点が揃わなくなった後でも、記録済みの反応を保ったまま D5 を追記できる。
+    shifted = json.loads(market_reactions["aster"].read_text(encoding="utf-8"))
+    shifted["event_window_reaction"]["reference_role"] = "pre_announcement_reference"
+    shifted_path = tmp_path / "shifted-reaction.json"
+    shifted_path.write_text(json.dumps(shifted, ensure_ascii=False), encoding="utf-8")
+    assert P._reaction_label(MarketReactionTracking.model_validate(shifted)) is None
+
+    P.evaluate_observation_file(
+        registry, STAGED_D5, trials, trials / "d5.json",
+        datetime(2026, 9, 8, 18, tzinfo=JST), authoritative_dataset, shifted_path,
+    )
+    assert (trials / "d5.json").exists()
