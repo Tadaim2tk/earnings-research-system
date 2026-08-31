@@ -1,0 +1,27 @@
+{
+  "auto_adjust": false,
+  "fetched_at": "2026-08-30T13:02:50.174778+09:00",
+  "not_recovered": [
+    {
+      "code": "…",
+      "event_date": "2026-06-30",
+      "why": "社名もコードもプレースホルダ"
+    },
+    {
+      "code": "80310",
+      "event_date": "2026-08-04",
+      "why": "8031 と同一開示。重複計上になるので取らない"
+    },
+    {
+      "code": "80310_dup",
+      "event_date": "2026-08-04",
+      "why": "重複行の目印。8031 と同一開示・同一 content_sha256"
+    }
+  ],
+  "note": "既存の記録は上書きしない。取りこぼしを別ファイルで補う",
+  "recovered": 5,
+  "schema_version": "recovered_event_sessions_manifest_v1",
+  "sha256": "8b25c7e71ddd2bf0ea363c7bd2f8246147e5b793a99eff0292ab53cb31be7f8f",
+  "source": "yfinance",
+  "supplements": "legacy_event_sessions.jsonl"
+}
