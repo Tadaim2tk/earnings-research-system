@@ -103,10 +103,15 @@ def test_a_future_exit_is_not_the_same_as_a_delisting():
     # **終了は証拠があって初めて言える。** 端より前で切れているだけなら
     # `end_unconfirmed`——休場・売買停止・その銘柄だけの取得の欠けが同じ形を作る。
     unconfirmed = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
+    # **「終わった」だけでは時点を主張できない。** 確かめた最終立会が系列の
+    # 最終日と一致して初めて、末尾が欠けていないと言える。
+    ended_only = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                                series_ended=True)
     confirmed = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
-                               series_ended=True)
+                               series_ended=True, ended_on="2023-03-10")
     assert alive == "not_yet_observable"
     assert unconfirmed == "end_unconfirmed"
+    assert ended_only == "end_unconfirmed"
     assert confirmed == "ended_before_exit"
 
 
@@ -157,7 +162,7 @@ def test_ending_before_the_cutoff_is_not_evidence_of_a_delisting():
     """
     without = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28")
     with_evidence = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
-                                   series_ended=True)
+                                   series_ended=True, ended_on="2023-03-10")
     assert without == "end_unconfirmed"
     assert with_evidence == "ended_before_exit"
     assert "end_unconfirmed" in C.RETURN_STATES
@@ -182,5 +187,27 @@ def test_a_confirmed_ending_at_the_cutoff_is_still_an_ending():
     側に入れない。実際には出口へ届かない。
     """
     assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28",
-                          series_ended=True) == "ended_before_exit"
+                          series_ended=True, ended_on="2026-08-28") == "ended_before_exit"
     assert C.return_state("2026-08-20", None, 3, 22, "2026-08-28", "2026-08-28") == "not_yet_observable"
+
+
+def test_a_confirmed_ending_alone_does_not_place_it_before_this_exit():
+    """**「終わった」と「この出口より前に終わった」は別の主張である。**
+
+    `series_ended=True` が示すのは前者だけ。系列に内部の欠けがあると
+    `sessions_after_entry` は実際より少なく出るので、出口を越えて売買していた
+    銘柄でも本数が足りなく見える。**数えた本数が少ないことを、終わった時点の
+    証拠に流用しない。**
+    """
+    # 上場廃止は確かめたが、系列の最終日と最終立会が食い違う（末尾が欠けている）
+    gappy = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                           series_ended=True, ended_on="2023-06-30")
+    # 確かめた最終立会が系列の最終日と一致する
+    tail_intact = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                                 series_ended=True, ended_on="2023-03-10")
+    # 欠けが無いことを別途確認済み
+    complete = C.return_state("2023-03-08", None, 3, 22, "2023-03-10", "2026-08-28",
+                              series_ended=True, series_complete=True)
+    assert gappy == "end_unconfirmed"
+    assert tail_intact == "ended_before_exit"
+    assert complete == "ended_before_exit"

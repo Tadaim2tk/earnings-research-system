@@ -79,16 +79,19 @@ def coverage_state(first: Optional[str], last: Optional[str],
     `first`/`last` が `None` は取得できていない場合で、**空の系列を
     「窓の外で上場した」と読み替えない。**
     """
+    # **窓の検査を先にする。** 取れなかった銘柄の早期returnを先に置くと、
+    # 壊れた窓（逆順・不正な表記）でも「取得できなかった」ともっともらしく
+    # 返ってしまい、**設定の誤りが銘柄ごとのデータの有無に左右される**。
+    window_first = _checked_day(window_first)
+    window_last = _checked_day(window_last)
+    if window_first > window_last:
+        raise MalformedDay("%s..%s" % (window_first, window_last))
     if first is None or last is None:
         return "source_unavailable"
     first = _checked_day(first)
     last = _checked_day(last)
-    window_first = _checked_day(window_first)
-    window_last = _checked_day(window_last)
     if first > last:
         raise MalformedDay("%s..%s" % (first, last))
-    if window_first > window_last:
-        raise MalformedDay("%s..%s" % (window_first, window_last))
     late = first > window_first
     early = last < window_last
     if late and early:
@@ -104,7 +107,9 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
                  sessions_after_entry: Optional[int], sessions_needed: int,
                  series_last: Optional[str],
                  observed_through: Optional[str] = None,
-                 series_ended: Optional[bool] = None) -> str:
+                 series_ended: Optional[bool] = None,
+                 ended_on: Optional[str] = None,
+                 series_complete: Optional[bool] = None) -> str:
     """1つの出口について、測れたか・測れないならなぜか。
 
     `entry_day` / `exit_day` は系列上で実際に値が取れた日で、取れなければ
@@ -131,6 +136,19 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
     外から確かめた事実）が無ければ `end_unconfirmed` に留める。証拠なしに
     「終わった」と書くと、上場が続いている銘柄が消えた側のコホートに入り、
     直そうとした生存バイアスを逆向きに入れることになる。
+
+    **「終わった」と「この出口より前に終わった」は別の主張である。**
+    `series_ended=True` が示すのは前者だけで、後者は本数の数え方に依存する。
+    系列に内部の欠けがあると `sessions_after_entry` は実際より少なく出るので、
+    出口を越えて売買していた銘柄でも本数が足りなく見える。時点を主張するには
+    次のどちらかが要る。
+
+    `ended_on`        確かめた最終立会。系列の最終日と一致すれば、末尾は欠けて
+                      いない。
+    `series_complete` この窓で系列に欠けが無いことを確認済み。
+
+    どちらも無ければ `end_unconfirmed` に留める。**数えた本数が少ないことを、
+    終わった時点の証拠に流用しない。**
     """
     if series_last is None:
         return "source_unavailable"
@@ -153,7 +171,14 @@ def return_state(entry_day: Optional[str], exit_day: Optional[str],
         # たまたまデータの端と同じ日だった銘柄が「まだ来ていない」側に入る。
         # 実際には出口へ届かない。
         if series_ended is True:
-            return "ended_before_exit"
+            # 終わったことは分かっても、この出口より前かは本数の数え方に依存する。
+            # 欠けが無いと確かめられた場合だけ、時点を主張する。
+            if series_complete is True:
+                return "ended_before_exit"
+            if ended_on is not None and \
+                    _checked_day(series_last) == _checked_day(ended_on):
+                return "ended_before_exit"
+            return "end_unconfirmed"
         if observed_through is None:
             return "ended_before_exit"
         if _checked_day(series_last) >= _checked_day(observed_through):
