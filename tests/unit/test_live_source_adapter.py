@@ -285,6 +285,97 @@ def test_calendar_reads_announcement_dates_and_ignores_other_events():
     assert "2027-02-15" not in result.stable_metadata["approximate_schedule"]
 
 
+# 2026年8月下旬、アイスコのIRカレンダーが日付を落として月だけの表になった。
+# 見出し行に12か月が続けて並び、その下に発表内容が別の行で置かれる。月と内容の
+# 対応は並び順では取れない（CSSの格子で合わせている）。同じ内容が、月と内容が
+# 交互に並ぶ形でもう一度出る。取り違えると見出し行の最後の3月に、次の行の先頭の
+# 決算発表が付く。
+MONTH_ONLY_CALENDAR_HTML = """<html><head><title>IRカレンダー | アイスコ IR情報</title></head><body>
+<h1>IRカレンダー</h1>
+<h4>年間スケジュール</h4>
+<div class="ifc-grid">
+  <div class="ifc-qhead">第1四半期</div><div class="ifc-qhead">第2四半期</div>
+  <div class="ifc-qhead">第3四半期</div><div class="ifc-qhead">第4四半期</div>
+  <div class="ifc-month">4月</div><div class="ifc-month">5月</div>
+  <div class="ifc-month">6月</div><div class="ifc-month">7月</div>
+  <div class="ifc-month">8月</div><div class="ifc-month">9月</div>
+  <div class="ifc-month">10月</div><div class="ifc-month">11月</div>
+  <div class="ifc-month">12月</div><div class="ifc-month">1月</div>
+  <div class="ifc-month">2月</div><div class="ifc-month">3月</div>
+  <div class="ifc-ev"><p class="ifc-lbl">決算<br>発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">定時<br>株主総会</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第１四半期<br>決算発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第２四半期<br>決算発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第３四半期<br>決算発表</p></div>
+</div>
+<div class="ifc-sp">
+  <div class="ifc-spq-label">第１四半期</div>
+  <div class="ifc-month">4月</div>
+  <div class="ifc-month">5月</div><p class="ifc-lbl">決算<br>発表</p>
+  <div class="ifc-month">6月</div><p class="ifc-lbl">定時<br>株主総会</p>
+  <div class="ifc-spq-label">第２四半期</div>
+  <div class="ifc-month">7月</div>
+  <div class="ifc-month">8月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>
+  <div class="ifc-month">9月</div>
+  <div class="ifc-spq-label">第３四半期</div>
+  <div class="ifc-month">10月</div>
+  <div class="ifc-month">11月</div><p class="ifc-lbl">第２四半期<br>決算発表</p>
+  <div class="ifc-month">12月</div>
+  <div class="ifc-spq-label">第４四半期</div>
+  <div class="ifc-month">1月</div>
+  <div class="ifc-month">2月</div><p class="ifc-lbl">第３四半期<br>決算発表</p>
+  <div class="ifc-month">3月</div>
+</div>
+</body></html>"""
+
+
+def test_a_month_only_calendar_is_read_without_inventing_dates():
+    """**取得元が日付を落としても、監視できる中身は残っている。**
+
+    日付が消えたことで読めなくなり、監視は `stopped` に落ちた。読めない状態で
+    「変更なし」と報告しない設計なので停止そのものは正しいが、月と発表内容は
+    公表され続けている。**無い精度を足さずに、公表された粒度のまま持つ。**
+    """
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    assert meta["monthly_schedule"] == (
+        "5月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+    # 日付が無いのだから、日付の欄は空のままにする。作らない。
+    assert meta["earnings_schedule"] == "none"
+    assert meta["approximate_schedule"] == "none"
+
+
+def test_a_month_only_calendar_does_not_borrow_a_label_from_the_next_row():
+    """見出し行では12か月が続けて並び、発表内容は別の行にある。並び順で対応を
+    取ると、**最後の3月に次の行の先頭の決算発表が付く**。続く月の数で見出し行を
+    見分ける。"""
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    assert "3月=" not in meta["monthly_schedule"]
+    # 定時株主総会は発表ではない。月だけの形でも同じ扱いにする。
+    assert "6月=" not in meta["monthly_schedule"]
+
+
+def test_a_month_only_calendar_moves_the_fingerprint_when_a_month_moves():
+    """月が動いたら気づける。粒度が落ちても、監視の目的は果たせる。"""
+    baseline = build_metadata_fingerprint(observe_calendar(MONTH_ONLY_CALENDAR_HTML))
+    moved = MONTH_ONLY_CALENDAR_HTML.replace(
+        '<div class="ifc-month">8月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>',
+        '<div class="ifc-month">9月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>')
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+def test_a_calendar_with_neither_dates_nor_months_still_refuses_to_report_no_change():
+    """**読めないものを黙って通さない。** 日付も月も取れない形になったら、
+    そこで落として人の判断を求める。"""
+    empty = ("<html><head><title>IRカレンダー</title></head>"
+             "<body><h1>IRカレンダー</h1><p>準備中です</p></body></html>")
+    # 読めないときは観測の失敗として返る。**「変更なし」にはならない。**
+    result = observe_calendar(empty)
+    assert not isinstance(result, SourceObservation)
+    assert result.error_code == "parse_error"
+
+
 def test_calendar_ignores_dates_inside_script_tags():
     assert "2099" not in observe_calendar().stable_metadata["earnings_schedule"]
 
