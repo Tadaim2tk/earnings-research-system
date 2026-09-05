@@ -346,6 +346,46 @@ def test_a_month_only_calendar_is_read_without_inventing_dates():
     assert meta["approximate_schedule"] == "none"
 
 
+def test_a_month_only_calendar_reaches_the_checkpoint_summary():
+    """**拾った月が、通知と引き継ぎまで届くこと。**
+
+    `monthly_schedule` を指紋に入れただけでは、`last_seen_schedule` は空のまま
+    になり、通知は `earnings_schedule: none` と出る。**読めるようにした予定が
+    通知に出てこないなら、この変更は目的を果たしていない。**
+    """
+    from earnings_research.monitoring.runtime import _schedule_summary
+
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    summary = _schedule_summary(meta)
+    assert "11月=第２四半期決算発表" in summary
+    assert summary != ""
+    # 日付の欄が none のときに "none" の文字が混ざらないこと。
+    assert "none" not in summary
+
+
+def test_the_schedule_summary_joins_dates_and_months_without_none():
+    """日付・概算・月だけ、どの組み合わせでも `none` を混ぜない。"""
+    from earnings_research.monitoring.runtime import _schedule_summary
+
+    assert _schedule_summary(
+        {"earnings_schedule": "2026-11-06=第2四半期決算発表",
+         "approximate_schedule": "none", "monthly_schedule": "none"}
+    ) == "2026-11-06=第2四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "none", "approximate_schedule": "none",
+         "monthly_schedule": "8月=第１四半期決算発表"}
+    ) == "8月=第１四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "2026-11-06=第2四半期決算発表",
+         "approximate_schedule": "none",
+         "monthly_schedule": "8月=第１四半期決算発表"}
+    ) == "2026-11-06=第2四半期決算発表 | 8月=第１四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "none", "approximate_schedule": "none",
+         "monthly_schedule": "none"}
+    ) == ""
+
+
 def test_a_month_only_calendar_does_not_borrow_a_label_from_the_next_row():
     """見出し行では12か月が続けて並び、発表内容は別の行にある。並び順で対応を
     取ると、**最後の3月に次の行の先頭の決算発表が付く**。続く月の数で見出し行を
