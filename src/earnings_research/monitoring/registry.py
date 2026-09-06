@@ -9,6 +9,9 @@ from earnings_research.monitoring.stale import _business_days_until
 from earnings_research.validation.validator import load_spec, validate_monitor_registry
 
 
+JST = timezone(timedelta(hours=9))
+
+
 class RegistryError(ValueError):
     """Raised when Human-owned configuration is incomplete or invalid."""
 
@@ -34,12 +37,18 @@ def active_target_plan(
     planned_at: Optional[datetime] = None,
     force: bool = False,
     observed_event_dates: Optional[Dict[str, str]] = None,
+    last_success_times: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, str]]:
     """Return only explicitly enabled, activated, approved Level 2 targets.
 
     ``observed_event_dates`` maps a target to the announcement date read from
     its schedule source. It takes precedence over the registry column so a date
     the company moved does not have to be retyped by hand.
+
+    ``last_success_times`` maps a target to the ``last_success_at`` carried by
+    its own committed checkpoint. It decides the normal day, so a dropped cron
+    slot no longer costs the whole day. A target that is missing from it falls
+    back to the clock.
     """
     active = [
         dict(row)
@@ -55,13 +64,21 @@ def active_target_plan(
             row["event_date"] = observed
     if force or planned_at is None:
         return active
-    return [row for row in active if _is_due(row, planned_at)]
+    return [
+        row
+        for row in active
+        if _is_due(
+            row,
+            planned_at,
+            (last_success_times or {}).get(row["monitor_target_id"], ""),
+        )
+    ]
 
 
-def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
+def _is_due(target: Dict[str, str], planned_at: datetime, last_success: str = "") -> bool:
     if planned_at.tzinfo is None or planned_at.utcoffset() is None:
         raise RegistryError("planned_at must be timezone-aware")
-    local = planned_at.astimezone(timezone(timedelta(hours=9)))
+    local = planned_at.astimezone(JST)
     if local.weekday() >= 5:
         return False
     event_date = target.get("event_date", "")
@@ -74,10 +91,35 @@ def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
             return True
         if local.date() < parsed_event_date and _business_days_until(local.date(), parsed_event_date) <= 5:
             return True
-    # Only the 17:17 slot owns the normal-day window, preserving one request per
-    # day. It follows the close, so a same-day disclosure is seen the same day
-    # instead of waiting for the next morning.
-    return 17 <= local.hour < 21
+    # 通常日は一日一度で足りるが、**どの枠が動いたかで決めると枠が落ちた日が
+    # 丸ごと消える。** 2026-08-29以降GitHubは6枠のうち4枠しか出さなくなり、
+    # 落ちた枠が 17:17 JST だったので、5営業日続けて誰も観測しなかった。
+    # workflow は success を返し続けた。
+    #
+    # だから「今日もう成功したか」で決める。まだなら大引け後のどの枠でも走る。
+    # 17:17 が落ちても 21:17 が拾う。一日一度は時計ではなく事実で守る。
+    observed_on = _local_date(last_success)
+    if observed_on is None:
+        # 状態が読めないときだけ従来の窓に戻す。**空文字と読めない文字列は
+        # 同じ扱いにする** ——どちらも「どの日に観測できたか」を言っていない。
+        # 上限のない再試行にはしないので、要求の頻度は前と変わらない。
+        return 17 <= local.hour < 21
+    if observed_on == local.date():
+        return False
+    return local.hour >= 17
+
+
+def _local_date(value: str) -> Optional[date]:
+    """Return the JST calendar date of a checkpoint timestamp, or None."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(JST).date()
 
 
 def next_announcement_date(schedule: str, on_or_after: date) -> Optional[str]:

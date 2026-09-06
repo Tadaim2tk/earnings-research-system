@@ -35,15 +35,17 @@ def plan_registry(
     fixture_name: Optional[str],
     planned_at: Optional[str] = None,
     force: bool = False,
-    schedule_state_dir: Optional[Path] = None,
+    previous_state_dir: Optional[Path] = None,
 ) -> int:
     rows = load_registry(registry_path)
     planned = _aware_datetime(planned_at, "planned_at") if planned_at else None
     observed = {}
-    if schedule_state_dir is not None and planned is not None:
+    successes = {}
+    if previous_state_dir is not None and planned is not None:
+        successes = _last_success_times(Path(previous_state_dir))
         observed = observed_event_dates(
             rows,
-            _published_schedules(Path(schedule_state_dir)),
+            _published_schedules(Path(previous_state_dir)),
             planned.astimezone(JST).date(),
         )
         unresolved = sorted(
@@ -62,7 +64,11 @@ def plan_registry(
                 file=sys.stderr,
             )
     targets = active_target_plan(
-        rows, planned_at=planned, force=force, observed_event_dates=observed
+        rows,
+        planned_at=planned,
+        force=force,
+        observed_event_dates=observed,
+        last_success_times=successes,
     )
     if target_id:
         targets = [target for target in targets if target.get("monitor_target_id") == target_id]
@@ -222,14 +228,29 @@ def build_handoff(bundle_dir: Path, output_path: Path) -> int:
 
 
 def _published_schedules(state_dir: Path) -> Dict[str, str]:
-    """Read last_seen_schedule from every downloaded schedule-source bundle.
+    """Read last_seen_schedule from every downloaded bundle.
 
     A missing or unreadable bundle simply contributes nothing, so planning falls
     back to the registry column instead of failing the run.
     """
-    schedules = {}
+    return _checkpoint_field(state_dir, "last_seen_schedule")
+
+
+def _last_success_times(state_dir: Path) -> Dict[str, str]:
+    """Read last_success_at from every downloaded bundle.
+
+    A target whose bundle is missing contributes nothing, and planning falls
+    back to the clock for it. That is the fail-safe direction: an unknown
+    target is treated as not yet observed today.
+    """
+    return _checkpoint_field(state_dir, "last_success_at")
+
+
+def _checkpoint_field(state_dir: Path, field: str) -> Dict[str, str]:
+    """Map each committed checkpoint's target to one of its fields."""
+    values = {}
     if not state_dir.is_dir():
-        return schedules
+        return values
     for checkpoint_path in sorted(state_dir.glob("**/checkpoint.json")):
         try:
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -240,10 +261,10 @@ def _published_schedules(state_dir: Path) -> Dict[str, str]:
             # would fail the plan and skip every target for that slot.
             continue
         target = str(checkpoint.get("monitor_target_id", ""))
-        schedule = str(checkpoint.get("last_seen_schedule", ""))
-        if target and schedule:
-            schedules[target] = schedule
-    return schedules
+        value = str(checkpoint.get(field, ""))
+        if target and value:
+            values[target] = value
+    return values
 
 
 def notify_state(
