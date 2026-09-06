@@ -55,21 +55,36 @@ jobs:
           python-version: "3.11.9"
           cache: pip
       - run: python -m pip install -e .
-      - name: Fetch published schedules
-        # The announcement date comes from the calendar target's own committed
-        # state, so a date the company moves does not have to be retyped into
-        # the registry. A missing bundle just leaves the registry value in use.
+      - name: Fetch committed state for planning
+        # Two things are read from the same bundles. The announcement date comes
+        # from the calendar target's own state, so a date the company moves does
+        # not have to be retyped into the registry. The last success decides
+        # whether the normal day still needs an observation, so a cron slot the
+        # scheduler drops no longer costs the whole day. A missing bundle just
+        # leaves the registry value and the clock in use.
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          sources=$(python -c 'import csv;print(" ".join(sorted({r["schedule_source_target_id"] for r in csv.DictReader(open("data/config/monitor_targets.csv",encoding="utf-8-sig")) if r["schedule_source_target_id"]})))')
-          for source in $sources; do
+          targets=$(python -c '
+          import csv
+          rows = list(csv.DictReader(open("data/config/monitor_targets.csv", encoding="utf-8-sig")))
+          active = {
+              r["monitor_target_id"]
+              for r in rows
+              if r["enabled"].lower() == "true"
+              and r["activation_state"] == "activated"
+              and r["monitoring_level"] == "level_2"
+              and r["automated_access_permitted"].lower() == "true"
+          }
+          sources = {r["schedule_source_target_id"] for r in rows if r["schedule_source_target_id"]}
+          print(" ".join(sorted(active | sources)))')
+          for target in $targets; do
             python -m earnings_research.cli monitor-fetch-state \
               --repository "$REPOSITORY" \
-              --target-id "$source" \
-              --output ".monitor/schedules/$source" || true
+              --target-id "$target" \
+              --output ".monitor/previous-state/$target" || true
           done
       - id: plan
         env:
@@ -94,7 +109,7 @@ jobs:
           else
             matrix=$(python -m earnings_research.cli monitor-plan \
               data/config/monitor_targets.csv \
-              --schedule-state .monitor/schedules \
+              --previous-state .monitor/previous-state \
               --planned-at "$(date --iso-8601=seconds)")
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
