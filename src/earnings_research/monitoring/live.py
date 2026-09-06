@@ -842,6 +842,10 @@ _SCHEDULE_LABEL_WINDOW = 40
 # 月だけの行は、日付を作らずに月とラベルのまま持つ。年も日も無いことが
 # `monthly_schedule` という別の欄であることから読める。**無い精度を足さない。**
 _SCHEDULE_MONTH_ONLY = re.compile(r"^\s*(\d{1,2})\s*月\s*$")
+# 日付が節に割れると `2026年` `11月` `13日` の3つに分かれ、`_SCHEDULE_DATE` は
+# どれにも一致しない。月の隣にこれらが居るかで、割れた日付を見分ける。
+_SCHEDULE_YEAR_ONLY = re.compile(r"^\s*20\d{2}\s*年\s*$")
+_SCHEDULE_DAY_HEAD = re.compile(r"^\s*\d{1,2}\s*日")
 # 見出し行は12か月が続けて並ぶ。月とラベルが交互に来る側は、続いても2か月まで。
 # 続く月の数で両者を分ける。見出し行の最後の月に、次の行の先頭のラベルが
 # 付いてしまうのを避けるため。
@@ -905,6 +909,18 @@ def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
     return generic
 
 
+def _split_date_fragment(segments, index: int) -> bool:
+    """月の前後に年や日の断片が並んでいれば、それは割れた日付である。
+
+    見出し行の12か月は続く月の数で既に外れているので、ここへ来るのは1つか2つ
+    しか続かない月に限られる。`2026年` の見出しの下に月の格子が並ぶ形は
+    そちらで落ちる。
+    """
+    before = segments[index - 1] if index else ""
+    after = segments[index + 1] if index + 1 < len(segments) else ""
+    return bool(_SCHEDULE_YEAR_ONLY.match(before) or _SCHEDULE_DAY_HEAD.match(after))
+
+
 def _monthly_schedule(segments) -> List[str]:
     """月だけが公表されている表から、月と発表内容を拾う。
 
@@ -930,6 +946,13 @@ def _monthly_schedule(segments) -> List[str]:
 
     out = []
     for i in sorted(usable):
+        # **日付が節に割れているだけの行を、月だけの行と読まない。**
+        # `<span>2026年</span><span>11月</span><span>13日</span>` は
+        # `_SCHEDULE_DATE` に一致しないので月だけの側へ落ちるが、日付は公表
+        # されている。そのまま通すと「日付は無い」と報告し、ラベルには
+        # `11月=13日…決算発表` が残る。**取り違えた読み方で観測を成功させない。**
+        if _split_date_fragment(segments, i):
+            raise ValueError("IR calendar splits a full date across nodes")
         month = int(_SCHEDULE_MONTH_ONLY.match(segments[i]).group(1))
         if not 1 <= month <= 12:
             continue

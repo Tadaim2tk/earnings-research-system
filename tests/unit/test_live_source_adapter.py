@@ -448,6 +448,53 @@ def test_a_dated_calendar_does_not_pick_up_months_from_a_header_grid():
     assert observe_calendar().stable_metadata["monthly_schedule"] == "none"
 
 
+SPLIT_DATE_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td><span>2026年</span><span>11月</span><span>13日</span></td>
+      <td>2027年3月期第2四半期決算発表</td></tr>
+</table>
+</body></html>"""
+
+DAY_SPLIT_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td>11月</td><td>13日</td><td>第2四半期決算発表</td></tr>
+</table>
+</body></html>"""
+
+
+@pytest.mark.parametrize(
+    "html", [SPLIT_DATE_CALENDAR_HTML, DAY_SPLIT_CALENDAR_HTML],
+    ids=["year-month-day", "month-day"],
+)
+def test_a_full_date_split_across_nodes_is_not_read_as_a_month_only_row(html):
+    """**割れた日付を、月だけの行と読み違えない。**
+
+    `<span>2026年</span><span>11月</span><span>13日</span>` は `_SCHEDULE_DATE`
+    に一致しないので月だけの側へ落ちる。そのまま通すと、日付は公表されているのに
+    「日付は無い」と報告し、ラベルには `11月=13日…決算発表` が残った。
+    **取り違えた読み方で観測を成功させない。** 読めない形として落とす。
+    """
+    result = observe_calendar(html)
+    assert not isinstance(result, SourceObservation)
+    assert result.error_code == "parse_error"
+
+
+def test_a_year_heading_above_a_month_grid_is_not_mistaken_for_a_split_date():
+    """年の見出しの下に12か月の格子が並ぶ形は、割れた日付ではない。
+
+    続く月の数で見出し行が先に外れるので、割れた日付の検査までは来ない。
+    """
+    html = ("<html><head><title>IRカレンダー</title></head><body><p>2026年</p><table><tr>"
+            + "".join("<th>%d月</th>" % m for m in list(range(4, 13)) + [1, 2, 3])
+            + "</tr></table><table><tr><td>2026年11月13日</td>"
+              "<td>2027年3月期第2四半期決算発表</td></tr></table></body></html>")
+    meta = observe_calendar(html).stable_metadata
+    assert meta["earnings_schedule"] == "2026-11-13=2027年3月期第2四半期決算発表"
+    assert meta["monthly_schedule"] == "none"
+
+
 def test_a_calendar_with_neither_dates_nor_months_still_refuses_to_report_no_change():
     """**読めないものを黙って通さない。** 日付も月も取れない形になったら、
     そこで落として人の判断を求める。"""
