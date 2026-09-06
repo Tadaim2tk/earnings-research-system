@@ -81,10 +81,15 @@ jobs:
           sources = {r["schedule_source_target_id"] for r in rows if r["schedule_source_target_id"]}
           print(" ".join(sorted(active | sources)))')
           for target in $targets; do
+            # 展開は検証より先に起きる。検証が落ちた出力を残すと、planは
+            # manifest を見ずに checkpoint.json を読むので、**検証されていない
+            # 「今日もう成功した」が monitor ジョブを止められる。**
+            # 落ちた出力は消す。読むのは成功した取得の結果だけにする。
             python -m earnings_research.cli monitor-fetch-state \
               --repository "$REPOSITORY" \
               --target-id "$target" \
-              --output ".monitor/previous-state/$target" || true
+              --output ".monitor/previous-state/$target" \
+              || rm -rf ".monitor/previous-state/$target"
           done
       - id: plan
         env:
