@@ -63,6 +63,20 @@ def plan_registry(
                 % ", ".join(unresolved),
                 file=sys.stderr,
             )
+        unknown = sorted(
+            row["monitor_target_id"]
+            for row in active_target_plan(rows)
+            if row["monitor_target_id"] not in successes
+        )
+        if unknown:
+            # 同じ理由で、こちらも黙って戻らない。状態が読めない対象は通常日の
+            # 判定が時計に戻り、**枠が落ちた日がまた見えないまま消える。**
+            # 消えたことが読める状態にしておく。
+            print(
+                "previous state unresolved, planning the normal day from the clock: %s"
+                % ", ".join(unknown),
+                file=sys.stderr,
+            )
     targets = active_target_plan(
         rows,
         planned_at=planned,
