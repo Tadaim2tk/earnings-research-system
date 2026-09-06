@@ -884,7 +884,15 @@ def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
             except ValueError as exc:
                 raise ValueError("IR calendar row has an invalid date") from exc
             exact.append("%s=%s" % (parsed.isoformat(), label))
-    monthly = _monthly_schedule(segments) if not exact and not approximate else []
+    # 日付の行がある表でも、月だけの行を落とさない。**日付が1行でもあれば
+    # 月だけの側を見ない書き方にしていたが、それは混在した表で「2月＝第3四半期
+    # 決算発表」が3月へ動いても指紋が変わらないということだった** ——観測は
+    # 成功し、`no_change` と報告される。読めるものを黙って捨てない。
+    #
+    # 日付だけの表から拾ってしまう心配は要らない。`^N月$` に一致するのは月だけ
+    # を置いた行で、`2026年11月13日 …` の行は一致しない。12か月が並ぶ見出しは
+    # 続く月の数で外れる。
+    monthly = _monthly_schedule(segments)
     if not exact and not approximate and not monthly:
         raise ValueError("IR calendar contains no earnings announcement row")
     if len(exact) + len(approximate) + len(monthly) > _MAX_SCHEDULE_ROWS:

@@ -405,6 +405,49 @@ def test_a_month_only_calendar_moves_the_fingerprint_when_a_month_moves():
     assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
 
 
+MIXED_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td>2026年11月13日</td><td>2027年3月期第2四半期決算発表</td></tr>
+</table>
+<table>
+  <tr><td>2月</td><td>第３四半期</td><td>決算発表</td></tr>
+</table>
+</body></html>"""
+
+
+def test_a_mixed_calendar_keeps_the_month_only_rows_too():
+    """**日付の行があっても、月だけの行を捨てない。**
+
+    取得元が日付を落とすのは一度に全部とは限らない。近い四半期だけ日を出し、
+    先の四半期は月だけ、という形が自然な途中経過である。日付が1行でもあれば
+    月だけの側を見ない書き方だと、そこが丸ごと死角になる。
+    """
+    meta = observe_calendar(MIXED_CALENDAR_HTML).stable_metadata
+    assert meta["earnings_schedule"] == "2026-11-13=2027年3月期第2四半期決算発表"
+    assert meta["monthly_schedule"] == "2月=第３四半期決算発表"
+
+
+def test_a_mixed_calendar_moves_the_fingerprint_when_only_the_month_row_moves():
+    """**動いたのが月だけの行でも気づける。**
+
+    死角だったときの症状は「観測は成功し、`no_change` と報告される」で、
+    落ちてくれない分だけ質が悪い。日付の行は動かさずに月だけを動かす。
+    """
+    baseline = build_metadata_fingerprint(observe_calendar(MIXED_CALENDAR_HTML))
+    moved = MIXED_CALENDAR_HTML.replace("<td>2月</td>", "<td>3月</td>")
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+def test_a_dated_calendar_does_not_pick_up_months_from_a_header_grid():
+    """月だけの読み取りを常に走らせても、日付だけの表からは何も拾わない。
+
+    `^N月$` に一致するのは月だけを置いた行で、`2026年11月13日 …` は一致しない。
+    12か月が続けて並ぶ見出しは、続く月の数で外れる。
+    """
+    assert observe_calendar().stable_metadata["monthly_schedule"] == "none"
+
+
 def test_a_calendar_with_neither_dates_nor_months_still_refuses_to_report_no_change():
     """**読めないものを黙って通さない。** 日付も月も取れない形になったら、
     そこで落として人の判断を求める。"""
