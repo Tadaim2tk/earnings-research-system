@@ -59,11 +59,25 @@ jobs:
           owner="${REPO%%/*}"
           name="${REPO##*/}"
           arrived=0
+          # **指摘が無いとき、Codexはレビューではなく普通のコメントで返す。**
+          # 2026-09-06 実測: PR #82 は `Codex Review: Didn't find any major issues.`
+          # を issue comment として投稿し、`pulls/N/reviews` には何も現れなかった。
+          # レビューだけを数えていると **きれいなPRは必ず「レビュー未着」になり、
+          # fail-open で通る。**「Codexが止まっている」と「見て問題なかった」が
+          # 区別できない。どちらの形も本文に `Reviewed commit: <sha>` を持つので、
+          # 現在の head を名指すボットのコメントも到着として数える。
+          short="${HEAD_SHA:0:10}"
           for i in $(seq 1 40); do
             # レビューは現在のhead SHAに対するものだけを数える(古いレビューでの即グリーン防止)。
             n=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
               2>/dev/null | awk '{s+=$1} END {print s+0}')
+            # コメント側も現在の head を名指すものだけ数える。古い回の文言で
+            # 即グリーンにしないため、レビュー側と同じ条件にそろえる。
+            c=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+              --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\") | select(.body | contains(\"Reviewed commit\")) | select(.body | contains(\"$short\"))] | length" \
+              2>/dev/null | awk '{s+=$1} END {print s+0}')
+            n=$((n + c))
             if [ "$n" -gt 0 ]; then
               arrived=1
               # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。

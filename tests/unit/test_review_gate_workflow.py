@@ -74,3 +74,37 @@ def test_the_gate_still_runs_on_every_pull_request_event_it_did_before():
     # `on` は YAML では真偽値 True として読まれる。
     triggers = parsed[True]["pull_request"]["types"]
     assert triggers == ["opened", "reopened", "synchronize", "ready_for_review"]
+
+
+def test_a_clean_review_counts_as_arrived():
+    """**指摘が無いとき、Codexはレビューではなく普通のコメントで返す。**
+
+    2026-09-06 実測: PR #82 は `Codex Review: Didn't find any major issues.` を
+    issue comment として投稿し、`pulls/N/reviews` には何も現れなかった。
+    レビューだけを数えると**きれいなPRは必ず「レビュー未着」になり fail-open で
+    通る。**「Codexが止まっている」と「見て問題なかった」が区別できない。
+    """
+    raw, parsed = gate()
+    wait = [
+        step
+        for step in parsed["jobs"]["wait-for-codex-review"]["steps"]
+        if step.get("name", "").startswith("Wait for Codex")
+    ][0]["run"]
+    assert 'issues/$PR/comments' in wait
+    assert "Reviewed commit" in wait
+    # コメント側も現在の head を名指すものだけ数える。古い回の文言で即グリーンに
+    # しないため、レビュー側と同じ条件にそろえる。
+    assert 'short="${HEAD_SHA:0:10}"' in raw
+    assert 'contains(\\"$short\\")' in wait
+    assert "n=$((n + c))" in wait
+
+
+def test_the_unresolved_finding_check_still_decides_the_outcome():
+    """到着の数え方を広げても、成功条件は「未解決スレッドがゼロ」のまま。"""
+    wait = [
+        step
+        for step in gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+        if step.get("name", "").startswith("Wait for Codex")
+    ][0]["run"]
+    assert 'if [ "$unresolved" = "0" ]; then' in wait
+    assert "Codex findings are still unresolved after 20 min" in wait
