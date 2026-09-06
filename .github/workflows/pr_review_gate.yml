@@ -26,7 +26,29 @@ jobs:
   wait-for-codex-review:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      pull-requests: write
     steps:
+      - name: Ask Codex to review this head
+        # Codexが動くのは「PRを開いた」「draftをreadyにした」「@codex review と
+        # 書いた」の3つだけで、**pushは入っていない**（レビュー本文が明示している）。
+        # 待つだけの実装では、指摘を直してpushするほどレビューは来なくなり、
+        # 20分後のfail-openで緑になる。**直すほどゲートが形骸化していた。**
+        #
+        # 2026-09-06 実測: PR #80/#81 とも push 後にレビューが来ず
+        # `No Codex review within 20 min` で通過。コメントで呼ぶと2分で届いた。
+        #
+        # 呼ぶのは synchronize のときだけにする。opened / reopened /
+        # ready_for_review は Codex 自身の発火条件なので、重ねて呼ぶと同じ head を
+        # 二度レビューさせ、利用上限を余計に使う。
+        if: github.event.action == 'synchronize'
+        # 呼べなくても待つ側は動く。上限に当たったときに、ここで赤くしない。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent
       - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2621,10 +2621,13 @@ Amendment が、混在ページでこの形にも当たるようにしていた�
 テスト 1356→1358。
 ## ERS-ADR-0081
 
+## ERS-ADR-0082
+
 Date: 2026-09-06
 
 Status: Accepted
 
+<<<<<<< HEAD
 Approval: 通常日の観測が単一のcron枠に依存していた件の修理。
 gap_acknowledgement の投入（`requires_human_decision: true`）は本ADRの範囲外。
 
@@ -2736,3 +2739,58 @@ plan は「取りに行くべきか」を、再判定は「その後に誰かが
   **決め打ちの文言をやめた。**
 
 テスト 1381→1383。
+=======
+Approval: レビューゲートが、来ないレビューを待っていた件の修理。
+
+Note: 番号は0082。0080は PR #80、0081は PR #81 が起案済み。本ADRはそれらと
+独立で、main から分岐している。
+
+Context: ERS-ADR-0039/0040 の Codex review gate は「現在の head に対する
+Codex レビューが届き、未解決の指摘スレッドがゼロ」で成功、20分来なければ
+fail-open で通す設計である。fail-open は Codex 側の停止で全マージが詰まることを
+防ぐ意図だった。
+
+**その「来なければ」が、ほぼ常に成立していた。** Codex のレビュー本文が
+発火条件を明示している。
+
+```
+Reviews are triggered when you
+- Open a pull request for review
+- Mark a draft as ready
+- Comment "@codex review".
+```
+
+**push は入っていない。** つまり指摘を直して push するほどレビューは来なくなり、
+20分後に fail-open で緑になる。**直すほどゲートが形骸化する。**
+
+2026-09-06 に実測した。PR #80 の `5322349`、PR #81 の `d4c1d04` と `3c77af9`、
+いずれも push 後にレビューが来ず `No Codex review within 20 min — gate passes as
+a no-review PR.` で通過した。同じ head にコメントで `@codex review` と書くと
+2分で届き、P1 が2件、P2 が2件出た。**待っていれば通り、呼べば指摘が出る状態
+だった。**
+
+なお 2026-09-05 に PR #80 のゲートがレビュー無しで通った件を、当初は Codex の
+利用上限が原因と説明した。上限メッセージは 2026-09-06 08:21Z に別途出ているが、
+9/5 の沈黙はこの発火条件で説明がつく。**上限と発火条件を取り違えていた。**
+
+Decision:
+
+- **ゲート自身が `@codex review` を書いてから待つ。** 呼ばなければ来ないものを
+  待つのをやめる。
+- **呼ぶのは `synchronize` のときだけ。** opened / reopened / ready_for_review は
+  Codex 自身の発火条件で、重ねて呼ぶと同じ head を二度レビューさせ、限りのある
+  利用枠を余計に使う。
+- **呼べなくてもゲートは赤くしない。** 上限に当たったときに待つ側まで止めない。
+  fail-open の意図はそのまま残す。
+- 権限は job 単位で `pull-requests: write` に留める。コメントを書く以外はしない。
+
+Consequences: テスト 1342→1347。ゲートの契約を
+`tests/unit/test_review_gate_workflow.py` に固定した（呼ぶこと、待つ側より先に
+呼ぶこと、synchronize 限定、失敗を許すこと、権限、発火条件を変えていないこと）。
+
+**fail-open は残る。** Codex が本当に停止しているときは今までどおり通る。
+変わるのは「呼んでいないから来なかった」場合が消えることだけである。
+
+**このゲートの緑は、レビューを読んだことの代わりにはならない。** 元の設計文書に
+書いてあるとおりで、本ADRはその前提を変えない。
+>>>>>>> fed07a1 (来ないレビューを待っていた——ゲート自身が呼ぶ)
