@@ -979,7 +979,7 @@ def test_plan_reads_the_announcement_date_from_the_schedule_source(tmp_path, cap
     "checkpoint",
     [[1, 2], "string", 123, None, {"monitor_target_id": "ICECO_EARNINGS_CALENDAR"}],
 )
-def test_unusable_schedule_state_falls_back_without_failing_the_plan(tmp_path, capsys, checkpoint):
+def test_unusable_previous_state_falls_back_without_failing_the_plan(tmp_path, capsys, checkpoint):
     """A broken bundle must not skip every target for that slot."""
     state = write_previous_state(tmp_path, "ICECO_EARNINGS_CALENDAR", checkpoint)
     assert plan_registry(
@@ -996,6 +996,49 @@ def test_missing_schedule_directory_is_reported_not_silent(tmp_path, capsys):
         PRODUCTION_REGISTRY, None, None, "2026-11-09T09:17:00+09:00", False, tmp_path / "absent"
     ) == 0
     assert "ICECO_TDNET_INDEX" in capsys.readouterr().err
+
+
+def test_a_target_without_committed_state_says_it_fell_back_to_the_clock(tmp_path, capsys):
+    """The silent fallback is the shape this whole incident took.
+
+    A target whose bundle did not download goes back to deciding the normal day
+    by the clock, which is the arrangement that lost five business days without
+    anyone seeing it. Falling back is still right; doing it quietly is not.
+    """
+    state = write_previous_state(
+        tmp_path,
+        "ICECO_EARNINGS_CALENDAR",
+        {
+            "monitor_target_id": "ICECO_EARNINGS_CALENDAR",
+            "last_seen_schedule": SCHEDULE,
+            "last_success_at": "2026-11-06T08:20:00+00:00",
+        },
+    )
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T18:30:00+09:00", False, state
+    ) == 0
+    notice = capsys.readouterr().err.split("previous state unresolved")
+    assert len(notice) == 2
+    # The calendar reported its state, so only the TDnet target is named.
+    assert "ICECO_TDNET_INDEX" in notice[1]
+    assert "ICECO_EARNINGS_CALENDAR" not in notice[1]
+
+
+def test_no_clock_fallback_notice_when_every_target_reported_its_state(tmp_path, capsys):
+    for target_id in ("ICECO_EARNINGS_CALENDAR", "ICECO_TDNET_INDEX"):
+        state = write_previous_state(
+            tmp_path,
+            target_id,
+            {
+                "monitor_target_id": target_id,
+                "last_seen_schedule": SCHEDULE,
+                "last_success_at": "2026-11-06T08:20:00+00:00",
+            },
+        )
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T18:30:00+09:00", False, state
+    ) == 0
+    assert "previous state unresolved" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
