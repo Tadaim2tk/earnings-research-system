@@ -41,7 +41,7 @@ from earnings_research.monitoring.persistence import (
     verify_uploaded_bundle,
     write_committed_bundle,
 )
-from earnings_research.monitoring.operational_cli import plan_registry
+from earnings_research.monitoring.operational_cli import plan_registry, recheck_due
 from earnings_research.monitoring.registry import (
     RegistryError,
     active_target_plan,
@@ -804,6 +804,29 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     # unverified "already succeeded today" suppress the monitor job.
     assert '|| rm -rf ".monitor/previous-state/$target"' in fetch[0]["run"]
     assert "|| true" not in fetch[0]["run"]
+    # 並びで待たされた2本目が同じ日に二度取りに行かないよう、待ち終わってから
+    # もう一度 due を見る。束を作る側の手順は全部その結果に従う。
+    monitor_steps = parsed["jobs"]["monitor"]["steps"]
+    names = [step.get("name", "") for step in monitor_steps]
+    assert names.index("Re-check dueness after the concurrency wait") > names.index(
+        "Fetch previous committed state"
+    )
+    recheck_step = monitor_steps[names.index("Re-check dueness after the concurrency wait")]
+    assert "monitor-recheck-due" in recheck_step["run"]
+    # 人が意図して呼んだ観測は、この門で止めない。
+    assert 'if [ "$EVENT_NAME" = "workflow_dispatch" ]' in recheck_step["run"]
+    gated = [
+        step
+        for step in monitor_steps
+        if step.get("if") == "steps.recheck.outputs.due == 'true'"
+    ]
+    assert {step.get("id") or step.get("name") for step in gated} == {
+        "run-monitor",
+        "upload",
+        "Re-download uploaded artifact",
+        "Verify re-downloaded committed state",
+        "handoff",
+    }
 
 
 def test_schedule_uses_six_slots_in_event_window_and_on_event_day():
@@ -1645,3 +1668,54 @@ def test_autonomous_change_creates_machine_readable_research_handoff(tmp_path):
     output = tmp_path / "handoff.json"
     assert write_research_handoff(changed, output) is True
     assert json.loads(output.read_text())["monitor_run_id"] == "MRUN-EXAMPLE-002"
+
+
+def recheck(tmp_path, capsys, last_success, at, target_id="ICECO_TDNET_INDEX", event_date=None):
+    """待ち終わった後の再判定を、その時点の状態で走らせる。"""
+    previous = None
+    if last_success is not None:
+        previous = tmp_path / "previous"
+        previous.mkdir(exist_ok=True)
+        (previous / "checkpoint.json").write_text(
+            json.dumps({"monitor_target_id": target_id, "last_success_at": last_success}),
+            encoding="utf-8",
+        )
+    assert recheck_due(PRODUCTION_REGISTRY, target_id, previous, at, event_date) == 0
+    return json.loads(capsys.readouterr().out)["due"]
+
+
+def test_the_second_queued_run_does_not_observe_the_same_day_twice(tmp_path, capsys):
+    """**plan は、同時に走っている別の実行の結果を見られない。**
+
+    遅れて重なった2本がどちらも「今日はまだ成功していない」を見ると、両方が
+    due になる。target ごとの concurrency は順番に並べるだけなので、2本目は
+    更新後の状態を取得しておきながら、そのまま同じ日に二度取りに行っていた。
+    待ち終わってから、いま在る状態でもう一度確かめる。
+    """
+    # 1本目が 17:30 JST に成功した後、2本目が 21:45 JST に待ち終わる。
+    assert recheck(tmp_path, capsys, "2026-09-02T08:30:00+00:00", "2026-09-02T21:45:00+09:00") is False
+
+
+def test_the_recheck_still_lets_the_first_run_of_the_day_through(tmp_path, capsys):
+    assert recheck(tmp_path, capsys, "2026-09-01T08:30:00+00:00", "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_uses_the_same_close_rule_as_the_plan(tmp_path, capsys):
+    """大引け前の成功は、再判定でもその日を終わらせない。"""
+    assert recheck(tmp_path, capsys, "2026-09-02T01:00:00+00:00", "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_keeps_an_open_event_window_open(tmp_path, capsys):
+    """発表日の窓では6枠とも走る。一日一度の規則は通常日のもの。"""
+    assert recheck(
+        tmp_path, capsys, "2026-09-02T08:30:00+00:00", "2026-09-02T09:17:00+09:00",
+        event_date="2026-09-02",
+    ) is True
+
+
+def test_an_undecidable_recheck_observes_anyway(tmp_path, capsys):
+    """**判定できないなら観測する。** 余分に一度取るより、取り損ねる方が害が大きい。"""
+    assert recheck_due(tmp_path / "missing.csv", "ICECO_TDNET_INDEX", None, "2026-09-02T21:45:00+09:00") == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["due"] is True
+    assert "dueness recheck failed" in captured.err

@@ -102,6 +102,46 @@ def plan_registry(
     return 0
 
 
+def recheck_due(
+    registry_path: Path,
+    target_id: str,
+    previous_dir: Optional[Path],
+    at: str,
+    event_date: Optional[str] = None,
+) -> int:
+    """待ち終わってから、いま在る状態でもう一度due判定をする。
+
+    plan は同時に走っている別の実行の結果を見られない。遅れて重なった2本が
+    どちらも「今日はまだ成功していない」を見ると、両方がdueになる。target ごとの
+    concurrency は順番に並べるだけなので（`cancel-in-progress: false`）、
+    **2本目は更新後の状態を取得しておきながら、そのまま同じ日に二度取りに行く。**
+
+    取得元への要求は `system_policy:public-web-low-frequency-v1` の下にある。
+    一日一度という境界は、待ち終わった側でも確かめる。
+
+    判定できないときは due にする。**観測を余分に一度するより、しないことの方が
+    害が大きい。** 失敗の向きを変えない。
+    """
+    try:
+        rows = load_registry(registry_path)
+        target = find_target(rows, target_id)
+        if event_date:
+            target["event_date"] = event_date
+        planned = _aware_datetime(at, "at")
+        successes = _last_success_times(Path(previous_dir)) if previous_dir else {}
+        due = bool(
+            active_target_plan([target], planned_at=planned, last_success_times=successes)
+        )
+        last_success = successes.get(target_id, "")
+    except (OSError, ValueError, KeyError) as exc:
+        print("dueness recheck failed, observing anyway: %s" % exc, file=sys.stderr)
+        due, last_success = True, ""
+    print(
+        json.dumps({"due": due, "last_success_at": last_success}, separators=(",", ":"))
+    )
+    return 0
+
+
 def fetch_state(repository: str, target_id: str, output_dir: Path) -> int:
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
