@@ -10,6 +10,8 @@ from earnings_research.validation.validator import load_spec, validate_monitor_r
 
 
 JST = timezone(timedelta(hours=9))
+# 通常日の観測は大引けの後に置く。同じ日に出た開示をその日のうちに見るため。
+NORMAL_DAY_HOUR = 17
 
 
 class RegistryError(ValueError):
@@ -98,19 +100,23 @@ def _is_due(target: Dict[str, str], planned_at: datetime, last_success: str = ""
     #
     # だから「今日もう成功したか」で決める。まだなら大引け後のどの枠でも走る。
     # 17:17 が落ちても 21:17 が拾う。一日一度は時計ではなく事実で守る。
-    observed_on = _local_date(last_success)
-    if observed_on is None:
+    observed = _local_datetime(last_success)
+    if observed is None:
         # 状態が読めないときだけ従来の窓に戻す。**空文字と読めない文字列は
         # 同じ扱いにする** ——どちらも「どの日に観測できたか」を言っていない。
         # 上限のない再試行にはしないので、要求の頻度は前と変わらない。
-        return 17 <= local.hour < 21
-    if observed_on == local.date():
+        return NORMAL_DAY_HOUR <= local.hour < 21
+    # **大引け前の成功は、その日を終わらせない。** 手動のdispatchや日付を
+    # またいだ実行で午前中に成功していると、日付だけを比べる書き方では
+    # 大引け後の観測が消え、15:30の開示が翌営業日まで見えなくなる。
+    # 17時という条件は、それを見るために置いてある。
+    if observed.date() == local.date() and observed.hour >= NORMAL_DAY_HOUR:
         return False
-    return local.hour >= 17
+    return local.hour >= NORMAL_DAY_HOUR
 
 
-def _local_date(value: str) -> Optional[date]:
-    """Return the JST calendar date of a checkpoint timestamp, or None."""
+def _local_datetime(value: str) -> Optional[datetime]:
+    """Return a checkpoint timestamp in Japan time, or None when it names no moment."""
     if not value:
         return None
     try:
@@ -119,7 +125,7 @@ def _local_date(value: str) -> Optional[date]:
         return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
-    return parsed.astimezone(JST).date()
+    return parsed.astimezone(JST)
 
 
 def next_announcement_date(schedule: str, on_or_after: date) -> Optional[str]:

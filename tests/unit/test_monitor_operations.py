@@ -799,6 +799,11 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert len(fetch) == 1
     assert 'r["activation_state"] == "activated"' in fetch[0]["run"]
     assert "active | sources" in fetch[0]["run"]
+    # Extraction happens before verification, so a rejected bundle would other-
+    # wise stay on disk and be read as state. A "|| true" here would let an
+    # unverified "already succeeded today" suppress the monitor job.
+    assert '|| rm -rf ".monitor/previous-state/$target"' in fetch[0]["run"]
+    assert "|| true" not in fetch[0]["run"]
 
 
 def test_schedule_uses_six_slots_in_event_window_and_on_event_day():
@@ -888,9 +893,43 @@ def test_an_unusable_last_success_falls_back_to_the_clock(value):
 
 
 def test_the_last_success_is_read_in_japan_time():
-    """22:30Z on the 11th is already the 12th in Tokyo, so the day is done."""
+    """13:00Z on the 12th is 22:00 JST the same day, so the day is done.
+
+    Dropping the JST conversion would read it as the 12th in UTC terms anyway,
+    so the case that separates them is one that crosses midnight: 15:00Z on the
+    11th is already 00:00 JST on the 12th.
+    """
     row = normal_day_target()
-    successes = {row["monitor_target_id"]: "2026-08-11T22:30:00+00:00"}
+    late = {row["monitor_target_id"]: "2026-08-12T13:00:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(22, 30, day=12), last_success_times=late
+    ) == []
+
+
+def test_a_success_before_the_close_does_not_finish_the_day():
+    """A forced dispatch in the morning must not eat the post-close observation.
+
+    Disclosures land at 15:30 JST. A same-day success at 10:00 has not seen
+    them, so treating the day as done would push them to the next business day
+    — the gap the 17:00 rule exists to close.
+    """
+    row = normal_day_target()
+    morning = {row["monitor_target_id"]: "2026-08-12T01:00:00+00:00"}  # 10:00 JST
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=12), last_success_times=morning
+    ) == [row]
+    # A run that crossed midnight lands in the small hours of the same JST day
+    # and is the same case.
+    overnight = {row["monitor_target_id"]: "2026-08-11T16:00:00+00:00"}  # 01:00 JST 12th
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=12), last_success_times=overnight
+    ) == [row]
+
+
+def test_a_success_at_the_close_itself_finishes_the_day():
+    """17:00 JST exactly is after the close, so it counts."""
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-12T08:00:00+00:00"}  # 17:00 JST
     assert active_target_plan(
         [row], planned_at=moment(21, 45, day=12), last_success_times=successes
     ) == []
