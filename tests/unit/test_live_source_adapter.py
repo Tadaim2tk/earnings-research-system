@@ -396,6 +396,39 @@ def test_a_month_only_calendar_does_not_borrow_a_label_from_the_next_row():
     assert "6月=" not in meta["monthly_schedule"]
 
 
+def test_an_announcement_in_the_third_month_of_a_quarter_is_not_dropped():
+    """**四半期は3か月あるので、続く月が3つでもデータ行である。**
+
+    発表が四半期の3番目の月にあると `4月 5月 6月 決算発表` の並びになる。
+    続く月が3つ以上を見出し行としていたときは、この3つが丸ごと消えた。
+    実測では `5月=決算発表` が失われるだけで `6月=決算発表` は出ず、
+    **通知には削除だけが載る。** 見出し行の3月を拾わないことは変わらない。
+    """
+    moved = MONTH_ONLY_CALENDAR_HTML.replace(
+        '<div class="ifc-month">5月</div><p class="ifc-lbl">決算<br>発表</p>\n'
+        '  <div class="ifc-month">6月</div>',
+        '<div class="ifc-month">5月</div>\n'
+        '  <div class="ifc-month">6月</div><p class="ifc-lbl">決算<br>発表</p>',
+    )
+    assert moved != MONTH_ONLY_CALENDAR_HTML, "fixture の並びが変わっている"
+    meta = observe_calendar(moved).stable_metadata
+    assert meta["monthly_schedule"] == (
+        "6月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+    assert "3月=" not in meta["monthly_schedule"]
+
+
+def test_the_twelve_month_header_run_is_still_excluded():
+    """見出し行そのものは、上限を上げても外れたままであること。"""
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    # 見出し行は 4月 から 3月 まで12か月が続く。どれも拾っていない。
+    assert meta["monthly_schedule"] == (
+        "5月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+
+
 def test_a_month_only_calendar_moves_the_fingerprint_when_a_month_moves():
     """月が動いたら気づける。粒度が落ちても、監視の目的は果たせる。"""
     baseline = build_metadata_fingerprint(observe_calendar(MONTH_ONLY_CALENDAR_HTML))
