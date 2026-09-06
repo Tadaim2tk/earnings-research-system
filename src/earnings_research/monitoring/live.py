@@ -955,13 +955,6 @@ def _monthly_schedule(segments) -> List[str]:
 
     out = []
     for i in sorted(usable):
-        # **日付が節に割れているだけの行を、月だけの行と読まない。**
-        # `<span>2026年</span><span>11月</span><span>13日</span>` は
-        # `_SCHEDULE_DATE` に一致しないので月だけの側へ落ちるが、日付は公表
-        # されている。そのまま通すと「日付は無い」と報告し、ラベルには
-        # `11月=13日…決算発表` が残る。**取り違えた読み方で観測を成功させない。**
-        if _split_date_fragment(segments, i):
-            raise ValueError("IR calendar splits a full date across nodes")
         month = int(_SCHEDULE_MONTH_ONLY.match(segments[i]).group(1))
         if not 1 <= month <= 12:
             continue
@@ -975,6 +968,17 @@ def _monthly_schedule(segments) -> List[str]:
         label = _clean_text("".join(parts))
         if "決算発表" not in label:
             continue
+        # **日付が節に割れているだけの行を、月だけの行と読まない。**
+        # `<span>2026年</span><span>11月</span><span>13日</span>` は
+        # `_SCHEDULE_DATE` に一致しないので月だけの側へ落ちるが、日付は公表
+        # されている。そのまま通すと「日付は無い」と報告し、ラベルには
+        # `11月=13日…決算発表` が残る。**取り違えた読み方で観測を成功させない。**
+        #
+        # **疑うのは、発表の行だと分かってからにする。** ページのどこかに
+        # 無関係な `2026年` `11月` の並び（アーカイブのナビゲーション等）が
+        # あるだけで観測を落とすと、正しく読めているカレンダーを止めてしまう。
+        if _split_date_fragment(segments, i):
+            raise ValueError("IR calendar splits a full date across nodes")
         label = label[: label.index("決算発表") + len("決算発表")]
         if not _is_meaningful_text(label):
             continue

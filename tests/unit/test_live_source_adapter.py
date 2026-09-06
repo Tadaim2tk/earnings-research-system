@@ -514,6 +514,27 @@ def test_a_full_date_split_across_nodes_is_not_read_as_a_month_only_row(html):
     assert result.error_code == "parse_error"
 
 
+ARCHIVE_NAV = '<nav><ul><li>2026年</li><li>11月</li><li>10月</li></ul></nav>'
+
+
+@pytest.mark.parametrize(
+    "base", [CALENDAR_HTML, MONTH_ONLY_CALENDAR_HTML], ids=["dated", "month-only"],
+)
+def test_an_unrelated_year_and_month_elsewhere_on_the_page_do_not_stop_monitoring(base):
+    """**疑うのは、発表の行だと分かってからにする。**
+
+    アーカイブのナビゲーションのように `2026年` `11月` が並ぶ場所はページの
+    どこにでもある。発表かどうかを見る前に落とすと、**正しく読めている
+    カレンダーを止めてしまう。** 月だけの読み取りを常に走らせるようにした分、
+    日付入りのページもこの巻き添えを食う。
+    """
+    result = observe_calendar(base.replace("</body>", ARCHIVE_NAV + "</body>"))
+    assert isinstance(result, SourceObservation)
+    assert result.stable_metadata["monthly_schedule"] == (
+        observe_calendar(base).stable_metadata["monthly_schedule"]
+    )
+
+
 def test_a_year_heading_above_a_month_grid_is_not_mistaken_for_a_split_date():
     """年の見出しの下に12か月の格子が並ぶ形は、割れた日付ではない。
 
