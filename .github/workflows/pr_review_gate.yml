@@ -29,7 +29,8 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - name: Ask Codex to review this head
+      - id: ask
+        name: Ask Codex to review this head
         # Codexが動くのは「PRを開いた」「draftをreadyにした」「@codex review と
         # 書いた」の3つだけで、**pushは入っていない**（レビュー本文が明示している）。
         # 待つだけの実装では、指摘を直してpushするほどレビューは来なくなり、
@@ -43,6 +44,10 @@ jobs:
         # 二度レビューさせ、利用上限を余計に使う。
         if: github.event.action == 'synchronize'
         # 呼べなくても待つ側は動く。上限に当たったときに、ここで赤くしない。
+        # ただし**呼べなかったことは覚えておく**。fork や Dependabot からのPRでは
+        # `GITHUB_TOKEN` が job 単位の permissions によらず読み取り専用になり、
+        # この POST は 403 で落ちる。黙って落として fail-open へ流すと、
+        # **一度も呼んでいないのに「Codexが止まっている」扱いで通ってしまう。**
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,6 +60,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ASK_OUTCOME: ${{ steps.ask.outcome }}
         run: |
           owner="${REPO%%/*}"
           name="${REPO##*/}"
@@ -97,6 +103,16 @@ jobs:
             fi
             sleep 30
           done
+          if [ "$ASK_OUTCOME" = "failure" ]; then
+            # **一度も呼べていない。** fork や Dependabot からのPRでは
+            # `GITHUB_TOKEN` が読み取り専用になり、依頼の POST が 403 で落ちる。
+            # push では Codex は動かないので、呼べなかった回は「レビューが
+            # 来なかった」ではなく「レビューを求めていない」である。
+            # fail-open は Codex 側の停止のための逃げ道で、**こちらの手が
+            # 届かなかった場合に使うものではない。**
+            echo "::error::Could not ask Codex for a review (the token is read-only on fork and Dependabot pull requests), and pushes do not trigger Codex on their own. Comment \"@codex review\" on this pull request, then re-run this check."
+            exit 1
+          fi
           if [ "$arrived" -gt 0 ]; then
             echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
             exit 1

@@ -108,3 +108,34 @@ def test_the_unresolved_finding_check_still_decides_the_outcome():
     ][0]["run"]
     assert 'if [ "$unresolved" = "0" ]; then' in wait
     assert "Codex findings are still unresolved after 20 min" in wait
+
+
+def test_a_request_we_could_not_send_does_not_pass_as_a_no_review_pr():
+    """**呼べなかった回は「レビューが来なかった」ではない。**
+
+    fork や Dependabot からのPRでは `GITHUB_TOKEN` が job 単位の permissions に
+    よらず読み取り専用になり、依頼の POST が 403 で落ちる。push では Codex は
+    動かないので、呼べていないなら誰も見ていない。fail-open は Codex 側の停止の
+    ための逃げ道であって、**こちらの手が届かなかった場合に使うものではない。**
+    """
+    raw, parsed = gate()
+    steps = parsed["jobs"]["wait-for-codex-review"]["steps"]
+    ask = [s for s in steps if s.get("name", "").startswith("Ask Codex")][0]
+    wait = [s for s in steps if s.get("name", "").startswith("Wait for Codex")][0]
+    # 依頼の成否を、待つ側が読めるようにしてある。
+    assert ask.get("id") == "ask"
+    assert wait["env"]["ASK_OUTCOME"] == "${{ steps.ask.outcome }}"
+    assert 'if [ "$ASK_OUTCOME" = "failure" ]; then' in wait["run"]
+    # 人が何をすればよいかを、その場で言う。
+    assert "@codex review" in wait["run"]
+    assert "re-run this check" in wait["run"]
+
+
+def test_the_fail_open_path_still_exists_for_a_silent_codex():
+    """Codex 側が止まっているときは、今までどおり通す。"""
+    wait = [
+        s
+        for s in gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+        if s.get("name", "").startswith("Wait for Codex")
+    ][0]["run"]
+    assert "No Codex review within 20 min — gate passes as a no-review PR." in wait
