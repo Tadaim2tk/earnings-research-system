@@ -209,3 +209,40 @@ def test_no_conflict_markers_survive_in_the_decision_log():
     text = DECISIONS.read_text(encoding="utf-8")
     for marker in ("<<<<<<< ", ">>>>>>> "):
         assert marker not in text, "衝突マーカーが残っている: %s" % marker
+
+
+def test_a_rerun_does_not_ask_for_a_review_of_an_already_reviewed_head():
+    """**チェックの再実行は `synchronize` の event をそのまま持ち回る。**
+
+    指摘を resolve して再実行する手順を、待つ側が案内している。毎回頼むと、
+    待つ側は既にある方のレビューを見てすぐ緑になり、**新しく頼んだレビューは
+    マージの後に届く。** ERS #48（マージ4分後にP1指摘が2件着き main の負債に
+    なった）と同じ形で、このゲートはそれを防ぐために在る。
+    """
+    ask = [
+        s
+        for s in gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+        if s.get("name", "").startswith("Ask Codex")
+    ][0]["run"]
+    assert 'if [ "$seen" -gt 0 ]; then' in ask
+    assert "not asking again" in ask
+    # 判定は投稿より前にある。後ろでは意味がない。
+    assert ask.index('"$seen" -gt 0') < ask.index("-f body='@codex review'")
+
+
+def test_asking_and_waiting_count_a_review_the_same_way():
+    """片方だけ変えると、**頼むかどうかと通すかどうかが食い違う。**
+
+    どちらも「現在の head に対するレビュー」と「現在の head を名指すボットの
+    コメント」を数える。同じ二つの述語を持っていることを見る。
+    """
+    steps = gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+    ask = [s for s in steps if s.get("name", "").startswith("Ask Codex")][0]["run"]
+    wait = [s for s in steps if s.get("name", "").startswith("Wait for Codex")][0]["run"]
+    for predicate in (
+        'select(.user.login==\\"chatgpt-codex-connector[bot]\\" and .commit_id==\\"$HEAD_SHA\\")',
+        'select(.body | contains(\\"Reviewed commit\\"))',
+        'select(.body | contains(\\"$short\\"))',
+    ):
+        assert predicate in ask, "依頼側に無い: %s" % predicate
+        assert predicate in wait, "待機側に無い: %s" % predicate

@@ -73,6 +73,26 @@ jobs:
             echo "head moved from $HEAD_SHA to $live; the newer run owns the request."
             exit 0
           fi
+          # **チェックの再実行は `synchronize` の event をそのまま持ち回る。**
+          # 指摘を resolve して再実行する手順を待つ側が案内しているので、この手順は
+          # push 無しで何度でも走る。毎回頼むと、待つ側は既にある方のレビューを見て
+          # すぐ緑になり、**新しく頼んだレビューはマージの後に届く。**
+          # ERS #48（マージ4分後にP1指摘が2件着き、mainの負債になった）と同じ形で、
+          # このゲートはそれを防ぐために在る。既に見てもらった SHA なら頼まない。
+          #
+          # 数え方は待つ側と同じにそろえる。片方だけ変えると、頼むかどうかと
+          # 通すかどうかが食い違う。
+          short="${HEAD_SHA:0:10}"
+          seen=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+            --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .commit_id==\"$HEAD_SHA\")] | length" \
+            2>/dev/null | awk '{s+=$1} END {print s+0}')
+          seen=$((seen + $(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\") | select(.body | contains(\"Reviewed commit\")) | select(.body | contains(\"$short\"))] | length" \
+            2>/dev/null | awk '{s+=$1} END {print s+0}')))
+          if [ "$seen" -gt 0 ]; then
+            echo "Codex already reviewed $HEAD_SHA; not asking again."
+            exit 0
+          fi
           gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent
       - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
