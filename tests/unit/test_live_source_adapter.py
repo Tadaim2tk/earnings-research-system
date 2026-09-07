@@ -285,6 +285,281 @@ def test_calendar_reads_announcement_dates_and_ignores_other_events():
     assert "2027-02-15" not in result.stable_metadata["approximate_schedule"]
 
 
+# 2026年8月下旬、アイスコのIRカレンダーが日付を落として月だけの表になった。
+# 見出し行に12か月が続けて並び、その下に発表内容が別の行で置かれる。月と内容の
+# 対応は並び順では取れない（CSSの格子で合わせている）。同じ内容が、月と内容が
+# 交互に並ぶ形でもう一度出る。取り違えると見出し行の最後の3月に、次の行の先頭の
+# 決算発表が付く。
+MONTH_ONLY_CALENDAR_HTML = """<html><head><title>IRカレンダー | アイスコ IR情報</title></head><body>
+<h1>IRカレンダー</h1>
+<h4>年間スケジュール</h4>
+<div class="ifc-grid">
+  <div class="ifc-qhead">第1四半期</div><div class="ifc-qhead">第2四半期</div>
+  <div class="ifc-qhead">第3四半期</div><div class="ifc-qhead">第4四半期</div>
+  <div class="ifc-month">4月</div><div class="ifc-month">5月</div>
+  <div class="ifc-month">6月</div><div class="ifc-month">7月</div>
+  <div class="ifc-month">8月</div><div class="ifc-month">9月</div>
+  <div class="ifc-month">10月</div><div class="ifc-month">11月</div>
+  <div class="ifc-month">12月</div><div class="ifc-month">1月</div>
+  <div class="ifc-month">2月</div><div class="ifc-month">3月</div>
+  <div class="ifc-ev"><p class="ifc-lbl">決算<br>発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">定時<br>株主総会</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第１四半期<br>決算発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第２四半期<br>決算発表</p></div>
+  <div class="ifc-ev"><p class="ifc-lbl">第３四半期<br>決算発表</p></div>
+</div>
+<div class="ifc-sp">
+  <div class="ifc-spq-label">第１四半期</div>
+  <div class="ifc-month">4月</div>
+  <div class="ifc-month">5月</div><p class="ifc-lbl">決算<br>発表</p>
+  <div class="ifc-month">6月</div><p class="ifc-lbl">定時<br>株主総会</p>
+  <div class="ifc-spq-label">第２四半期</div>
+  <div class="ifc-month">7月</div>
+  <div class="ifc-month">8月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>
+  <div class="ifc-month">9月</div>
+  <div class="ifc-spq-label">第３四半期</div>
+  <div class="ifc-month">10月</div>
+  <div class="ifc-month">11月</div><p class="ifc-lbl">第２四半期<br>決算発表</p>
+  <div class="ifc-month">12月</div>
+  <div class="ifc-spq-label">第４四半期</div>
+  <div class="ifc-month">1月</div>
+  <div class="ifc-month">2月</div><p class="ifc-lbl">第３四半期<br>決算発表</p>
+  <div class="ifc-month">3月</div>
+</div>
+</body></html>"""
+
+
+def test_a_month_only_calendar_is_read_without_inventing_dates():
+    """**取得元が日付を落としても、監視できる中身は残っている。**
+
+    日付が消えたことで読めなくなり、監視は `stopped` に落ちた。読めない状態で
+    「変更なし」と報告しない設計なので停止そのものは正しいが、月と発表内容は
+    公表され続けている。**無い精度を足さずに、公表された粒度のまま持つ。**
+    """
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    assert meta["monthly_schedule"] == (
+        "5月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+    # 日付が無いのだから、日付の欄は空のままにする。作らない。
+    assert meta["earnings_schedule"] == "none"
+    assert meta["approximate_schedule"] == "none"
+
+
+def test_a_month_only_calendar_reaches_the_checkpoint_summary():
+    """**拾った月が、通知と引き継ぎまで届くこと。**
+
+    `monthly_schedule` を指紋に入れただけでは、`last_seen_schedule` は空のまま
+    になり、通知は `earnings_schedule: none` と出る。**読めるようにした予定が
+    通知に出てこないなら、この変更は目的を果たしていない。**
+    """
+    from earnings_research.monitoring.runtime import _schedule_summary
+
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    summary = _schedule_summary(meta)
+    assert "11月=第２四半期決算発表" in summary
+    assert summary != ""
+    # 日付の欄が none のときに "none" の文字が混ざらないこと。
+    assert "none" not in summary
+
+
+def test_the_schedule_summary_joins_dates_and_months_without_none():
+    """日付・概算・月だけ、どの組み合わせでも `none` を混ぜない。"""
+    from earnings_research.monitoring.runtime import _schedule_summary
+
+    assert _schedule_summary(
+        {"earnings_schedule": "2026-11-06=第2四半期決算発表",
+         "approximate_schedule": "none", "monthly_schedule": "none"}
+    ) == "2026-11-06=第2四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "none", "approximate_schedule": "none",
+         "monthly_schedule": "8月=第１四半期決算発表"}
+    ) == "8月=第１四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "2026-11-06=第2四半期決算発表",
+         "approximate_schedule": "none",
+         "monthly_schedule": "8月=第１四半期決算発表"}
+    ) == "2026-11-06=第2四半期決算発表 | 8月=第１四半期決算発表"
+    assert _schedule_summary(
+        {"earnings_schedule": "none", "approximate_schedule": "none",
+         "monthly_schedule": "none"}
+    ) == ""
+
+
+def test_a_month_only_calendar_does_not_borrow_a_label_from_the_next_row():
+    """見出し行では12か月が続けて並び、発表内容は別の行にある。並び順で対応を
+    取ると、**最後の3月に次の行の先頭の決算発表が付く**。続く月の数で見出し行を
+    見分ける。"""
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    assert "3月=" not in meta["monthly_schedule"]
+    # 定時株主総会は発表ではない。月だけの形でも同じ扱いにする。
+    assert "6月=" not in meta["monthly_schedule"]
+
+
+def test_an_announcement_in_the_third_month_of_a_quarter_is_not_dropped():
+    """**四半期は3か月あるので、続く月が3つでもデータ行である。**
+
+    発表が四半期の3番目の月にあると `4月 5月 6月 決算発表` の並びになる。
+    続く月が3つ以上を見出し行としていたときは、この3つが丸ごと消えた。
+    実測では `5月=決算発表` が失われるだけで `6月=決算発表` は出ず、
+    **通知には削除だけが載る。** 見出し行の3月を拾わないことは変わらない。
+    """
+    moved = MONTH_ONLY_CALENDAR_HTML.replace(
+        '<div class="ifc-month">5月</div><p class="ifc-lbl">決算<br>発表</p>\n'
+        '  <div class="ifc-month">6月</div>',
+        '<div class="ifc-month">5月</div>\n'
+        '  <div class="ifc-month">6月</div><p class="ifc-lbl">決算<br>発表</p>',
+    )
+    assert moved != MONTH_ONLY_CALENDAR_HTML, "fixture の並びが変わっている"
+    meta = observe_calendar(moved).stable_metadata
+    assert meta["monthly_schedule"] == (
+        "6月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+    assert "3月=" not in meta["monthly_schedule"]
+
+
+def test_the_twelve_month_header_run_is_still_excluded():
+    """見出し行そのものは、上限を上げても外れたままであること。"""
+    meta = observe_calendar(MONTH_ONLY_CALENDAR_HTML).stable_metadata
+    # 見出し行は 4月 から 3月 まで12か月が続く。どれも拾っていない。
+    assert meta["monthly_schedule"] == (
+        "5月=決算発表;8月=第１四半期決算発表;"
+        "11月=第２四半期決算発表;2月=第３四半期決算発表"
+    )
+
+
+def test_a_month_only_calendar_moves_the_fingerprint_when_a_month_moves():
+    """月が動いたら気づける。粒度が落ちても、監視の目的は果たせる。"""
+    baseline = build_metadata_fingerprint(observe_calendar(MONTH_ONLY_CALENDAR_HTML))
+    moved = MONTH_ONLY_CALENDAR_HTML.replace(
+        '<div class="ifc-month">8月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>',
+        '<div class="ifc-month">9月</div><p class="ifc-lbl">第１四半期<br>決算発表</p>')
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+MIXED_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td>2026年11月13日</td><td>2027年3月期第2四半期決算発表</td></tr>
+</table>
+<table>
+  <tr><td>2月</td><td>第３四半期</td><td>決算発表</td></tr>
+</table>
+</body></html>"""
+
+
+def test_a_mixed_calendar_keeps_the_month_only_rows_too():
+    """**日付の行があっても、月だけの行を捨てない。**
+
+    取得元が日付を落とすのは一度に全部とは限らない。近い四半期だけ日を出し、
+    先の四半期は月だけ、という形が自然な途中経過である。日付が1行でもあれば
+    月だけの側を見ない書き方だと、そこが丸ごと死角になる。
+    """
+    meta = observe_calendar(MIXED_CALENDAR_HTML).stable_metadata
+    assert meta["earnings_schedule"] == "2026-11-13=2027年3月期第2四半期決算発表"
+    assert meta["monthly_schedule"] == "2月=第３四半期決算発表"
+
+
+def test_a_mixed_calendar_moves_the_fingerprint_when_only_the_month_row_moves():
+    """**動いたのが月だけの行でも気づける。**
+
+    死角だったときの症状は「観測は成功し、`no_change` と報告される」で、
+    落ちてくれない分だけ質が悪い。日付の行は動かさずに月だけを動かす。
+    """
+    baseline = build_metadata_fingerprint(observe_calendar(MIXED_CALENDAR_HTML))
+    moved = MIXED_CALENDAR_HTML.replace("<td>2月</td>", "<td>3月</td>")
+    assert build_metadata_fingerprint(observe_calendar(moved)) != baseline
+
+
+def test_a_dated_calendar_does_not_pick_up_months_from_a_header_grid():
+    """月だけの読み取りを常に走らせても、日付だけの表からは何も拾わない。
+
+    `^N月$` に一致するのは月だけを置いた行で、`2026年11月13日 …` は一致しない。
+    12か月が続けて並ぶ見出しは、続く月の数で外れる。
+    """
+    assert observe_calendar().stable_metadata["monthly_schedule"] == "none"
+
+
+SPLIT_DATE_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td><span>2026年</span><span>11月</span><span>13日</span></td>
+      <td>2027年3月期第2四半期決算発表</td></tr>
+</table>
+</body></html>"""
+
+DAY_SPLIT_CALENDAR_HTML = """<html><head><title>IRカレンダー</title></head><body>
+<h1>IRカレンダー</h1>
+<table>
+  <tr><td>11月</td><td>13日</td><td>第2四半期決算発表</td></tr>
+</table>
+</body></html>"""
+
+
+@pytest.mark.parametrize(
+    "html", [SPLIT_DATE_CALENDAR_HTML, DAY_SPLIT_CALENDAR_HTML],
+    ids=["year-month-day", "month-day"],
+)
+def test_a_full_date_split_across_nodes_is_not_read_as_a_month_only_row(html):
+    """**割れた日付を、月だけの行と読み違えない。**
+
+    `<span>2026年</span><span>11月</span><span>13日</span>` は `_SCHEDULE_DATE`
+    に一致しないので月だけの側へ落ちる。そのまま通すと、日付は公表されているのに
+    「日付は無い」と報告し、ラベルには `11月=13日…決算発表` が残った。
+    **取り違えた読み方で観測を成功させない。** 読めない形として落とす。
+    """
+    result = observe_calendar(html)
+    assert not isinstance(result, SourceObservation)
+    assert result.error_code == "parse_error"
+
+
+ARCHIVE_NAV = '<nav><ul><li>2026年</li><li>11月</li><li>10月</li></ul></nav>'
+
+
+@pytest.mark.parametrize(
+    "base", [CALENDAR_HTML, MONTH_ONLY_CALENDAR_HTML], ids=["dated", "month-only"],
+)
+def test_an_unrelated_year_and_month_elsewhere_on_the_page_do_not_stop_monitoring(base):
+    """**疑うのは、発表の行だと分かってからにする。**
+
+    アーカイブのナビゲーションのように `2026年` `11月` が並ぶ場所はページの
+    どこにでもある。発表かどうかを見る前に落とすと、**正しく読めている
+    カレンダーを止めてしまう。** 月だけの読み取りを常に走らせるようにした分、
+    日付入りのページもこの巻き添えを食う。
+    """
+    result = observe_calendar(base.replace("</body>", ARCHIVE_NAV + "</body>"))
+    assert isinstance(result, SourceObservation)
+    assert result.stable_metadata["monthly_schedule"] == (
+        observe_calendar(base).stable_metadata["monthly_schedule"]
+    )
+
+
+def test_a_year_heading_above_a_month_grid_is_not_mistaken_for_a_split_date():
+    """年の見出しの下に12か月の格子が並ぶ形は、割れた日付ではない。
+
+    続く月の数で見出し行が先に外れるので、割れた日付の検査までは来ない。
+    """
+    html = ("<html><head><title>IRカレンダー</title></head><body><p>2026年</p><table><tr>"
+            + "".join("<th>%d月</th>" % m for m in list(range(4, 13)) + [1, 2, 3])
+            + "</tr></table><table><tr><td>2026年11月13日</td>"
+              "<td>2027年3月期第2四半期決算発表</td></tr></table></body></html>")
+    meta = observe_calendar(html).stable_metadata
+    assert meta["earnings_schedule"] == "2026-11-13=2027年3月期第2四半期決算発表"
+    assert meta["monthly_schedule"] == "none"
+
+
+def test_a_calendar_with_neither_dates_nor_months_still_refuses_to_report_no_change():
+    """**読めないものを黙って通さない。** 日付も月も取れない形になったら、
+    そこで落として人の判断を求める。"""
+    empty = ("<html><head><title>IRカレンダー</title></head>"
+             "<body><h1>IRカレンダー</h1><p>準備中です</p></body></html>")
+    # 読めないときは観測の失敗として返る。**「変更なし」にはならない。**
+    result = observe_calendar(empty)
+    assert not isinstance(result, SourceObservation)
+    assert result.error_code == "parse_error"
+
+
 def test_calendar_ignores_dates_inside_script_tags():
     assert "2099" not in observe_calendar().stable_metadata["earnings_schedule"]
 

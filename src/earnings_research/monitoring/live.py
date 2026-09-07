@@ -10,7 +10,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from email.message import Message
 from html.parser import HTMLParser
-from typing import Callable, Dict, Mapping, Optional, Tuple
+from typing import List, Callable, Dict, Mapping, Optional, Tuple
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
@@ -834,6 +834,35 @@ _SCHEDULE_DATE = re.compile(
 )
 _SCHEDULE_LABEL_WINDOW = 40
 
+# 取得元が日付を落とし、月だけの表に変わることがある。アイスコのIRカレンダーは
+# 2026年8月下旬にそうなり、`20XX年X月X日` を必須にしていた抽出が読めなくなった。
+# **読めないものを「変更なし」と報告しない**設計なので監視は正しく停止したが、
+# 公表されている粒度が落ちただけで、監視できる中身はまだある。
+#
+# 月だけの行は、日付を作らずに月とラベルのまま持つ。年も日も無いことが
+# `monthly_schedule` という別の欄であることから読める。**無い精度を足さない。**
+_SCHEDULE_MONTH_ONLY = re.compile(r"^\s*(\d{1,2})\s*月\s*$")
+# 日付が節に割れると `2026年` `11月` `13日` の3つに分かれ、`_SCHEDULE_DATE` は
+# どれにも一致しない。月の隣にこれらが居るかで、割れた日付を見分ける。
+_SCHEDULE_YEAR_ONLY = re.compile(r"^\s*20\d{2}\s*年\s*$")
+_SCHEDULE_DAY_HEAD = re.compile(r"^\s*\d{1,2}\s*日")
+# 見出し行は12か月が続けて並ぶ。続く月の数で見出し行とデータ行を分ける。
+# 見出し行の最後の月に、次の行の先頭のラベルが付いてしまうのを避けるため。
+#
+# **四半期は3か月あるので、続く月が3つでもデータ行である。** 上限を2にして
+# いたときは、発表が四半期の3番目の月にあると（`4月 5月 6月 決算発表`）
+# その3つが丸ごと見出し扱いで消えた。実測では `5月=決算発表` が消えるだけで
+# `6月=決算発表` は出ず、通知には削除だけが載る。
+#
+# **これは長さという代用で見出しかどうかを決めている。** ラベルの無い四半期が
+# 2つ続けば月は6つ並び、その並びは今も見出しとして落ちる。段の折り返し方が
+# 変われば同じことが起きる。節の並びだけからは、見出しの最後の月と、
+# ラベルを持つ月を見分けられない。**ここは残った穴である。**
+_MONTH_RUN_LIMIT = 4
+# ラベルが「第１四半期」「決算発表」のように分かれて置かれることがある。
+# 隣を何個まで繋いで読むか。月に当たったら止める。
+_MONTH_LABEL_SEGMENTS = 3
+
 
 def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
     """Fingerprint the published earnings schedule, not the whole page.
@@ -868,15 +897,93 @@ def _parse_ir_calendar_html(text: str, media_type: str = "text/html") -> Dict:
             except ValueError as exc:
                 raise ValueError("IR calendar row has an invalid date") from exc
             exact.append("%s=%s" % (parsed.isoformat(), label))
-    if not exact and not approximate:
+    # 日付の行がある表でも、月だけの行を落とさない。**日付が1行でもあれば
+    # 月だけの側を見ない書き方にしていたが、それは混在した表で「2月＝第3四半期
+    # 決算発表」が3月へ動いても指紋が変わらないということだった** ——観測は
+    # 成功し、`no_change` と報告される。読めるものを黙って捨てない。
+    #
+    # 日付だけの表から拾ってしまう心配は要らない。`^N月$` に一致するのは月だけ
+    # を置いた行で、`2026年11月13日 …` の行は一致しない。12か月が並ぶ見出しは
+    # 続く月の数で外れる。
+    monthly = _monthly_schedule(segments)
+    if not exact and not approximate and not monthly:
         raise ValueError("IR calendar contains no earnings announcement row")
-    if len(exact) + len(approximate) > _MAX_SCHEDULE_ROWS:
+    if len(exact) + len(approximate) + len(monthly) > _MAX_SCHEDULE_ROWS:
         raise ValueError("IR calendar contains an implausible number of rows")
     generic["stable_metadata"] = {
         "earnings_schedule": ";".join(exact) if exact else "none",
         "approximate_schedule": ";".join(approximate) if approximate else "none",
+        "monthly_schedule": ";".join(monthly) if monthly else "none",
     }
     return generic
+
+
+def _split_date_fragment(segments, index: int) -> bool:
+    """月の前後に年や日の断片が並んでいれば、それは割れた日付である。
+
+    見出し行の12か月は続く月の数で既に外れているので、ここへ来るのは1つか2つ
+    しか続かない月に限られる。`2026年` の見出しの下に月の格子が並ぶ形は
+    そちらで落ちる。
+    """
+    before = segments[index - 1] if index else ""
+    after = segments[index + 1] if index + 1 < len(segments) else ""
+    return bool(_SCHEDULE_YEAR_ONLY.match(before) or _SCHEDULE_DAY_HEAD.match(after))
+
+
+def _monthly_schedule(segments) -> List[str]:
+    """月だけが公表されている表から、月と発表内容を拾う。
+
+    日付が無いので日付は作らない。`8月=第1四半期決算発表` の形で、公表された
+    粒度のまま持つ。翌年の同じ月へ動いたかは分からないが、**分からないことを
+    分かったように書かないほうが、後で数え直せる。**
+
+    見出し行（12か月が続けて並ぶ）は対象にしない。そこでは月と発表内容が
+    別の行に置かれ、並び順では対応が取れない。最後の月に次の行の先頭の
+    ラベルが付いてしまう。
+    """
+    months = [i for i, seg in enumerate(segments)
+              if _SCHEDULE_MONTH_ONLY.match(seg)]
+    runs, run = [], []
+    for i in months:
+        if run and i == run[-1] + 1:
+            run.append(i)
+        else:
+            runs.append(run)
+            run = [i]
+    runs.append(run)
+    usable = {i for r in runs if 0 < len(r) < _MONTH_RUN_LIMIT for i in r}
+
+    out = []
+    for i in sorted(usable):
+        month = int(_SCHEDULE_MONTH_ONLY.match(segments[i]).group(1))
+        if not 1 <= month <= 12:
+            continue
+        parts = []
+        for j in range(i + 1, min(i + 1 + _MONTH_LABEL_SEGMENTS, len(segments))):
+            if _SCHEDULE_MONTH_ONLY.match(segments[j]):
+                break
+            parts.append(segments[j])
+            if "決算発表" in "".join(parts):
+                break
+        label = _clean_text("".join(parts))
+        if "決算発表" not in label:
+            continue
+        # **日付が節に割れているだけの行を、月だけの行と読まない。**
+        # `<span>2026年</span><span>11月</span><span>13日</span>` は
+        # `_SCHEDULE_DATE` に一致しないので月だけの側へ落ちるが、日付は公表
+        # されている。そのまま通すと「日付は無い」と報告し、ラベルには
+        # `11月=13日…決算発表` が残る。**取り違えた読み方で観測を成功させない。**
+        #
+        # **疑うのは、発表の行だと分かってからにする。** ページのどこかに
+        # 無関係な `2026年` `11月` の並び（アーカイブのナビゲーション等）が
+        # あるだけで観測を落とすと、正しく読めているカレンダーを止めてしまう。
+        if _split_date_fragment(segments, i):
+            raise ValueError("IR calendar splits a full date across nodes")
+        label = label[: label.index("決算発表") + len("決算発表")]
+        if not _is_meaningful_text(label):
+            continue
+        out.append("%d月=%s" % (month, label[:_SCHEDULE_LABEL_WINDOW]))
+    return out
 
 
 def _schedule_label(segments, index: int, remainder: str) -> Optional[str]:

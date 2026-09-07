@@ -353,7 +353,7 @@ def _schedule_summary(stable_metadata) -> str:
     """Join the dated and the month-only announcement rows for one field."""
     parts = [
         stable_metadata.get(key, "")
-        for key in ("earnings_schedule", "approximate_schedule")
+        for key in ("earnings_schedule", "approximate_schedule", "monthly_schedule")
     ]
     present = [part for part in parts if part and part != "none"]
     return " | ".join(present)
