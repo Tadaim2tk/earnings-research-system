@@ -183,10 +183,12 @@ jobs:
             --at "$(date --iso-8601=seconds)" \
             "${event_date_args[@]}")
           due=$(printf '%s' "$result" | python -c 'import json,sys; print(str(json.load(sys.stdin)["due"]).lower())')
+          reason=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["reason"])')
           echo "due=$due" >> "$GITHUB_OUTPUT"
-          if [ "$due" != "true" ]; then
-            echo "already observed today; skipping the duplicate source request."
-          fi
+          # **判定した理由をそのまま出す。** 以前はここで "already observed today"
+          # と決め打ちしていたが、状態が読めずに落ちた場合まで同じ文言になり、
+          # 観測した証拠が無いのに観測したと書いていた。
+          echo "dueness recheck: due=$due ($reason)"
       - id: run-monitor
         name: Generate and validate state bundle
         if: steps.recheck.outputs.due == 'true'

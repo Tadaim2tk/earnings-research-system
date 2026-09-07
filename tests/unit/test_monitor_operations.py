@@ -1718,4 +1718,21 @@ def test_an_undecidable_recheck_observes_anyway(tmp_path, capsys):
     assert recheck_due(tmp_path / "missing.csv", "ICECO_TDNET_INDEX", None, "2026-09-02T21:45:00+09:00") == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)["due"] is True
-    assert "dueness recheck failed" in captured.err
+    assert "recheck failed" in captured.err
+
+
+def test_a_state_that_vanished_while_waiting_is_not_read_as_an_observation(tmp_path, capsys):
+    """**取り消せるのは、観測があった証拠があるときだけ。**
+
+    plan は有効な状態から計画したのに、待っている間に artifact が失効・削除される
+    ことがある。plan の判定をそのまま流用すると、時計の fallback が働いて21時以降は
+    `false` に倒れ、**観測した証拠が無いのに「今日はもう観測した」と言うことになる。**
+    `state_unavailable` で止まる経路まで飛ばしてしまう。
+    """
+    assert recheck(tmp_path, capsys, None, "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_says_why_it_decided(tmp_path, capsys):
+    """理由を残す。**「観測済み」と決め打ちしていた文言が、嘘になっていた。**"""
+    recheck_due(PRODUCTION_REGISTRY, "ICECO_TDNET_INDEX", None, "2026-09-02T21:45:00+09:00")
+    assert json.loads(capsys.readouterr().out)["reason"] == "no committed state at recheck"

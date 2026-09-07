@@ -83,16 +83,8 @@ def _is_due(target: Dict[str, str], planned_at: datetime, last_success: str = ""
     local = planned_at.astimezone(JST)
     if local.weekday() >= 5:
         return False
-    event_date = target.get("event_date", "")
-    # The workflow fires every four hours at 01:17 through 21:17 JST, but a scheduled run can
-    # start hours late. Matching the hour exactly meant a delayed run never
-    # became due, so each cron slot owns the window that follows it instead.
-    if event_date:
-        parsed_event_date = datetime.fromisoformat(event_date).date()
-        if local.date() == parsed_event_date:
-            return True
-        if local.date() < parsed_event_date and _business_days_until(local.date(), parsed_event_date) <= 5:
-            return True
+    if event_window_open(target, planned_at):
+        return True
     # 通常日は一日一度で足りるが、**どの枠が動いたかで決めると枠が落ちた日が
     # 丸ごと消える。** 2026-08-29以降GitHubは6枠のうち4枠しか出さなくなり、
     # 落ちた枠が 17:17 JST だったので、5営業日続けて誰も観測しなかった。
@@ -113,6 +105,43 @@ def _is_due(target: Dict[str, str], planned_at: datetime, last_success: str = ""
     if observed.date() == local.date() and observed.hour >= NORMAL_DAY_HOUR:
         return False
     return local.hour >= NORMAL_DAY_HOUR
+
+
+def event_window_open(target: Dict[str, str], planned_at: datetime) -> bool:
+    """Return whether the announcement window or the announcement day is open.
+
+    The workflow fires every four hours at 01:17 through 21:17 JST, but a
+    scheduled run can start hours late. Matching the hour exactly meant a
+    delayed run never became due, so each cron slot owns the window that
+    follows it instead.
+
+    **一日一度の規則は通常日のものである。** 発表の窓では6枠とも走る。
+    plan と、待ちが明けた後の再判定が同じ規則を見るように、ここに置く。
+    """
+    event_date = target.get("event_date", "")
+    if not event_date:
+        return False
+    local = planned_at.astimezone(JST)
+    parsed_event_date = datetime.fromisoformat(event_date).date()
+    if local.date() == parsed_event_date:
+        return True
+    return (
+        local.date() < parsed_event_date
+        and _business_days_until(local.date(), parsed_event_date) <= 5
+    )
+
+
+def observed_after_the_close(last_success: str, planned_at: datetime) -> Optional[bool]:
+    """同じ日の大引け後に成功しているか。分からなければ None。
+
+    **空文字も読めない文字列も None にする。** どちらも「どの日に観測できたか」を
+    言っていない。呼ぶ側が、分からない場合をどちらへ倒すか決める。
+    """
+    observed = _local_datetime(last_success)
+    if observed is None:
+        return None
+    local = planned_at.astimezone(JST)
+    return observed.date() == local.date() and observed.hour >= NORMAL_DAY_HOUR
 
 
 def _local_datetime(value: str) -> Optional[datetime]:

@@ -20,8 +20,10 @@ from earnings_research.monitoring.operations import execute_live_run, execute_of
 from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
 from earnings_research.monitoring.registry import (
     active_target_plan,
+    event_window_open,
     find_target,
     load_registry,
+    observed_after_the_close,
     observed_event_dates,
 )
 from earnings_research.validation.validator import validate_monitor_bundle
@@ -109,7 +111,7 @@ def recheck_due(
     at: str,
     event_date: Optional[str] = None,
 ) -> int:
-    """待ち終わってから、いま在る状態でもう一度due判定をする。
+    """待ち終わってから、**同じ日に誰かが既に観測したか**だけを見る。
 
     plan は同時に走っている別の実行の結果を見られない。遅れて重なった2本が
     どちらも「今日はまだ成功していない」を見ると、両方がdueになる。target ごとの
@@ -119,9 +121,14 @@ def recheck_due(
     取得元への要求は `system_policy:public-web-low-frequency-v1` の下にある。
     一日一度という境界は、待ち終わった側でも確かめる。
 
-    判定できないときは due にする。**観測を余分に一度するより、しないことの方が
-    害が大きい。** 失敗の向きを変えない。
+    **この再判定が取り消せるのは、観測があった証拠があるときだけである。**
+    plan の判定をそのまま流用すると、待っている間に artifact が失効・削除されて
+    状態が読めなくなった場合に、時計の fallback が働いて 21時以降は `false` に
+    倒れる。**観測した証拠が無いのに「今日はもう観測した」と言うことになり、
+    `state_unavailable` で止まる経路まで飛ばしてしまう。** 分からないときは
+    観測する。余分に一度取ることより、取り損ねることの方が害が大きい。
     """
+    reason = ""
     try:
         rows = load_registry(registry_path)
         target = find_target(rows, target_id)
@@ -129,15 +136,32 @@ def recheck_due(
             target["event_date"] = event_date
         planned = _aware_datetime(at, "at")
         successes = _last_success_times(Path(previous_dir)) if previous_dir else {}
-        due = bool(
-            active_target_plan([target], planned_at=planned, last_success_times=successes)
-        )
         last_success = successes.get(target_id, "")
+        if event_window_open(target, planned):
+            # 発表の窓では6枠とも走る。一日一度の規則は通常日のもの。
+            due, reason = True, "event window open"
+        else:
+            observed = observed_after_the_close(last_success, planned)
+            if observed is None:
+                due, reason = True, "no committed state at recheck"
+            elif observed:
+                due, reason = False, "already observed after the close today"
+            else:
+                due, reason = True, "no post-close observation today"
     except (OSError, ValueError, KeyError) as exc:
-        print("dueness recheck failed, observing anyway: %s" % exc, file=sys.stderr)
         due, last_success = True, ""
+        reason = "recheck failed: %s" % exc
+    if not due:
+        print("skipping the duplicate source request: %s" % reason, file=sys.stderr)
+    elif reason != "no post-close observation today":
+        # 通常の「まだ観測していない」以外は、なぜ通したのかを残す。
+        print("observing anyway: %s" % reason, file=sys.stderr)
     print(
-        json.dumps({"due": due, "last_success_at": last_success}, separators=(",", ":"))
+        json.dumps(
+            {"due": due, "reason": reason, "last_success_at": last_success},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     )
     return 0
 

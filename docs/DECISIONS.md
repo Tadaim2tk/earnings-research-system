@@ -2714,3 +2714,25 @@ concurrency は順番に並べるだけなので（`cancel-in-progress: false`�
   害が大きい。失敗の向きを変えない。
 
 テスト 1374→1379。
+
+さらに Codex の P2 指摘。**再判定が、観測の証拠が無いのに「観測済み」と言っていた。**
+
+plan は有効な状態から計画したのに、待っている間に artifact が失効・削除されて
+2度目の取得が空になることがある。再判定に plan の判定をそのまま流用していたので、
+`successes` が空 → 時計の fallback（`17 <= hour < 21`）→ 21時以降は `false`。
+**観測した証拠が無いのに due を取り消し、`state_unavailable` で止まる経路まで
+飛ばしていた。** ログにも `already observed today` と決め打ちで書いていた。嘘である。
+
+**この再判定が取り消せるのは、観測があった証拠があるときだけにする。**
+plan は「取りに行くべきか」を、再判定は「その後に誰かが取ったか」を答える。
+後者は引き算しかできず、引くには証拠が要る。
+
+- `event_window_open` と `observed_after_the_close` を registry へ切り出し、
+  plan と再判定が同じ規則を見るようにした。
+- 状態が読めないときは due。空文字も壊れた文字列も同じ扱い。
+- 判定の理由（`event window open` / `already observed after the close today` /
+  `no post-close observation today` / `no committed state at recheck` /
+  `recheck failed: …`）を出力に載せ、ワークフローはそれをそのまま印字する。
+  **決め打ちの文言をやめた。**
+
+テスト 1381→1384。
