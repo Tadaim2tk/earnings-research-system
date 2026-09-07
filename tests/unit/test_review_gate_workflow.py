@@ -139,3 +139,33 @@ def test_the_fail_open_path_still_exists_for_a_silent_codex():
         if s.get("name", "").startswith("Wait for Codex")
     ][0]["run"]
     assert "No Codex review within 20 min — gate passes as a no-review PR." in wait
+
+
+def test_only_one_gate_run_per_pull_request_stays_alive():
+    """**重なった古い実行は、満たされない待ちを続けるだけ。**
+
+    続けて push すると `synchronize` の実行が重なる。古い方は自分の head SHA への
+    レビューを待つが、Codexが見るのは常に最新の head なので満たされない。
+    20分の fail-open を消費し、依頼を投げる側になった今は限りある枠まで使う。
+    """
+    parsed = gate()[1]
+    assert parsed["concurrency"] == {
+        "group": "codex-review-gate-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": True,
+    }
+
+
+def test_a_stale_run_does_not_request_a_review_of_someone_elses_head():
+    """依頼のコメントは commit を名指さない。**古い実行が投げると最新の head が
+    レビューされ、その実行は自分の SHA を待ち続ける。** 投げる直前に突き合わせる。
+    """
+    ask = [
+        s
+        for s in gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+        if s.get("name", "").startswith("Ask Codex")
+    ][0]
+    assert ask["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert 'live=$(gh api "repos/$REPO/pulls/$PR" --jq' in ask["run"]
+    assert 'if [ "$live" != "$HEAD_SHA" ]; then' in ask["run"]
+    # 突き合わせは投稿より前にある。後ろでは意味がない。
+    assert ask["run"].index('"$live" != "$HEAD_SHA"') < ask["run"].index("-f body='@codex review'")

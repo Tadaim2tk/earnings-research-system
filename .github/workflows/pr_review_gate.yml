@@ -22,6 +22,15 @@ on:
 permissions:
   pull-requests: read
 
+# 続けて push すると `synchronize` の実行が重なる。古い方は自分の head SHA への
+# レビューを待ち続けるが、**Codexが見るのは常に最新の head なので、その待ちは
+# 満たされない。** 20分の fail-open を消費するだけで、依頼を投げる側になった今は
+# 限りある枠まで無駄に使う。PR単位で1本に絞り、古い方は畳む。
+# 畳まれるのは古い commit の実行で、必須チェックが見るのは head の実行である。
+concurrency:
+  group: codex-review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   wait-for-codex-review:
     runs-on: ubuntu-latest
@@ -53,7 +62,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # 畳まれる前に走り出した実行が残ることがある。**依頼のコメントは
+          # commit を名指さないので、古い実行が投げると最新の head が
+          # レビューされ、その実行は自分の SHA を待ち続ける。** 投げる直前に
+          # 現在の head と突き合わせ、ずれていたら投げない。
+          live=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+          if [ "$live" != "$HEAD_SHA" ]; then
+            echo "head moved from $HEAD_SHA to $live; the newer run owns the request."
+            exit 0
+          fi
+          gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent
       - name: Wait for Codex review with zero unresolved findings (max 20 min)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
