@@ -51,7 +51,14 @@ jobs:
         # 呼ぶのは synchronize のときだけにする。opened / reopened /
         # ready_for_review は Codex 自身の発火条件なので、重ねて呼ぶと同じ head を
         # 二度レビューさせ、利用上限を余計に使う。
-        if: github.event.action == 'synchronize'
+        #
+        # **draft のうちは呼ばない。** 書きかけへの push も `synchronize` なので、
+        # 条件を event だけにすると更新のたびに未完成の内容をレビューさせ、
+        # 限りある枠を使い切る。draft を見てもらう場所は `ready_for_review` で、
+        # そこは Codex 自身が発火する。
+        if: >-
+          github.event.action == 'synchronize' &&
+          github.event.pull_request.draft == false
         # 呼べなくても待つ側は動く。上限に当たったときに、ここで赤くしない。
         # ただし**呼べなかったことは覚えておく**。fork や Dependabot からのPRでは
         # `GITHUB_TOKEN` が job 単位の permissions によらず読み取り専用になり、
@@ -91,6 +98,15 @@ jobs:
             2>/dev/null | awk '{s+=$1} END {print s+0}')))
           if [ "$seen" -gt 0 ]; then
             echo "Codex already reviewed $HEAD_SHA; not asking again."
+            exit 0
+          fi
+          # **head の確認は投げる直前でなければ意味がない。** 上の走査は
+          # ページを跨ぐので時間がかかり、その間に新しい push が入りうる。
+          # 最初の確認は明らかに古い実行を早く畳むためのもので、競合を塞ぐのは
+          # こちらである。
+          live=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+          if [ "$live" != "$HEAD_SHA" ]; then
+            echo "head moved to $live while checking; the newer run owns the request."
             exit 0
           fi
           gh api "repos/$REPO/issues/$PR/comments" -f body='@codex review' --silent

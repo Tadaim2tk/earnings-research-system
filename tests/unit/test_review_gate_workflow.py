@@ -48,7 +48,7 @@ def test_the_gate_only_asks_on_a_push():
     重ねて呼ぶと同じ head を二度レビューさせ、限りのある利用枠を余計に使う。
     """
     step = request_step(gate()[1])
-    assert step["if"] == "github.event.action == 'synchronize'"
+    assert "github.event.action == 'synchronize'" in step["if"]
 
 
 def test_asking_is_allowed_to_fail_without_failing_the_gate():
@@ -157,7 +157,11 @@ def test_only_one_gate_run_per_pull_request_stays_alive():
 
 def test_a_stale_run_does_not_request_a_review_of_someone_elses_head():
     """依頼のコメントは commit を名指さない。**古い実行が投げると最新の head が
-    レビューされ、その実行は自分の SHA を待ち続ける。** 投げる直前に突き合わせる。
+    レビューされ、その実行は自分の SHA を待ち続ける。**
+
+    **突き合わせは投げる直前でなければ意味がない。** 既にレビュー済みかを見る
+    走査はページを跨ぐので時間がかかり、その間に新しい push が入りうる。
+    最初の確認と、投稿の直前の確認と、二度要る。
     """
     ask = [
         s
@@ -165,10 +169,28 @@ def test_a_stale_run_does_not_request_a_review_of_someone_elses_head():
         if s.get("name", "").startswith("Ask Codex")
     ][0]
     assert ask["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
-    assert 'live=$(gh api "repos/$REPO/pulls/$PR" --jq' in ask["run"]
-    assert 'if [ "$live" != "$HEAD_SHA" ]; then' in ask["run"]
-    # 突き合わせは投稿より前にある。後ろでは意味がない。
-    assert ask["run"].index('"$live" != "$HEAD_SHA"') < ask["run"].index("-f body='@codex review'")
+    run = ask["run"]
+    assert run.count('live=$(gh api "repos/$REPO/pulls/$PR" --jq') == 2
+    assert run.count('if [ "$live" != "$HEAD_SHA" ]; then') == 2
+    post = run.index("-f body='@codex review'")
+    # 二度目の突き合わせが、既レビュー判定より後、投稿より前にある。
+    assert run.index('"$seen" -gt 0') < run.rindex('"$live" != "$HEAD_SHA"') < post
+
+
+def test_a_draft_pull_request_is_not_sent_for_review():
+    """**書きかけへの push も `synchronize` である。**
+
+    条件を event だけにすると、draft の更新のたびに未完成の内容をレビューさせ、
+    限りある枠を使い切る。draft を見てもらう場所は `ready_for_review` で、
+    そこは Codex 自身が発火する。
+    """
+    ask = [
+        s
+        for s in gate()[1]["jobs"]["wait-for-codex-review"]["steps"]
+        if s.get("name", "").startswith("Ask Codex")
+    ][0]
+    assert "github.event.pull_request.draft == false" in ask["if"]
+    assert "github.event.action == 'synchronize'" in ask["if"]
 
 
 DECISIONS = ROOT / "docs" / "DECISIONS.md"
