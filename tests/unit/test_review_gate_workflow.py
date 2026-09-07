@@ -169,3 +169,43 @@ def test_a_stale_run_does_not_request_a_review_of_someone_elses_head():
     assert 'if [ "$live" != "$HEAD_SHA" ]; then' in ask["run"]
     # 突き合わせは投稿より前にある。後ろでは意味がない。
     assert ask["run"].index('"$live" != "$HEAD_SHA"') < ask["run"].index("-f body='@codex review'")
+
+
+DECISIONS = ROOT / "docs" / "DECISIONS.md"
+
+
+def test_no_decision_record_is_swallowed_by_the_next_heading():
+    """**見出しだけの ADR を残さない。**
+
+    rebase の衝突を「両方残す」で機械的に畳んだとき、`## ERS-ADR-0082` の見出しが
+    `## ERS-ADR-0081` の見出しと `Date:` の間に割り込み、**0081 の全文が 0082 の
+    中身として読まれる**状態を作った。0082 の本文は見出しを失って `Approval:` から
+    始まっていた。どちらの ADR も、読む側からは別のものに見える。
+
+    見出しの前置きの形は歴史的にばらついている（`Date:` 58本、`Title:` 20本、他）。
+    **見るのは「見出しの次に本文がある」ことだけで、その形は見ない。**
+    """
+    lines = DECISIONS.read_text(encoding="utf-8").split("\n")
+    headings = [i for i, line in enumerate(lines) if line.startswith("## ERS-ADR-")]
+    assert len(headings) > 50, "ADR の見出しが数えられていない"
+    for i in headings:
+        following = [line for line in lines[i + 1 :] if line.strip()]
+        assert following, "%s の後に何も無い" % lines[i]
+        assert not following[0].startswith("## ERS-ADR-"), (
+            "%s が中身を持たないまま %s に飲み込まれている" % (lines[i], following[0])
+        )
+
+
+def test_each_decision_record_number_appears_once():
+    """同じ番号が二度現れたら、畳み方を間違えている。"""
+    lines = DECISIONS.read_text(encoding="utf-8").split("\n")
+    numbers = [line.strip() for line in lines if line.startswith("## ERS-ADR-")]
+    duplicated = sorted({n for n in numbers if numbers.count(n) > 1})
+    assert not duplicated, "番号が重複している: %s" % ", ".join(duplicated)
+
+
+def test_no_conflict_markers_survive_in_the_decision_log():
+    """衝突マーカーを一度そのまま commit した。二度目を機械で止める。"""
+    text = DECISIONS.read_text(encoding="utf-8")
+    for marker in ("<<<<<<< ", ">>>>>>> "):
+        assert marker not in text, "衝突マーカーが残っている: %s" % marker
