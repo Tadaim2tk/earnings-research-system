@@ -41,7 +41,7 @@ from earnings_research.monitoring.persistence import (
     verify_uploaded_bundle,
     write_committed_bundle,
 )
-from earnings_research.monitoring.operational_cli import plan_registry
+from earnings_research.monitoring.operational_cli import plan_registry, recheck_due
 from earnings_research.monitoring.registry import (
     RegistryError,
     active_target_plan,
@@ -786,6 +786,47 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
     assert '"${gap_acknowledgement_args[@]}"' in raw
     assert "monitor-build-handoff" in raw
     assert 'cron: "17 0,4,8,12,16,20 * * *"' in raw
+    # Dueness is decided from the downloaded state, so the fetch must cover every
+    # active target and not only the schedule sources. Fetching the smaller set
+    # would silently put every target back on the single-slot clock.
+    assert "--previous-state .monitor/previous-state" in raw
+    assert "--schedule-state" not in raw
+    fetch = [
+        step
+        for step in parsed["jobs"]["plan"]["steps"]
+        if step.get("name", "").startswith("Fetch committed state")
+    ]
+    assert len(fetch) == 1
+    assert 'r["activation_state"] == "activated"' in fetch[0]["run"]
+    assert "active | sources" in fetch[0]["run"]
+    # Extraction happens before verification, so a rejected bundle would other-
+    # wise stay on disk and be read as state. A "|| true" here would let an
+    # unverified "already succeeded today" suppress the monitor job.
+    assert '|| rm -rf ".monitor/previous-state/$target"' in fetch[0]["run"]
+    assert "|| true" not in fetch[0]["run"]
+    # 並びで待たされた2本目が同じ日に二度取りに行かないよう、待ち終わってから
+    # もう一度 due を見る。束を作る側の手順は全部その結果に従う。
+    monitor_steps = parsed["jobs"]["monitor"]["steps"]
+    names = [step.get("name", "") for step in monitor_steps]
+    assert names.index("Re-check dueness after the concurrency wait") > names.index(
+        "Fetch previous committed state"
+    )
+    recheck_step = monitor_steps[names.index("Re-check dueness after the concurrency wait")]
+    assert "monitor-recheck-due" in recheck_step["run"]
+    # 人が意図して呼んだ観測は、この門で止めない。
+    assert 'if [ "$EVENT_NAME" = "workflow_dispatch" ]' in recheck_step["run"]
+    gated = [
+        step
+        for step in monitor_steps
+        if step.get("if") == "steps.recheck.outputs.due == 'true'"
+    ]
+    assert {step.get("id") or step.get("name") for step in gated} == {
+        "run-monitor",
+        "upload",
+        "Re-download uploaded artifact",
+        "Verify re-downloaded committed state",
+        "handoff",
+    }
 
 
 def test_schedule_uses_six_slots_in_event_window_and_on_event_day():
@@ -801,6 +842,138 @@ def test_delayed_morning_run_is_still_due(hour, minute):
     row = target()
     row["event_date"] = "2026-08-13"
     assert active_target_plan([row], planned_at=moment(hour, minute, day=12)) == [row]
+
+
+def normal_day_target():
+    """A target with no event ahead, so only the normal-day rule can select it."""
+    row = target()
+    row["event_date"] = ""
+    return row
+
+
+@pytest.mark.parametrize("hour,minute", [(17, 17), (21, 45)])
+def test_a_dropped_cron_slot_no_longer_costs_the_normal_day(hour, minute):
+    """The 2026-08-29 outage: the 17:17 JST slot stopped being delivered.
+
+    Only that slot owned the normal day, so five business days passed with no
+    observation while the workflow kept returning success. Any slot after the
+    close now serves the day, as long as the day has not been observed yet.
+    21:45 is the surviving slot that actually ran throughout the outage.
+    """
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-11T08:30:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(hour, minute, day=12), last_success_times=successes
+    ) == [row]
+
+
+def test_a_target_already_observed_today_is_not_due_again():
+    """One observation per business day survives, as a fact rather than a slot."""
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-12T08:30:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(21, 45, day=12), last_success_times=successes
+    ) == []
+
+
+def test_the_normal_day_still_waits_for_the_close():
+    """Observing after the close is what makes a same-day disclosure same-day."""
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-11T08:30:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(13, 45, day=12), last_success_times=successes
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "hour,minute,due",
+    [(17, 17, True), (20, 59, True), (21, 45, False), (13, 45, False)],
+)
+def test_without_state_the_normal_day_keeps_the_old_window(hour, minute, due):
+    """A missing or unreadable bundle must not widen the request rate.
+
+    Falling back to the clock keeps the previous guarantee exactly, so a broken
+    artifact cannot turn one request a day into one per surviving slot.
+    """
+    row = normal_day_target()
+    planned = moment(hour, minute, day=12)
+    expected = [row] if due else []
+    assert active_target_plan([row], planned_at=planned) == expected
+    assert active_target_plan([row], planned_at=planned, last_success_times={}) == expected
+
+
+@pytest.mark.parametrize("value", ["2026-08-11T08:30:00", "not-a-time", ""])
+def test_an_unusable_last_success_falls_back_to_the_clock(value):
+    """A naive or malformed timestamp names no day, so it decides nothing."""
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: value}
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=12), last_success_times=successes
+    ) == [row]
+    assert active_target_plan(
+        [row], planned_at=moment(21, 45, day=12), last_success_times=successes
+    ) == []
+
+
+def test_the_last_success_is_read_in_japan_time():
+    """13:00Z on the 12th is 22:00 JST the same day, so the day is done.
+
+    Dropping the JST conversion would read it as the 12th in UTC terms anyway,
+    so the case that separates them is one that crosses midnight: 15:00Z on the
+    11th is already 00:00 JST on the 12th.
+    """
+    row = normal_day_target()
+    late = {row["monitor_target_id"]: "2026-08-12T13:00:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(22, 30, day=12), last_success_times=late
+    ) == []
+
+
+def test_a_success_before_the_close_does_not_finish_the_day():
+    """A forced dispatch in the morning must not eat the post-close observation.
+
+    Disclosures land at 15:30 JST. A same-day success at 10:00 has not seen
+    them, so treating the day as done would push them to the next business day
+    — the gap the 17:00 rule exists to close.
+    """
+    row = normal_day_target()
+    morning = {row["monitor_target_id"]: "2026-08-12T01:00:00+00:00"}  # 10:00 JST
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=12), last_success_times=morning
+    ) == [row]
+    # A run that crossed midnight lands in the small hours of the same JST day
+    # and is the same case.
+    overnight = {row["monitor_target_id"]: "2026-08-11T16:00:00+00:00"}  # 01:00 JST 12th
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=12), last_success_times=overnight
+    ) == [row]
+
+
+def test_a_success_at_the_close_itself_finishes_the_day():
+    """17:00 JST exactly is after the close, so it counts."""
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-12T08:00:00+00:00"}  # 17:00 JST
+    assert active_target_plan(
+        [row], planned_at=moment(21, 45, day=12), last_success_times=successes
+    ) == []
+
+
+def test_an_observed_day_does_not_close_an_open_event_window():
+    """Event days keep all six slots; the once-a-day rule is the normal day's."""
+    row = target()
+    row["event_date"] = "2026-08-13"
+    successes = {row["monitor_target_id"]: "2026-08-12T08:30:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(9, 17, day=12), last_success_times=successes
+    ) == [row]
+
+
+def test_a_weekend_slot_is_still_never_due():
+    row = normal_day_target()
+    successes = {row["monitor_target_id"]: "2026-08-11T08:30:00+00:00"}
+    assert active_target_plan(
+        [row], planned_at=moment(17, 17, day=15), last_success_times=successes
+    ) == []
 
 
 def test_a_committed_bundle_carries_one_target_and_still_validates():
@@ -836,13 +1009,14 @@ def test_registry_validation_rejects_a_self_referencing_schedule_source():
     assert any("must not be the target itself" in issue.message for issue in report.issues)
 
 
-def write_schedule_state(tmp_path, target_id, checkpoint):
-    directory = tmp_path / "schedules" / target_id
+def write_previous_state(tmp_path, target_id, checkpoint):
+    """One committed bundle, as the plan job downloads it before planning."""
+    directory = tmp_path / "previous-state" / target_id
     directory.mkdir(parents=True)
     (directory / "checkpoint.json").write_text(
         json.dumps(checkpoint, ensure_ascii=False), encoding="utf-8"
     )
-    return tmp_path / "schedules"
+    return tmp_path / "previous-state"
 
 
 def planned_ids(capsys):
@@ -850,7 +1024,7 @@ def planned_ids(capsys):
 
 
 def test_plan_reads_the_announcement_date_from_the_schedule_source(tmp_path, capsys):
-    state = write_schedule_state(
+    state = write_previous_state(
         tmp_path,
         "ICECO_EARNINGS_CALENDAR",
         {"monitor_target_id": "ICECO_EARNINGS_CALENDAR", "last_seen_schedule": SCHEDULE},
@@ -867,9 +1041,9 @@ def test_plan_reads_the_announcement_date_from_the_schedule_source(tmp_path, cap
     "checkpoint",
     [[1, 2], "string", 123, None, {"monitor_target_id": "ICECO_EARNINGS_CALENDAR"}],
 )
-def test_unusable_schedule_state_falls_back_without_failing_the_plan(tmp_path, capsys, checkpoint):
+def test_unusable_previous_state_falls_back_without_failing_the_plan(tmp_path, capsys, checkpoint):
     """A broken bundle must not skip every target for that slot."""
-    state = write_schedule_state(tmp_path, "ICECO_EARNINGS_CALENDAR", checkpoint)
+    state = write_previous_state(tmp_path, "ICECO_EARNINGS_CALENDAR", checkpoint)
     assert plan_registry(
         PRODUCTION_REGISTRY, None, None, "2026-11-09T09:17:00+09:00", False, state
     ) == 0
@@ -886,13 +1060,56 @@ def test_missing_schedule_directory_is_reported_not_silent(tmp_path, capsys):
     assert "ICECO_TDNET_INDEX" in capsys.readouterr().err
 
 
+def test_a_target_without_committed_state_says_it_fell_back_to_the_clock(tmp_path, capsys):
+    """The silent fallback is the shape this whole incident took.
+
+    A target whose bundle did not download goes back to deciding the normal day
+    by the clock, which is the arrangement that lost five business days without
+    anyone seeing it. Falling back is still right; doing it quietly is not.
+    """
+    state = write_previous_state(
+        tmp_path,
+        "ICECO_EARNINGS_CALENDAR",
+        {
+            "monitor_target_id": "ICECO_EARNINGS_CALENDAR",
+            "last_seen_schedule": SCHEDULE,
+            "last_success_at": "2026-11-06T08:20:00+00:00",
+        },
+    )
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T18:30:00+09:00", False, state
+    ) == 0
+    notice = capsys.readouterr().err.split("previous state unresolved")
+    assert len(notice) == 2
+    # The calendar reported its state, so only the TDnet target is named.
+    assert "ICECO_TDNET_INDEX" in notice[1]
+    assert "ICECO_EARNINGS_CALENDAR" not in notice[1]
+
+
+def test_no_clock_fallback_notice_when_every_target_reported_its_state(tmp_path, capsys):
+    for target_id in ("ICECO_EARNINGS_CALENDAR", "ICECO_TDNET_INDEX"):
+        state = write_previous_state(
+            tmp_path,
+            target_id,
+            {
+                "monitor_target_id": target_id,
+                "last_seen_schedule": SCHEDULE,
+                "last_success_at": "2026-11-06T08:20:00+00:00",
+            },
+        )
+    assert plan_registry(
+        PRODUCTION_REGISTRY, None, None, "2026-11-09T18:30:00+09:00", False, state
+    ) == 0
+    assert "previous state unresolved" not in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "planned_at,expected",
     [("2026-11-05T14:59:59+00:00", 1), ("2026-11-05T15:00:00+00:00", 2)],
 )
 def test_plan_resolves_the_schedule_against_japan_time(tmp_path, capsys, planned_at, expected):
     """The runner records UTC; 15:00Z is already the next JST day."""
-    state = write_schedule_state(
+    state = write_previous_state(
         tmp_path,
         "ICECO_EARNINGS_CALENDAR",
         {
@@ -1451,3 +1668,71 @@ def test_autonomous_change_creates_machine_readable_research_handoff(tmp_path):
     output = tmp_path / "handoff.json"
     assert write_research_handoff(changed, output) is True
     assert json.loads(output.read_text())["monitor_run_id"] == "MRUN-EXAMPLE-002"
+
+
+def recheck(tmp_path, capsys, last_success, at, target_id="ICECO_TDNET_INDEX", event_date=None):
+    """待ち終わった後の再判定を、その時点の状態で走らせる。"""
+    previous = None
+    if last_success is not None:
+        previous = tmp_path / "previous"
+        previous.mkdir(exist_ok=True)
+        (previous / "checkpoint.json").write_text(
+            json.dumps({"monitor_target_id": target_id, "last_success_at": last_success}),
+            encoding="utf-8",
+        )
+    assert recheck_due(PRODUCTION_REGISTRY, target_id, previous, at, event_date) == 0
+    return json.loads(capsys.readouterr().out)["due"]
+
+
+def test_the_second_queued_run_does_not_observe_the_same_day_twice(tmp_path, capsys):
+    """**plan は、同時に走っている別の実行の結果を見られない。**
+
+    遅れて重なった2本がどちらも「今日はまだ成功していない」を見ると、両方が
+    due になる。target ごとの concurrency は順番に並べるだけなので、2本目は
+    更新後の状態を取得しておきながら、そのまま同じ日に二度取りに行っていた。
+    待ち終わってから、いま在る状態でもう一度確かめる。
+    """
+    # 1本目が 17:30 JST に成功した後、2本目が 21:45 JST に待ち終わる。
+    assert recheck(tmp_path, capsys, "2026-09-02T08:30:00+00:00", "2026-09-02T21:45:00+09:00") is False
+
+
+def test_the_recheck_still_lets_the_first_run_of_the_day_through(tmp_path, capsys):
+    assert recheck(tmp_path, capsys, "2026-09-01T08:30:00+00:00", "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_uses_the_same_close_rule_as_the_plan(tmp_path, capsys):
+    """大引け前の成功は、再判定でもその日を終わらせない。"""
+    assert recheck(tmp_path, capsys, "2026-09-02T01:00:00+00:00", "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_keeps_an_open_event_window_open(tmp_path, capsys):
+    """発表日の窓では6枠とも走る。一日一度の規則は通常日のもの。"""
+    assert recheck(
+        tmp_path, capsys, "2026-09-02T08:30:00+00:00", "2026-09-02T09:17:00+09:00",
+        event_date="2026-09-02",
+    ) is True
+
+
+def test_an_undecidable_recheck_observes_anyway(tmp_path, capsys):
+    """**判定できないなら観測する。** 余分に一度取るより、取り損ねる方が害が大きい。"""
+    assert recheck_due(tmp_path / "missing.csv", "ICECO_TDNET_INDEX", None, "2026-09-02T21:45:00+09:00") == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["due"] is True
+    assert "recheck failed" in captured.err
+
+
+def test_a_state_that_vanished_while_waiting_is_not_read_as_an_observation(tmp_path, capsys):
+    """**取り消せるのは、観測があった証拠があるときだけ。**
+
+    plan は有効な状態から計画したのに、待っている間に artifact が失効・削除される
+    ことがある。plan の判定をそのまま流用すると、時計の fallback が働いて21時以降は
+    `false` に倒れ、**観測した証拠が無いのに「今日はもう観測した」と言うことになる。**
+    `state_unavailable` で止まる経路まで飛ばしてしまう。
+    """
+    assert recheck(tmp_path, capsys, None, "2026-09-02T21:45:00+09:00") is True
+
+
+def test_the_recheck_says_why_it_decided(tmp_path, capsys):
+    """理由を残す。**「観測済み」と決め打ちしていた文言が、嘘になっていた。**"""
+    recheck_due(PRODUCTION_REGISTRY, "ICECO_TDNET_INDEX", None, "2026-09-02T21:45:00+09:00")
+    assert json.loads(capsys.readouterr().out)["reason"] == "no committed state at recheck"

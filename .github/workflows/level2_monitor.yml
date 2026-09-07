@@ -55,21 +55,41 @@ jobs:
           python-version: "3.11.9"
           cache: pip
       - run: python -m pip install -e .
-      - name: Fetch published schedules
-        # The announcement date comes from the calendar target's own committed
-        # state, so a date the company moves does not have to be retyped into
-        # the registry. A missing bundle just leaves the registry value in use.
+      - name: Fetch committed state for planning
+        # Two things are read from the same bundles. The announcement date comes
+        # from the calendar target's own state, so a date the company moves does
+        # not have to be retyped into the registry. The last success decides
+        # whether the normal day still needs an observation, so a cron slot the
+        # scheduler drops no longer costs the whole day. A missing bundle just
+        # leaves the registry value and the clock in use.
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          sources=$(python -c 'import csv;print(" ".join(sorted({r["schedule_source_target_id"] for r in csv.DictReader(open("data/config/monitor_targets.csv",encoding="utf-8-sig")) if r["schedule_source_target_id"]})))')
-          for source in $sources; do
+          targets=$(python -c '
+          import csv
+          rows = list(csv.DictReader(open("data/config/monitor_targets.csv", encoding="utf-8-sig")))
+          active = {
+              r["monitor_target_id"]
+              for r in rows
+              if r["enabled"].lower() == "true"
+              and r["activation_state"] == "activated"
+              and r["monitoring_level"] == "level_2"
+              and r["automated_access_permitted"].lower() == "true"
+          }
+          sources = {r["schedule_source_target_id"] for r in rows if r["schedule_source_target_id"]}
+          print(" ".join(sorted(active | sources)))')
+          for target in $targets; do
+            # 展開は検証より先に起きる。検証が落ちた出力を残すと、planは
+            # manifest を見ずに checkpoint.json を読むので、**検証されていない
+            # 「今日もう成功した」が monitor ジョブを止められる。**
+            # 落ちた出力は消す。読むのは成功した取得の結果だけにする。
             python -m earnings_research.cli monitor-fetch-state \
               --repository "$REPOSITORY" \
-              --target-id "$source" \
-              --output ".monitor/schedules/$source" || true
+              --target-id "$target" \
+              --output ".monitor/previous-state/$target" \
+              || rm -rf ".monitor/previous-state/$target"
           done
       - id: plan
         env:
@@ -94,7 +114,7 @@ jobs:
           else
             matrix=$(python -m earnings_research.cli monitor-plan \
               data/config/monitor_targets.csv \
-              --schedule-state .monitor/schedules \
+              --previous-state .monitor/previous-state \
               --planned-at "$(date --iso-8601=seconds)")
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -132,8 +152,46 @@ jobs:
             --repository "$REPOSITORY" \
             --target-id "$TARGET_ID" \
             --output .monitor/previous
+      - id: recheck
+        name: Re-check dueness after the concurrency wait
+        # plan は同時に走っている別の実行の結果を見られない。遅れて重なった2本が
+        # どちらも「今日はまだ成功していない」を見ると両方 due になる。target ごとの
+        # concurrency は順番に並べるだけなので（cancel-in-progress: false）、
+        # **2本目は更新後の状態を取得しておきながら、同じ日に二度取りに行く。**
+        # 待ち終わってから、いま在る状態でもう一度確かめる。
+        #
+        # 手動の dispatch は plan を --force で通しているので、ここでも通す。
+        # 人が意図して呼んだ観測を、この門で止めない。
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REGISTRY: ${{ matrix.registry }}
+          TARGET_ID: ${{ matrix.monitor_target_id }}
+          EVENT_DATE: ${{ matrix.event_date }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          event_date_args=()
+          if [ -n "$EVENT_DATE" ]; then
+            event_date_args=(--event-date "$EVENT_DATE")
+          fi
+          result=$(python -m earnings_research.cli monitor-recheck-due \
+            --registry "$REGISTRY" \
+            --target-id "$TARGET_ID" \
+            --previous-dir .monitor/previous \
+            --at "$(date --iso-8601=seconds)" \
+            "${event_date_args[@]}")
+          due=$(printf '%s' "$result" | python -c 'import json,sys; print(str(json.load(sys.stdin)["due"]).lower())')
+          reason=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["reason"])')
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+          # **判定した理由をそのまま出す。** 以前はここで "already observed today"
+          # と決め打ちしていたが、状態が読めずに落ちた場合まで同じ文言になり、
+          # 観測した証拠が無いのに観測したと書いていた。
+          echo "dueness recheck: due=$due ($reason)"
       - id: run-monitor
         name: Generate and validate state bundle
+        if: steps.recheck.outputs.due == 'true'
         env:
           REGISTRY: ${{ matrix.registry }}
           TARGET_ID: ${{ matrix.monitor_target_id }}
@@ -178,6 +236,7 @@ jobs:
           artifact_name=$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
       - id: upload
+        if: steps.recheck.outputs.due == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ steps.run-monitor.outputs.artifact_name }}
@@ -186,14 +245,17 @@ jobs:
           retention-days: 14
           overwrite: false
       - name: Re-download uploaded artifact
+        if: steps.recheck.outputs.due == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ steps.run-monitor.outputs.artifact_name }}
           path: .monitor/reread
       - name: Verify re-downloaded committed state
+        if: steps.recheck.outputs.due == 'true'
         run: python -m earnings_research.cli monitor-verify-bundle .monitor/reread
       - id: handoff
         name: Build autonomous research handoff
+        if: steps.recheck.outputs.due == 'true'
         run: |
           result=$(python -m earnings_research.cli monitor-build-handoff \
             .monitor/reread \

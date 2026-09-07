@@ -20,8 +20,10 @@ from earnings_research.monitoring.operations import execute_live_run, execute_of
 from earnings_research.monitoring.persistence import artifact_name, verify_bundle, verify_uploaded_bundle
 from earnings_research.monitoring.registry import (
     active_target_plan,
+    event_window_open,
     find_target,
     load_registry,
+    observed_after_the_close,
     observed_event_dates,
 )
 from earnings_research.validation.validator import validate_monitor_bundle
@@ -35,15 +37,17 @@ def plan_registry(
     fixture_name: Optional[str],
     planned_at: Optional[str] = None,
     force: bool = False,
-    schedule_state_dir: Optional[Path] = None,
+    previous_state_dir: Optional[Path] = None,
 ) -> int:
     rows = load_registry(registry_path)
     planned = _aware_datetime(planned_at, "planned_at") if planned_at else None
     observed = {}
-    if schedule_state_dir is not None and planned is not None:
+    successes = {}
+    if previous_state_dir is not None and planned is not None:
+        successes = _last_success_times(Path(previous_state_dir))
         observed = observed_event_dates(
             rows,
-            _published_schedules(Path(schedule_state_dir)),
+            _published_schedules(Path(previous_state_dir)),
             planned.astimezone(JST).date(),
         )
         unresolved = sorted(
@@ -61,8 +65,26 @@ def plan_registry(
                 % ", ".join(unresolved),
                 file=sys.stderr,
             )
+        unknown = sorted(
+            row["monitor_target_id"]
+            for row in active_target_plan(rows)
+            if row["monitor_target_id"] not in successes
+        )
+        if unknown:
+            # 同じ理由で、こちらも黙って戻らない。状態が読めない対象は通常日の
+            # 判定が時計に戻り、**枠が落ちた日がまた見えないまま消える。**
+            # 消えたことが読める状態にしておく。
+            print(
+                "previous state unresolved, planning the normal day from the clock: %s"
+                % ", ".join(unknown),
+                file=sys.stderr,
+            )
     targets = active_target_plan(
-        rows, planned_at=planned, force=force, observed_event_dates=observed
+        rows,
+        planned_at=planned,
+        force=force,
+        observed_event_dates=observed,
+        last_success_times=successes,
     )
     if target_id:
         targets = [target for target in targets if target.get("monitor_target_id") == target_id]
@@ -79,6 +101,68 @@ def plan_registry(
         for target in targets
     ]
     print(json.dumps(plan, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
+def recheck_due(
+    registry_path: Path,
+    target_id: str,
+    previous_dir: Optional[Path],
+    at: str,
+    event_date: Optional[str] = None,
+) -> int:
+    """待ち終わってから、**同じ日に誰かが既に観測したか**だけを見る。
+
+    plan は同時に走っている別の実行の結果を見られない。遅れて重なった2本が
+    どちらも「今日はまだ成功していない」を見ると、両方がdueになる。target ごとの
+    concurrency は順番に並べるだけなので（`cancel-in-progress: false`）、
+    **2本目は更新後の状態を取得しておきながら、そのまま同じ日に二度取りに行く。**
+
+    取得元への要求は `system_policy:public-web-low-frequency-v1` の下にある。
+    一日一度という境界は、待ち終わった側でも確かめる。
+
+    **この再判定が取り消せるのは、観測があった証拠があるときだけである。**
+    plan の判定をそのまま流用すると、待っている間に artifact が失効・削除されて
+    状態が読めなくなった場合に、時計の fallback が働いて 21時以降は `false` に
+    倒れる。**観測した証拠が無いのに「今日はもう観測した」と言うことになり、
+    `state_unavailable` で止まる経路まで飛ばしてしまう。** 分からないときは
+    観測する。余分に一度取ることより、取り損ねることの方が害が大きい。
+    """
+    reason = ""
+    try:
+        rows = load_registry(registry_path)
+        target = find_target(rows, target_id)
+        if event_date:
+            target["event_date"] = event_date
+        planned = _aware_datetime(at, "at")
+        successes = _last_success_times(Path(previous_dir)) if previous_dir else {}
+        last_success = successes.get(target_id, "")
+        if event_window_open(target, planned):
+            # 発表の窓では6枠とも走る。一日一度の規則は通常日のもの。
+            due, reason = True, "event window open"
+        else:
+            observed = observed_after_the_close(last_success, planned)
+            if observed is None:
+                due, reason = True, "no committed state at recheck"
+            elif observed:
+                due, reason = False, "already observed after the close today"
+            else:
+                due, reason = True, "no post-close observation today"
+    except (OSError, ValueError, KeyError) as exc:
+        due, last_success = True, ""
+        reason = "recheck failed: %s" % exc
+    if not due:
+        print("skipping the duplicate source request: %s" % reason, file=sys.stderr)
+    elif reason != "no post-close observation today":
+        # 通常の「まだ観測していない」以外は、なぜ通したのかを残す。
+        print("observing anyway: %s" % reason, file=sys.stderr)
+    print(
+        json.dumps(
+            {"due": due, "reason": reason, "last_success_at": last_success},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
     return 0
 
 
@@ -222,14 +306,29 @@ def build_handoff(bundle_dir: Path, output_path: Path) -> int:
 
 
 def _published_schedules(state_dir: Path) -> Dict[str, str]:
-    """Read last_seen_schedule from every downloaded schedule-source bundle.
+    """Read last_seen_schedule from every downloaded bundle.
 
     A missing or unreadable bundle simply contributes nothing, so planning falls
     back to the registry column instead of failing the run.
     """
-    schedules = {}
+    return _checkpoint_field(state_dir, "last_seen_schedule")
+
+
+def _last_success_times(state_dir: Path) -> Dict[str, str]:
+    """Read last_success_at from every downloaded bundle.
+
+    A target whose bundle is missing contributes nothing, and planning falls
+    back to the clock for it. That is the fail-safe direction: an unknown
+    target is treated as not yet observed today.
+    """
+    return _checkpoint_field(state_dir, "last_success_at")
+
+
+def _checkpoint_field(state_dir: Path, field: str) -> Dict[str, str]:
+    """Map each committed checkpoint's target to one of its fields."""
+    values = {}
     if not state_dir.is_dir():
-        return schedules
+        return values
     for checkpoint_path in sorted(state_dir.glob("**/checkpoint.json")):
         try:
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -240,10 +339,10 @@ def _published_schedules(state_dir: Path) -> Dict[str, str]:
             # would fail the plan and skip every target for that slot.
             continue
         target = str(checkpoint.get("monitor_target_id", ""))
-        schedule = str(checkpoint.get("last_seen_schedule", ""))
-        if target and schedule:
-            schedules[target] = schedule
-    return schedules
+        value = str(checkpoint.get(field, ""))
+        if target and value:
+            values[target] = value
+    return values
 
 
 def notify_state(

@@ -9,6 +9,11 @@ from earnings_research.monitoring.stale import _business_days_until
 from earnings_research.validation.validator import load_spec, validate_monitor_registry
 
 
+JST = timezone(timedelta(hours=9))
+# 通常日の観測は大引けの後に置く。同じ日に出た開示をその日のうちに見るため。
+NORMAL_DAY_HOUR = 17
+
+
 class RegistryError(ValueError):
     """Raised when Human-owned configuration is incomplete or invalid."""
 
@@ -34,12 +39,18 @@ def active_target_plan(
     planned_at: Optional[datetime] = None,
     force: bool = False,
     observed_event_dates: Optional[Dict[str, str]] = None,
+    last_success_times: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, str]]:
     """Return only explicitly enabled, activated, approved Level 2 targets.
 
     ``observed_event_dates`` maps a target to the announcement date read from
     its schedule source. It takes precedence over the registry column so a date
     the company moved does not have to be retyped by hand.
+
+    ``last_success_times`` maps a target to the ``last_success_at`` carried by
+    its own committed checkpoint. It decides the normal day, so a dropped cron
+    slot no longer costs the whole day. A target that is missing from it falls
+    back to the clock.
     """
     active = [
         dict(row)
@@ -55,29 +66,95 @@ def active_target_plan(
             row["event_date"] = observed
     if force or planned_at is None:
         return active
-    return [row for row in active if _is_due(row, planned_at)]
+    return [
+        row
+        for row in active
+        if _is_due(
+            row,
+            planned_at,
+            (last_success_times or {}).get(row["monitor_target_id"], ""),
+        )
+    ]
 
 
-def _is_due(target: Dict[str, str], planned_at: datetime) -> bool:
+def _is_due(target: Dict[str, str], planned_at: datetime, last_success: str = "") -> bool:
     if planned_at.tzinfo is None or planned_at.utcoffset() is None:
         raise RegistryError("planned_at must be timezone-aware")
-    local = planned_at.astimezone(timezone(timedelta(hours=9)))
+    local = planned_at.astimezone(JST)
     if local.weekday() >= 5:
         return False
+    if event_window_open(target, planned_at):
+        return True
+    # 通常日は一日一度で足りるが、**どの枠が動いたかで決めると枠が落ちた日が
+    # 丸ごと消える。** 2026-08-29以降GitHubは6枠のうち4枠しか出さなくなり、
+    # 落ちた枠が 17:17 JST だったので、5営業日続けて誰も観測しなかった。
+    # workflow は success を返し続けた。
+    #
+    # だから「今日もう成功したか」で決める。まだなら大引け後のどの枠でも走る。
+    # 17:17 が落ちても 21:17 が拾う。一日一度は時計ではなく事実で守る。
+    observed = _local_datetime(last_success)
+    if observed is None:
+        # 状態が読めないときだけ従来の窓に戻す。**空文字と読めない文字列は
+        # 同じ扱いにする** ——どちらも「どの日に観測できたか」を言っていない。
+        # 上限のない再試行にはしないので、要求の頻度は前と変わらない。
+        return NORMAL_DAY_HOUR <= local.hour < 21
+    # **大引け前の成功は、その日を終わらせない。** 手動のdispatchや日付を
+    # またいだ実行で午前中に成功していると、日付だけを比べる書き方では
+    # 大引け後の観測が消え、15:30の開示が翌営業日まで見えなくなる。
+    # 17時という条件は、それを見るために置いてある。
+    if observed.date() == local.date() and observed.hour >= NORMAL_DAY_HOUR:
+        return False
+    return local.hour >= NORMAL_DAY_HOUR
+
+
+def event_window_open(target: Dict[str, str], planned_at: datetime) -> bool:
+    """Return whether the announcement window or the announcement day is open.
+
+    The workflow fires every four hours at 01:17 through 21:17 JST, but a
+    scheduled run can start hours late. Matching the hour exactly meant a
+    delayed run never became due, so each cron slot owns the window that
+    follows it instead.
+
+    **一日一度の規則は通常日のものである。** 発表の窓では6枠とも走る。
+    plan と、待ちが明けた後の再判定が同じ規則を見るように、ここに置く。
+    """
     event_date = target.get("event_date", "")
-    # The workflow fires every four hours at 01:17 through 21:17 JST, but a scheduled run can
-    # start hours late. Matching the hour exactly meant a delayed run never
-    # became due, so each cron slot owns the window that follows it instead.
-    if event_date:
-        parsed_event_date = datetime.fromisoformat(event_date).date()
-        if local.date() == parsed_event_date:
-            return True
-        if local.date() < parsed_event_date and _business_days_until(local.date(), parsed_event_date) <= 5:
-            return True
-    # Only the 17:17 slot owns the normal-day window, preserving one request per
-    # day. It follows the close, so a same-day disclosure is seen the same day
-    # instead of waiting for the next morning.
-    return 17 <= local.hour < 21
+    if not event_date:
+        return False
+    local = planned_at.astimezone(JST)
+    parsed_event_date = datetime.fromisoformat(event_date).date()
+    if local.date() == parsed_event_date:
+        return True
+    return (
+        local.date() < parsed_event_date
+        and _business_days_until(local.date(), parsed_event_date) <= 5
+    )
+
+
+def observed_after_the_close(last_success: str, planned_at: datetime) -> Optional[bool]:
+    """同じ日の大引け後に成功しているか。分からなければ None。
+
+    **空文字も読めない文字列も None にする。** どちらも「どの日に観測できたか」を
+    言っていない。呼ぶ側が、分からない場合をどちらへ倒すか決める。
+    """
+    observed = _local_datetime(last_success)
+    if observed is None:
+        return None
+    local = planned_at.astimezone(JST)
+    return observed.date() == local.date() and observed.hour >= NORMAL_DAY_HOUR
+
+
+def _local_datetime(value: str) -> Optional[datetime]:
+    """Return a checkpoint timestamp in Japan time, or None when it names no moment."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(JST)
 
 
 def next_announcement_date(schedule: str, on_or_after: date) -> Optional[str]:

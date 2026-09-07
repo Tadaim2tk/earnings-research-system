@@ -52,6 +52,7 @@ from earnings_research.monitoring.operational_cli import (
     notify_state,
     notify_workflow_failure,
     plan_registry,
+    recheck_due,
     record_gap_acknowledgement,
     run_offline,
     run_live,
@@ -87,7 +88,17 @@ def main(argv=None) -> int:
     plan_parser.add_argument("--fixture-name")
     plan_parser.add_argument("--planned-at")
     plan_parser.add_argument("--force", action="store_true")
-    plan_parser.add_argument("--schedule-state", type=Path)
+    plan_parser.add_argument("--previous-state", type=Path)
+
+    recheck_parser = subparsers.add_parser(
+        "monitor-recheck-due",
+        help="Re-check dueness after the per-target concurrency wait.",
+    )
+    recheck_parser.add_argument("--registry", required=True, type=Path)
+    recheck_parser.add_argument("--target-id", required=True)
+    recheck_parser.add_argument("--previous-dir", type=Path)
+    recheck_parser.add_argument("--at", required=True)
+    recheck_parser.add_argument("--event-date")
 
     fetch_parser = subparsers.add_parser("monitor-fetch-state", help="Fetch and verify prior GitHub artifact state.")
     fetch_parser.add_argument("--repository", required=True)
@@ -707,7 +718,15 @@ def main(argv=None) -> int:
                 args.fixture_name,
                 args.planned_at,
                 args.force,
-                args.schedule_state,
+                args.previous_state,
+            )
+        if args.command == "monitor-recheck-due":
+            return recheck_due(
+                args.registry,
+                args.target_id,
+                args.previous_dir,
+                args.at,
+                args.event_date,
             )
         if args.command == "monitor-fetch-state":
             return fetch_state(args.repository, args.target_id, args.output)
