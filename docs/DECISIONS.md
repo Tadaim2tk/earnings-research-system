@@ -2921,3 +2921,64 @@ draft を見てもらう場所は `ready_for_review` で、そこは Codex 自�
 
 テスト 1399→1400。
 
+## ERS-ADR-0083
+
+Date: 2026-11-17
+
+Status: Accepted
+
+Approval: GitHub の実行環境の切り替えで、監視の workflow が準備の段階で落ち続けていた件の修理。
+
+Context: `level2_monitor.yml` と `checks.yml` は Python を `3.11.9` に固定している
+（`docs/AI_MONITORING_IMPLEMENTATION_DESIGN.md` の workflow 要件 11）。job の実行環境は
+`ubuntu-latest` だった。こちらは GitHub が指す先を変える名前である。
+
+**2026-11-15（JST）に、その指す先が 24.04 から 26.04 へ変わった。**
+
+| run | 開始 (UTC) | image | setup-python |
+| --- | --- | --- | --- |
+| 43624882121 | 2026-11-14T18:08 | `ubuntu-24.04` (20261111.370.1) | 3.11.9 を取得して成功 |
+| 43655706269 | 2026-11-14T23:56 | `ubuntu-26.04` (20261111.82.6) | `The version '3.11.9' with architecture 'x64' was not found for Ubuntu 26.04.` |
+
+以後、2026-11-17T02:57Z の run 44006699630 までの7回が、すべて同じ image・同じ
+エラーで落ちた。`plan` が落ちるので `monitor` は skipped になり、何も観測していない。
+
+**失敗を知らせる job も、同じ場所で落ちた。** `report-pipeline-failure` は「workflow が
+何も観測しなかった」ことを Issue に書くための job だが、最初に同じ `setup-python` を
+通るので、同じ理由で止まった。この間に書かれた Issue もコメントも無い。残ったのは
+Actions の赤い実行と GitHub が既定で送る失敗通知だけで、人が調べ始めたのは3日目
+（2026-11-17）だった。
+
+原因は、固定したものと固定していないものが同じ job の中に並んでいたことである。
+**interpreter を patch まで固定するなら、それが載る image も固定しなければ、固定は
+GitHub の都合で外れる。**
+
+`checks.yml` も同じ指定だった。この期間に PR も push も無く一度も走っていないので
+実測は無いが、同じ action・同じ版・同じ `ubuntu-latest` である。
+
+Decision:
+
+- Python を patch まで固定している job は、`runs-on` を `ubuntu-24.04` に固定する。
+  対象は `level2_monitor.yml` の `plan`・`monitor`・`report-pipeline-failure` と、
+  `checks.yml` の `checks`。
+- Python `3.11.9` の固定は変えない。設計の要件 11 はそのまま満たす。
+- `pr_review_gate.yml` は Python を入れないので `ubuntu-latest` のままにする。
+- image を上げるときは、上げた先に固定した patch のビルドがあることを確かめ、無ければ
+  patch と一緒に上げる。その変更は ADR に書く。
+
+Consequences: テスト 1400→1402。`tests/unit/test_workflow_runner_image.py` が全 workflow を
+読み、patch まで固定した Python を入れる job の `runs-on` が `ubuntu-24.04` であることを
+固定した。`-latest` に戻すと落ちる。該当する job の集合が変わったとき（走査から漏れて
+検査が何も見なくなったとき）も落ちる。
+
+**これで戻るのは、workflow が走ることだけである。** 監視対象は2つとも
+`stopped / state_unavailable` のままで（state artifact の `last_success_at` は
+2026-10-06）、復帰には人の `gap_acknowledgement` が要る。その契約は本 ADR では変えない。
+
+**`ubuntu-24.04` もいずれ無くなる。** GitHub は古い image を廃止する。そのときは同じ形で
+止まる。止まり方が「setup で落ちる」と分かっていることと、image と patch を一緒に動かす
+規則がここでの備えで、廃止の期限を見張る仕組みは入れていない。
+
+**失敗を知らせる job が、知らせる対象と同じ準備に依存している点は直していない。**
+今回は GitHub のメールが代わりになったが、それは本システムの通知ではない。
+どちらも `docs/OPEN_QUESTIONS.md` に残した。

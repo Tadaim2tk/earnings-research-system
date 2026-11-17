@@ -141,3 +141,35 @@
 人の判断を求めるか。後者は正しく読めているページを止める副作用がある。
 
 関連: ERS-ADR-0080 Amendment (2026-09-06)。
+
+## 失敗を知らせる job が、知らせる対象と同じ準備に依存している
+
+2026-11-17。`level2_monitor.yml` の `report-pipeline-failure` は、`plan` や `monitor` が
+何も観測せずに終わったことを Issue に書く。2026-11-15〜11-17 の停止では、`plan` と同じ
+`setup-python` で先に落ち、1件も書けなかった（ERS-ADR-0083）。
+
+未解決の前提:
+
+- 通知の job は、checkout・`setup-python`・`pip install -e .` が全部通ることを前提に
+  している。この3つのどれかが落ちる障害（runner image の変更、依存の取得失敗）は、
+  通知ごと消える。
+- 残った手がかりは Actions の赤い実行と GitHub が既定で送る失敗通知で、本システムの
+  通知の契約の外にある。それを見なければ気付かない。
+
+決めていないこと: 通知の job を project の install に依存しない形にするか。そうすると
+通知の本文を組み立てる code が二か所になり、`monitor-notify-workflow-failure` の dedup と
+receipt の契約から外れる。もう一つの案は、workflow の外から run の結果を見る watchdog を
+置くことで、`AI_MONITORING_IMPLEMENTATION_DESIGN.md` が「別のwatchdogまたはHuman dashboard」
+と書いているものに当たるが、どちらもまだ無い。
+
+関連: ERS-ADR-0083。
+
+## 固定した runner image の廃止を、止まる前に知る方法が無い
+
+2026-11-17。Python を patch まで固定している job の image を `ubuntu-24.04` に固定した
+（ERS-ADR-0083）。GitHub は古い image を廃止するので、いつかは同じ形で止まる。
+
+決めていないこと: 廃止の予告をどこで見るか。image を上げる判断を、止まってからではなく
+前もって行う手順を持つか。
+
+関連: ERS-ADR-0083。
