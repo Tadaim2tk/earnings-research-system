@@ -404,7 +404,7 @@ workflowは次を満たす。
 8. run/checkpoint bundleをcross-validateし、artifactとしてpublish後にread-after-write検証する。
 9. change/errorだけIssue通知し、`no_change` はActions summaryに留める。
 10. source result、persistence result、notification resultを別々に記録する。
-11. Python `3.11.9` を固定し、project最低versionと一致させる。
+11. Python `3.11.9` を固定し、project最低versionと一致させる。そのpatchのビルドがあるrunner image（現在 `ubuntu-24.04`）も固定する。`ubuntu-latest` の指す先が変わると、固定したpatchを取得できず全jobが準備で止まる（2026-11-15に発生。ERS-ADR-0083）。
 12. target単位の `concurrency` を使い、state保存途中をcancelしないため `cancel-in-progress=false` とする。
 
 workflow run欠落自体はそのrunから記録できないため、次回runのstale gap検査と、別のwatchdogまたはHuman dashboardで検知する。stale watchdogが同じmonitor stateへ書き込む場合も、同じatomic bundle契約とconcurrencyを使用する。

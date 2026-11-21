@@ -27,7 +27,11 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    # image は固定する（ERS-ADR-0083）。`ubuntu-latest` は GitHub が指す先を変える名前で、
+    # 2026-11-15 に 24.04 から 26.04 へ移った。下で patch まで固定している Python 3.11.9 は
+    # 26.04 向けのビルドが無く、同じ指定の level2_monitor.yml は setup-python で止まった。
+    # image を上げるときは、上げた先に固定した patch があることを確かめ、無ければ一緒に上げる。
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
