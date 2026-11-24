@@ -259,6 +259,9 @@ case "$args" in
     echo "$calls" > "$GATE_FIXTURES/$kind.calls"
     fail_from=$(number "$GATE_FIXTURES/comments_fail_from")
     if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
+    # 要約を読む側（式なし）だけが失敗する場面。受領コメントを数える側（式つき）は通る。
+    fail_from=$(number "$GATE_FIXTURES/${kind}_fail_from")
+    if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
     late_from=$(number "$GATE_FIXTURES/comments_late_from")
     if [ "$late_from" -gt 0 ] && [ "$calls" -ge "$late_from" ]; then
       pages "$GATE_FIXTURES/comments_late.json"
@@ -305,6 +308,7 @@ def _run_gate(
     threads=(),
     graphql_fails: bool = False,
     comments_fail_from: int = 0,
+    summary_fail_from: int = 0,
     reviews_fail_from: int = 0,
     late_comments=None,
     late_from: int = 0,
@@ -319,6 +323,7 @@ def _run_gate(
     graphql_fails: スレッドの取得が失敗する。
     comments_fail_from=N / reviews_fail_from=N: N 回目以降の取得が失敗する（周回ごとに1回ずつ呼ぶ。
     時間切れのあとの依頼の読み取りは、コメントの polls+1 回目）。
+    summary_fail_from=N: 要約を読む取得だけが N 回目以降失敗する。受領コメントを数える取得は通る。
     late_comments, late_from=N: N 回目以降は late_comments を返す（Codex が読み終えた場面）。
     broken_jq: 手順から見える jq が動かない（runner に jq が無い、に当たる）。偽の gh は本物を使う。
     polls: 周回の数。None なら seq を差し替えず、本物の40回を走らせる（1回に10秒ほどかかる）。
@@ -333,6 +338,8 @@ def _run_gate(
         (fixtures / "graphql.json").write_text(json.dumps(nodes), encoding="utf-8")
     if comments_fail_from:
         (fixtures / "comments_fail_from").write_text("%d\n" % comments_fail_from, encoding="utf-8")
+    if summary_fail_from:
+        (fixtures / "comments_raw_fail_from").write_text("%d\n" % summary_fail_from, encoding="utf-8")
     if reviews_fail_from:
         (fixtures / "reviews_fail_from").write_text("%d\n" % reviews_fail_from, encoding="utf-8")
     if late_from:
@@ -455,7 +462,9 @@ def test_findings_seen_once_are_not_forgotten_when_a_later_poll_cannot_read_them
     """最後の1回だけ取得に失敗する。それまでは「指摘あり」と読めていた。見たあとで fail-open にしない。"""
     run = _run_gate(tmp_path, comments=[_summary(HEAD, "completed", True)], comments_fail_from=POLLS)
     assert run.code == 1 and "no review thread could be read" in run.said
-    assert run.said.count("reports findings for this head, but no review is visible yet") == POLLS - 1
+    # 読めなかった周回も、最後に読めた内容（指摘あり）に従って待つ
+    assert run.said.count("reports findings for this head, but no review is visible yet") == POLLS
+    assert run.said.count("could not be read this time; keeping what it last said (findings)") == 1
 
 
 # --- 2. 前からある二つの形は、前と同じに数える（今回は述語を実際に動かして確かめる）
@@ -478,6 +487,67 @@ def test_a_receipt_does_not_outvote_a_summary_that_speaks_for_the_same_head(tmp_
     assert findings.code == 1 and "no review thread could be read" in findings.said
     running = _run_gate(tmp_path / "running", comments=[_receipt(HEAD), _summary(HEAD, "running", None)])
     assert running.polls() == POLLS and "did not finish within 20 min" in running.said
+
+
+def test_a_receipt_stays_outvoted_when_the_summary_cannot_be_read_again(tmp_path):
+    """要約が「指摘あり」と言った次の周回で、要約の取得だけが失敗する（PR #92 Codex P2）。
+
+    今の周回で読めなかっただけの none を「要約は何も言っていない」と読むと、同じ head への古い
+    受領コメントが数え直され、指摘のスレッドがまだ見えないうちに緑で通る。直す前は2周目で通った。
+    """
+    comments = [_receipt(HEAD), _summary(HEAD, "completed", True)]
+    findings = _run_gate(tmp_path / "findings", comments=comments, summary_fail_from=2)
+    assert findings.code == 1, findings.said
+    assert "Codex review arrived" not in findings.said
+    assert "no review thread could be read" in findings.said
+    # 読み直させている最中に読めなくなった場合も、前の回の受領コメントでは通さない
+    comments = [_receipt(HEAD), _summary(HEAD, "running", None)]
+    running = _run_gate(tmp_path / "running", comments=comments, summary_fail_from=2)
+    assert "Codex review arrived" not in running.said and running.polls() == POLLS
+    assert "did not finish within 20 min" in running.said
+    # 要約が最初から一度も読めなければ、手がかりは受領コメントだけである（前からの数え方のまま）
+    never = _run_gate(tmp_path / "never", comments=[_receipt(HEAD)], summary_fail_from=1)
+    assert never.code == 0 and "Codex review arrived (1 review(s))" in never.said
+
+
+def test_nothing_passes_while_codex_is_still_reading_this_head(tmp_path):
+    """同じ head を読み直させている最中。前の回のレビュー（指摘は解決済み）で先に通さない。
+
+    先に通すと、いま読んでいるレビューはマージの後に届く（ERS #48 と同じ形）。
+    """
+    older = dict(reviews=[_review(HEAD)], comments=[_summary(HEAD, "running", None)])
+    waiting = _run_gate(tmp_path / "waiting", threads=[_thread(True)], **older)
+    assert waiting.polls() == POLLS and "Codex review arrived" not in waiting.said
+    # Codex 側が終わらなかったので、fail-open の対象である
+    assert waiting.code == 0 and "did not finish within 20 min" in waiting.said
+    clean = _run_gate(
+        tmp_path / "clean",
+        threads=[_thread(True)],
+        late_comments=[_summary(HEAD, "completed", False)],
+        late_from=3,
+        **older,
+    )
+    assert clean.code == 0 and clean.polls() == 2
+    findings = _run_gate(
+        tmp_path / "findings",
+        threads=[_thread(True), _thread(False)],
+        late_comments=[_summary(HEAD, "completed", True)],
+        late_from=3,
+        **older,
+    )
+    assert findings.code == 1 and "still unresolved after 20 min" in findings.said
+    # 読んでいる最中だと分かったあとで要約が読めなくなっても、前の回のレビューでは通さない
+    unreadable = _run_gate(tmp_path / "unreadable", threads=[_thread(True)], summary_fail_from=2, **older)
+    assert unreadable.polls() == POLLS and "Codex review arrived" not in unreadable.said
+    assert "keeping what it last said (running)" in unreadable.said
+
+
+def test_resolving_the_threads_still_turns_a_reviewed_head_green(tmp_path):
+    """要約が「指摘あり」のままでも、指摘スレッドを全部 resolve すれば通る（前からの手順）。"""
+    run = _run_gate(
+        tmp_path, reviews=[_review(HEAD)], threads=[_thread(True)], comments=[_summary(HEAD, "completed", True)]
+    )
+    assert run.code == 0 and "Codex review arrived (1 review(s))" in run.said
 
 
 def test_a_review_of_this_head_passes_only_with_zero_unresolved_codex_threads(tmp_path):

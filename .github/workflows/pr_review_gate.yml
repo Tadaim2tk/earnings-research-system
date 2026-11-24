@@ -115,8 +115,9 @@ jobs:
           owner="${REPO%%/*}"
           name="${REPO##*/}"
           arrived=0
+          # この実行の中で、要約が最後にこの head について言ったこと（まだ何も言っていなければ空）。
+          summary_last=""
           summary_findings=0
-          summary_running=0
           # この実行が、何の event で、どの head を、いつの push として見ているか。
           # あとから結論を検算できるように、最初に書いておく。
           echo "event=${EVENT_ACTION:-} draft=${IS_DRAFT:-} head=$HEAD_SHA pushed_at=${PUSHED_AT:-}"
@@ -145,25 +146,36 @@ jobs:
               2>/dev/null | awk '{s+=$1} END {print s+0}')
             # **PR を開いたときの自動レビューは、上のどちらの形でも返らない。** 指摘が無ければ
             # 要約コメントを書き換えるだけである（2026-11-17 実測: PR #89）。要約も読む。
-            summary_state=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
+            summary_read=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
               | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || true)
-            case "$summary_state" in clean|findings|running) ;; *) summary_state="none" ;; esac
-            # 一度でも「いまの head に指摘あり」「いまの head を読んでいる」を見たら、あとの周回で
-            # 読めなくなっても忘れない。最後の周だけ取得に失敗して、見たはずのものを無かったことに
-            # しないため。
+            case "$summary_read" in clean|findings|running) ;; *) summary_read="none" ;; esac
+            # **今の周回で読めなかったことを、「要約は何も言っていない」と読まない**（PR #92 Codex P2）。
+            # 要約が「指摘あり」と言った次の周回で、要約の取得だけが失敗すると none になる。それを
+            # 「何も言っていない」と読むと、同じ head への古い `Reviewed commit` のコメントが数え直され、
+            # 指摘のスレッドがまだ見えないうちに緑で通る。一度要約が口を開いたら、次に読めるまでは、
+            # 最後に読めた内容に従う。
+            if [ "$summary_read" != "none" ]; then
+              summary_last="$summary_read"
+            elif [ -n "$summary_last" ]; then
+              echo "Codex's summary could not be read this time; keeping what it last said ($summary_last)."
+            fi
+            summary_state="${summary_last:-none}"
+            # 一度でも「いまの head に指摘あり」を見たら、そのあと読み直しが始まって終わらなくても
+            # 忘れない。取り消せるのは、あとで読めた「指摘なし」（下で通る）だけである。
             if [ "$summary_state" = "findings" ]; then
               summary_findings=1
             fi
-            if [ "$summary_state" = "running" ]; then
-              summary_running=1
-            fi
-            # `Reviewed commit` のコメントは、要約がこの head について何も言っていないときだけ数える。
-            # 要約が「指摘あり」「まだ読んでいる」と言っているのに、同じ head への古い受領コメントで
-            # 通さない（同じ head を読み直させている最中に、前の回の結論で緑にしない）。
-            if [ "$summary_state" != "none" ]; then
+            # `Reviewed commit` のコメントは、要約がこの head について一度も口を開いていないときだけ
+            # 数える（要約が無い古い書式のための手がかり）。要約があるなら、要約に従う。
+            if [ -n "$summary_last" ]; then
               c=0
             fi
-            if [ "$n" -gt 0 ] || [ "$c" -gt 0 ] || [ "$summary_state" = "clean" ]; then
+            if [ "$summary_state" = "running" ]; then
+              # **Codex はいまこの head を読んでいる。** 同じ head への前の回のレビューや受領コメントが
+              # あっても、それで先に通さない。先に通すと、いま読んでいるレビューはマージの後に届く
+              # （ERS #48 と同じ形）。終わらなければ、下の fail-open で通る。
+              echo "Codex is reviewing this head. ($i/40)"
+            elif [ "$n" -gt 0 ] || [ "$c" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               arrived=1
               # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
               # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
@@ -187,8 +199,6 @@ jobs:
               # 要約は「いまの head に指摘あり」と言っているが、レビュー（指摘スレッド）がまだ見えない。
               # 遅れて届くことがあるので待つ。最後まで見えなければ赤にする（fail-open で通さない）。
               echo "Codex's summary reports findings for this head, but no review is visible yet. ($i/40)"
-            elif [ "$summary_state" = "running" ]; then
-              echo "Codex is reviewing this head. ($i/40)"
             else
               echo "waiting for Codex review... ($i/40)"
             fi
@@ -203,7 +213,7 @@ jobs:
             echo "::error::Codex's summary comment reports findings for this head, but no review thread could be read. Read Codex's comments on this pull request; push a fix, or re-run this check once the findings are visible."
             exit 1
           fi
-          if [ "$summary_running" -gt 0 ]; then
+          if [ "$summary_last" = "running" ]; then
             # Codex はこの head を読み始めていた。頼まれていないのではなく、終わらなかった。
             # Codex 側の停止なので、fail-open の対象である。
             echo "Codex started reviewing this head but did not finish within 20 min — gate passes as a no-review PR."
