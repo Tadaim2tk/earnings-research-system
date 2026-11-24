@@ -112,6 +112,19 @@ def _thread(resolved: bool, login: str = "chatgpt-codex-connector") -> dict:
     return {"isResolved": resolved, "comments": {"nodes": [{"author": {"login": login}}]}}
 
 
+def _finding_comments(threads, sha: str) -> list:
+    """指摘スレッドの最初のコメントを、REST の行コメントの形で返す（Codex のものだけ。解決済みも含む）。
+
+    Codex の指摘は、レビューした commit への行コメントとして付く。GraphQL のスレッドと REST の
+    行コメントは同じものを別の口から見ているので、fixture でも片方からもう片方を作る。
+    """
+    return [
+        {"user": {"login": CODEX["login"]}, "original_commit_id": sha}
+        for thread in threads
+        if thread["comments"]["nodes"][0]["author"]["login"].startswith("chatgpt-codex-connector")
+    ]
+
+
 def _apply(filter_name: str, pages, **args: str) -> str:
     """job の env にある jq の式を、実物の文字列のまま jq に渡す。pages はページごとの配列。"""
     stdin = "\n".join(json.dumps(page) for page in pages)
@@ -210,8 +223,7 @@ def test_only_a_request_a_person_wrote_after_the_push_counts():
 
 
 # --------------------------------------------------------------------------- 手順をそのまま走らせる
-GH_STUB = r"""#!/usr/bin/env bash
-# 偽の gh。答えは $GATE_FIXTURES の fixture から作る。手順が `--jq` で渡した式は、そのまま本物の
+GH_STUB = r"""# 偽の gh。答えは $GATE_FIXTURES の fixture から作る。手順が `--jq` で渡した式は、そのまま本物の
 # jq（$REAL_JQ）に通す。本物の gh は --paginate のとき式をページごとに当てるので、同じようにする。
 filter=""
 prev=""
@@ -235,6 +247,22 @@ number() {  # $1: ファイル。中の数を返す（無ければ 0）。cat �
   echo "$n"
 }
 
+late() {  # $1: fixture の名前、$2: いま何周目か。後から変わる fixture があり、その周回に達していれば、そちらを返す
+  from=$(number "$GATE_FIXTURES/$1_late_from")
+  if [ "$from" -eq 0 ]; then from=$(number "$GATE_FIXTURES/late_from"); fi
+  if [ "$from" -gt 0 ] && [ "$2" -ge "$from" ] && [ -f "$GATE_FIXTURES/$1_late.json" ]; then
+    echo "$GATE_FIXTURES/$1_late.json"
+  else
+    echo "$GATE_FIXTURES/$1.json"
+  fi
+}
+
+tick() {  # $1: 数える名前。呼ばれた回数（= 周回の番号）を進めて返す
+  n=$(( $(number "$GATE_FIXTURES/$1.calls") + 1 ))
+  echo "$n" > "$GATE_FIXTURES/$1.calls"
+  echo "$n"
+}
+
 case "$args" in
   *"-f body="*|"pr comment"*|"pr review"*|"issue comment"*|*"-X POST"*|*"--method POST"*|*"-X PATCH"*|*"-X DELETE"*)
     # このゲートは PR に何も書かない。書こうとしたら、その試験を落とす。
@@ -242,32 +270,40 @@ case "$args" in
     echo "the gate must not write to the pull request: $args" >&2
     exit 9 ;;
   "api graphql"*)
-    [ -f "$GATE_FIXTURES/graphql.json" ] || exit 1
-    "$REAL_JQ" -r "$filter" "$GATE_FIXTURES/graphql.json"
+    # 手順は周回の最初にレビューを数えるので、その回数がいまの周回の番号になる。
+    poll=$(number "$GATE_FIXTURES/reviews.calls")
+    file=$(late graphql "$poll")
+    [ -f "$file" ] || exit 1
+    "$REAL_JQ" -r "$filter" "$file"
     exit $? ;;
   *"/pulls/"*"/reviews"*)
-    calls=$(( $(number "$GATE_FIXTURES/reviews.calls") + 1 ))
-    echo "$calls" > "$GATE_FIXTURES/reviews.calls"
+    calls=$(tick reviews)
     fail_from=$(number "$GATE_FIXTURES/reviews_fail_from")
     if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
-    pages "$GATE_FIXTURES/reviews.json"
+    pages "$(late reviews "$calls")"
+    exit 0 ;;
+  *"/pulls/"*"/comments"*)
+    # 行に付いたコメント（指摘）。issue のコメントとは別の取得口。
+    calls=$(tick review_comments)
+    fail_from=$(number "$GATE_FIXTURES/review_comments_fail_from")
+    if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
+    fail_until=$(number "$GATE_FIXTURES/review_comments_fail_until")
+    if [ "$calls" -le "$fail_until" ]; then exit 1; fi
+    pages "$(late review_comments "$calls")"
     exit 0 ;;
   *"/issues/"*"/comments"*)
     # 手順は周回ごとに、式つき（受領コメントを数える）と式なし（要約を読む）を1回ずつ呼ぶ。別々に数える。
     if [ -n "$filter" ]; then kind=comments_jq; else kind=comments_raw; fi
-    calls=$(( $(number "$GATE_FIXTURES/$kind.calls") + 1 ))
-    echo "$calls" > "$GATE_FIXTURES/$kind.calls"
+    calls=$(tick "$kind")
     fail_from=$(number "$GATE_FIXTURES/comments_fail_from")
     if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
     # 要約を読む側（式なし）だけが失敗する場面。受領コメントを数える側（式つき）は通る。
     fail_from=$(number "$GATE_FIXTURES/${kind}_fail_from")
     if [ "$fail_from" -gt 0 ] && [ "$calls" -ge "$fail_from" ]; then exit 1; fi
-    late_from=$(number "$GATE_FIXTURES/comments_late_from")
-    if [ "$late_from" -gt 0 ] && [ "$calls" -ge "$late_from" ]; then
-      pages "$GATE_FIXTURES/comments_late.json"
-    else
-      pages "$GATE_FIXTURES/comments.json"
-    fi
+    # 最初の何回かだけ失敗して、あとから読めるようになる場面。
+    fail_until=$(number "$GATE_FIXTURES/${kind}_fail_until")
+    if [ "$calls" -le "$fail_until" ]; then exit 1; fi
+    pages "$(late comments "$calls")"
     exit 0 ;;
 esac
 echo "unexpected gh call: $args" >&2
@@ -278,8 +314,7 @@ exit 9
 # 手順は `seq 1 40` で40回、30秒おきに見る（20分）。試験では回数を縮める。sleep を偽物にするのと同じで、
 # 縮めるのは時間であって、周回の中身と、時間切れのあとの判断はそのまま走る。
 POLLS = 3
-SEQ_STUB = """#!/usr/bin/env bash
-# 偽の seq。`seq 1 40` を `seq 1 $GATE_POLLS` に縮める。ほかの呼び方は想定していない。
+SEQ_STUB = """# 偽の seq。`seq 1 40` を `seq 1 $GATE_POLLS` に縮める。ほかの呼び方は想定していない。
 if [ "$*" != "1 40" ]; then echo "unexpected seq call: $*" >&2; exit 9; fi
 i=1
 while [ "$i" -le "$GATE_POLLS" ]; do echo "$i"; i=$((i + 1)); done
@@ -307,11 +342,18 @@ def _run_gate(
     comments=(),
     threads=(),
     graphql_fails: bool = False,
+    finding_comments=None,
     comments_fail_from: int = 0,
     summary_fail_from: int = 0,
+    summary_fail_until: int = 0,
     reviews_fail_from: int = 0,
-    late_comments=None,
     late_from: int = 0,
+    late_comments=None,
+    late_reviews=None,
+    late_threads=None,
+    late_threads_from: int = 0,
+    late_finding_comments=None,
+    finding_comments_fail_until: int = 0,
     broken_jq: bool = False,
     polls: int | None = POLLS,
     head: str = HEAD,
@@ -320,42 +362,72 @@ def _run_gate(
     """ゲートの手順を走らせる。
 
     reviews / comments: API が返す中身（1ページぶん）。threads: PR の指摘スレッド。
+    finding_comments: この PR の行コメント。渡さなければ、threads のうち Codex のものが、いまの head に
+    付いているものとして作る。
     graphql_fails: スレッドの取得が失敗する。
     comments_fail_from=N / reviews_fail_from=N: N 回目以降の取得が失敗する（周回ごとに1回ずつ呼ぶ。
     時間切れのあとの依頼の読み取りは、コメントの polls+1 回目）。
     summary_fail_from=N: 要約を読む取得だけが N 回目以降失敗する。受領コメントを数える取得は通る。
-    late_comments, late_from=N: N 回目以降は late_comments を返す（Codex が読み終えた場面）。
+    summary_fail_until=N: 要約を読む取得だけが N 回目まで失敗し、そのあとは読める。
+    late_from=N, late_comments / late_reviews / late_threads: N 周目以降は、渡したものへ差し替える
+    （Codex が読み終えた、新しい指摘が見えるようになった、などの場面）。渡さなかったものは変わらない。
+    late_threads_from=M: スレッドとレビューと行コメントだけ、M 周目から差し替える（要約より先に結果が見える場面）。
+    finding_comments_fail_until=N: 行コメントの取得が N 回目まで失敗する。
     broken_jq: 手順から見える jq が動かない（runner に jq が無い、に当たる）。偽の gh は本物を使う。
     polls: 周回の数。None なら seq を差し替えず、本物の40回を走らせる（1回に10秒ほどかかる）。
     """
     where.mkdir(parents=True, exist_ok=True)
     fixtures = where / "fixtures"
     fixtures.mkdir()
-    (fixtures / "reviews.json").write_text(json.dumps([list(reviews)]), encoding="utf-8")
-    (fixtures / "comments.json").write_text(json.dumps([list(comments)]), encoding="utf-8")
+    def write(name: str, value) -> None:
+        (fixtures / name).write_text(json.dumps(value), encoding="utf-8")
+
+    def graphql(nodes) -> dict:
+        return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": list(nodes)}}}}}
+
+    write("reviews.json", [list(reviews)])
+    write("comments.json", [list(comments)])
+    if finding_comments is None:
+        finding_comments = _finding_comments(threads, head)
+    write("review_comments.json", [list(finding_comments)])
     if not graphql_fails:
-        nodes = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": list(threads)}}}}}
-        (fixtures / "graphql.json").write_text(json.dumps(nodes), encoding="utf-8")
+        write("graphql.json", graphql(threads))
     if comments_fail_from:
         (fixtures / "comments_fail_from").write_text("%d\n" % comments_fail_from, encoding="utf-8")
     if summary_fail_from:
         (fixtures / "comments_raw_fail_from").write_text("%d\n" % summary_fail_from, encoding="utf-8")
+    if summary_fail_until:
+        (fixtures / "comments_raw_fail_until").write_text("%d\n" % summary_fail_until, encoding="utf-8")
     if reviews_fail_from:
         (fixtures / "reviews_fail_from").write_text("%d\n" % reviews_fail_from, encoding="utf-8")
+    if finding_comments_fail_until:
+        (fixtures / "review_comments_fail_until").write_text("%d\n" % finding_comments_fail_until, encoding="utf-8")
+    if late_threads_from:
+        for name in ("reviews", "review_comments", "graphql"):
+            (fixtures / ("%s_late_from" % name)).write_text("%d\n" % late_threads_from, encoding="utf-8")
     if late_from:
-        (fixtures / "comments_late_from").write_text("%d\n" % late_from, encoding="utf-8")
-        late = json.dumps([list(late_comments or [])])
-        (fixtures / "comments_late.json").write_text(late, encoding="utf-8")
+        (fixtures / "late_from").write_text("%d\n" % late_from, encoding="utf-8")
+        if late_comments is not None:
+            write("comments_late.json", [list(late_comments)])
+        if late_reviews is not None:
+            write("reviews_late.json", [list(late_reviews)])
+        if late_threads is not None:
+            write("review_comments_late.json", [_finding_comments(late_threads, head)])
+            if not graphql_fails:
+                write("graphql_late.json", graphql(late_threads))
+        if late_finding_comments is not None:
+            write("review_comments_late.json", [list(late_finding_comments)])
     bin_dir = where / "bin"
     bin_dir.mkdir()
-    fakes = {"gh": GH_STUB, "sleep": "#!/usr/bin/env bash\nexit 0\n"}
+    fakes = {"gh": GH_STUB, "sleep": "exit 0\n"}
     if broken_jq:
-        fakes["jq"] = "#!/usr/bin/env bash\nexit 127\n"
+        fakes["jq"] = "exit 127\n"
     if polls is not None:
         fakes["seq"] = SEQ_STUB
     for name, body in fakes.items():
         path = bin_dir / name
-        path.write_text(body, encoding="utf-8")
+        # `env` を挟まずに bash を直接起こす（偽物は1回の実行で数百回呼ばれる）。
+        path.write_text("#!%s\n%s" % (BASH, body), encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     script = where / "step.sh"
     script.write_text(_step()["run"], encoding="utf-8")
@@ -464,7 +536,7 @@ def test_findings_seen_once_are_not_forgotten_when_a_later_poll_cannot_read_them
     assert run.code == 1 and "no review thread could be read" in run.said
     # 読めなかった周回も、最後に読めた内容（指摘あり）に従って待つ
     assert run.said.count("reports findings for this head, but no review is visible yet") == POLLS
-    assert run.said.count("could not be read this time; keeping what it last said (findings)") == 1
+    assert run.said.count("this time (unread); keeping what it last said (findings)") == 1
 
 
 # --- 2. 前からある二つの形は、前と同じに数える（今回は述語を実際に動かして確かめる）
@@ -487,6 +559,15 @@ def test_a_receipt_does_not_outvote_a_summary_that_speaks_for_the_same_head(tmp_
     assert findings.code == 1 and "no review thread could be read" in findings.said
     running = _run_gate(tmp_path / "running", comments=[_receipt(HEAD), _summary(HEAD, "running", None)])
     assert running.polls() == POLLS and "did not finish within 20 min" in running.said
+    # 指摘コメントは見えているが、その指摘を運ぶレビューとスレッドがまだ見えない。受領コメントを
+    # 到着に数えると、スレッドが空なので未解決ゼロになり、通ってしまう。
+    half_visible = _run_gate(
+        tmp_path / "half",
+        comments=[_receipt(HEAD), _summary(HEAD, "completed", True)],
+        finding_comments=_finding_comments([_thread(False)], HEAD),
+    )
+    assert half_visible.code == 1 and "Codex review arrived" not in half_visible.said
+    assert half_visible.said.count("no review is visible yet") == POLLS
 
 
 def test_a_receipt_stays_outvoted_when_the_summary_cannot_be_read_again(tmp_path):
@@ -528,26 +609,112 @@ def test_nothing_passes_while_codex_is_still_reading_this_head(tmp_path):
         **older,
     )
     assert clean.code == 0 and clean.polls() == 2
+    # 読み直しが「指摘あり」で終わり、新しい指摘スレッドが見えるようになった
     findings = _run_gate(
         tmp_path / "findings",
-        threads=[_thread(True), _thread(False)],
+        threads=[_thread(True)],
         late_comments=[_summary(HEAD, "completed", True)],
+        late_threads=[_thread(True), _thread(False)],
         late_from=3,
         **older,
     )
-    assert findings.code == 1 and "still unresolved after 20 min" in findings.said
+    assert findings.code == 1 and "unresolved finding threads: 1" in findings.said
+    assert "still unresolved after 20 min" in findings.said
     # 読んでいる最中だと分かったあとで要約が読めなくなっても、前の回のレビューでは通さない
     unreadable = _run_gate(tmp_path / "unreadable", threads=[_thread(True)], summary_fail_from=2, **older)
     assert unreadable.polls() == POLLS and "Codex review arrived" not in unreadable.said
     assert "keeping what it last said (running)" in unreadable.said
 
 
+def test_unresolved_findings_are_not_waved_through_when_a_rereview_stalls(tmp_path):
+    """この head へのレビューに未解決の指摘が残っている。読み直しを頼んだが、終わらなかった（PR #92 Codex P2）。
+
+    読み直しの最中は通さずに待つ。だが、未解決を数えるのまでやめると、時間切れのときに
+    「読み始めたが終わらなかった」の fail-open で、未解決の指摘が残ったまま通る。直す前はそう通った。
+    """
+    run = _run_gate(
+        tmp_path, reviews=[_review(HEAD)], threads=[_thread(False)], comments=[_summary(HEAD, "running", None)]
+    )
+    assert run.code == 1, run.said
+    assert run.polls() == POLLS and "still unresolved after 20 min" in run.said
+    assert "did not finish within 20 min" not in run.said
+
+
+def test_an_older_review_does_not_stand_in_for_findings_that_are_not_visible_yet(tmp_path):
+    """要約は「いまの head に指摘あり」と言う。見えているのは、同じ head への前の回のレビューだけ（PR #92 Codex P2）。
+
+    前の回の指摘は解決済みなので、未解決はゼロである。それで通すと、新しい指摘が見える前に緑になる。
+    """
+    found = [_summary(HEAD, "completed", True)]
+    # 1) この head への Codex の指摘コメントが1つも見えない
+    nothing = _run_gate(tmp_path / "nothing", reviews=[_review(HEAD)], threads=[], comments=found)
+    assert nothing.code == 1, nothing.said
+    assert nothing.said.count("the comments that carry them are not visible yet") == POLLS
+    assert "no review thread could be read" in nothing.said
+    # 2) 読み直しを見ていた実行。要約が「指摘あり」に変わっても、指摘コメントは前の回の1つのまま
+    rereview = dict(
+        reviews=[_review(HEAD)],
+        threads=[_thread(True)],
+        comments=[_summary(HEAD, "running", None)],
+        late_comments=found,
+        late_from=3,
+    )
+    stale = _run_gate(tmp_path / "stale", **rereview)
+    assert stale.code == 1 and "Codex review arrived" not in stale.said
+    assert "the comments that carry them are not visible yet. (3/40)" in stale.said
+    # 3) 新しい指摘が見えるようになり、それも解決した。ここで初めて通る
+    settled = _run_gate(tmp_path / "settled", late_threads=[_thread(True), _thread(True)], **rereview)
+    assert settled.code == 0 and "Codex review arrived (1 review(s))" in settled.said
+    # Codex は結果を先に置き、数秒あとで要約を書き換える（PR #92 で2回ともそうだった）。その数秒に当たった
+    # 周回は、要約がまだ「読んでいる最中」なのに新しい指摘をもう数えている。それを「前の姿」に数えると、
+    # 要約が変わったときに「増えていない」と読んで、resolve しても通らなくなる。
+    early = _run_gate(
+        tmp_path / "early",
+        late_reviews=[_review(HEAD)],
+        late_threads=[_thread(True), _thread(True)],
+        late_threads_from=2,
+        **rereview,
+    )
+    assert early.code == 0 and early.polls() == 2, early.said
+    # 行コメントを数えられなかった周回は、「前は無かった」の根拠にしない
+    blind = _run_gate(tmp_path / "blind", finding_comments_fail_until=2, **rereview)
+    assert blind.code == 1 and "Codex review arrived" not in blind.said
+    # 4) 増えたのが、前の回のスレッドへの Codex の返信や、別の commit への指摘だけなら、まだ通さない
+    first = _finding_comments([_thread(True)], HEAD)
+    reply = {"user": {"login": CODEX["login"]}, "original_commit_id": HEAD, "in_reply_to_id": 1}
+    elsewhere = {"user": {"login": CODEX["login"]}, "original_commit_id": OTHER}
+    person = {"user": {"login": "someone"}, "original_commit_id": HEAD}
+    noise = _run_gate(tmp_path / "noise", late_finding_comments=first + [reply, elsewhere, person], **rereview)
+    assert noise.code == 1 and "Codex review arrived" not in noise.said
+
+
 def test_resolving_the_threads_still_turns_a_reviewed_head_green(tmp_path):
     """要約が「指摘あり」のままでも、指摘スレッドを全部 resolve すれば通る（前からの手順）。"""
-    run = _run_gate(
-        tmp_path, reviews=[_review(HEAD)], threads=[_thread(True)], comments=[_summary(HEAD, "completed", True)]
-    )
+    found = [_summary(HEAD, "completed", True)]
+    run = _run_gate(tmp_path / "rerun", reviews=[_review(HEAD)], threads=[_thread(True)], comments=found)
     assert run.code == 0 and "Codex review arrived (1 review(s))" in run.said
+    # 待っている最中に resolve した場合（PR #92 で実際にそうなった）
+    waiting = _run_gate(
+        tmp_path / "waiting",
+        reviews=[_review(HEAD)],
+        threads=[_thread(False)],
+        comments=found,
+        late_threads=[_thread(True)],
+        late_from=3,
+    )
+    assert waiting.code == 0 and waiting.polls() == 2
+    # 最初の周回だけ要約が読めなかった場合。読めなかった周回の姿を「指摘ありと言う前の姿」に数えると、
+    # 指摘コメントが増えていないという理由で、resolve しても通らなくなる。
+    late_read = _run_gate(
+        tmp_path / "late_read",
+        reviews=[_review(HEAD)],
+        threads=[_thread(False)],
+        comments=found,
+        summary_fail_until=1,
+        late_threads=[_thread(True)],
+        late_from=2,
+    )
+    assert late_read.code == 0 and late_read.polls() == 1, late_read.said
 
 
 def test_a_review_of_this_head_passes_only_with_zero_unresolved_codex_threads(tmp_path):

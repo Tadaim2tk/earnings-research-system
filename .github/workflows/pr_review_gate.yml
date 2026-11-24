@@ -114,10 +114,15 @@ jobs:
         run: |
           owner="${REPO%%/*}"
           name="${REPO##*/}"
-          arrived=0
+          # 最後に数えられたとき、未解決の指摘スレッドが残っていた（または数えられなかった）。
+          open_findings=0
           # この実行の中で、要約が最後にこの head について言ったこと（まだ何も言っていなければ空）。
           summary_last=""
           summary_findings=0
+          # 要約が「指摘あり」と言う前に見えていた、この head への Codex の指摘コメントの数
+          # （その姿を見ていなければ空）。
+          findings_baseline=""
+          summary_prev=""
           # この実行が、何の event で、どの head を、いつの push として見ているか。
           # あとから結論を検算できるように、最初に書いておく。
           echo "event=${EVENT_ACTION:-} draft=${IS_DRAFT:-} head=$HEAD_SHA pushed_at=${PUSHED_AT:-}"
@@ -144,67 +149,115 @@ jobs:
             c=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
               --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\") | select(.body | contains(\"Reviewed commit\")) | select(.body | contains(\"$short\"))] | length" \
               2>/dev/null | awk '{s+=$1} END {print s+0}')
-            # **PR を開いたときの自動レビューは、上のどちらの形でも返らない。** 指摘が無ければ
+            # この head に Codex が付けた指摘コメント（行に付くコメント）の数。解決済みも数える。
+            # スレッドの最初のコメントだけを数え、スレッドの中の返信は数えない。
+            # 要約が言う「指摘」が、見えているものと同じかどうかを確かめるのに使う（下の「証拠」）。
+            # 数えられなかった回は 0 ではなく unknown にする（0 と読むと「前は無かった」ことになる）。
+            f="unknown"
+            if f_pages=$(gh api --paginate "repos/$REPO/pulls/$PR/comments" \
+              --jq "[.[] | select(.user.login==\"chatgpt-codex-connector[bot]\" and .original_commit_id==\"$HEAD_SHA\" and .in_reply_to_id==null)] | length" \
+              2>/dev/null); then
+              f=$(printf '%s\n' "$f_pages" | awk '{s+=$1} END {print s+0}')
+            fi
+            # **PR を開いたときの自動レビューは、上のどの形でも返らない。** 指摘が無ければ
             # 要約コメントを書き換えるだけである（2026-11-17 実測: PR #89）。要約も読む。
-            summary_read=$( (gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null \
-              | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || true)
-            case "$summary_read" in clean|findings|running) ;; *) summary_read="none" ;; esac
+            # 「読めなかった」（unread）と「読めたが、この head については何も言っていない」（none）は
+            # 分けて持つ。
+            summary_read="unread"
+            if comments_raw=$(gh api --paginate "repos/$REPO/issues/$PR/comments" 2>/dev/null); then
+              summary_out=$(printf '%s' "$comments_raw" | jq -rs --arg head "$HEAD_SHA" "$SUMMARY_FILTER" 2>/dev/null) || summary_out=""
+              case "$summary_out" in clean|findings|running|none) summary_read="$summary_out" ;; esac
+            fi
             # **今の周回で読めなかったことを、「要約は何も言っていない」と読まない**（PR #92 Codex P2）。
-            # 要約が「指摘あり」と言った次の周回で、要約の取得だけが失敗すると none になる。それを
+            # 要約が「指摘あり」と言った次の周回で、要約の取得だけが失敗することがある。それを
             # 「何も言っていない」と読むと、同じ head への古い `Reviewed commit` のコメントが数え直され、
             # 指摘のスレッドがまだ見えないうちに緑で通る。一度要約が口を開いたら、次に読めるまでは、
             # 最後に読めた内容に従う。
-            if [ "$summary_read" != "none" ]; then
-              summary_last="$summary_read"
-            elif [ -n "$summary_last" ]; then
-              echo "Codex's summary could not be read this time; keeping what it last said ($summary_last)."
-            fi
+            case "$summary_read" in
+              clean|findings|running) summary_last="$summary_read" ;;
+              *) if [ -n "$summary_last" ]; then
+                   echo "Codex's summary did not speak for this head this time ($summary_read); keeping what it last said ($summary_last)."
+                 fi ;;
+            esac
             summary_state="${summary_last:-none}"
-            # 一度でも「いまの head に指摘あり」を見たら、そのあと読み直しが始まって終わらなくても
-            # 忘れない。取り消せるのは、あとで読めた「指摘なし」（下で通る）だけである。
             if [ "$summary_state" = "findings" ]; then
+              # 一度でも「いまの head に指摘あり」を見たら、そのあと読み直しが始まって終わらなくても
+              # 忘れない。取り消せるのは、あとで読めた「指摘なし」（下で通る）だけである。
               summary_findings=1
+            elif [ "$summary_read" != "unread" ]; then
+              # 要約が「指摘あり」と言う前の姿を覚えておく。**読んでいる最中は、読み始めを見た周回の姿だけを
+              # 覚える。** Codex は結果（レビューとコメント）を先に置き、数秒あとで要約を書き換える。
+              # 読んでいる最中の周回を全部覚えると、その数秒に当たった周回が新しい指摘をもう数えていて、
+              # 要約が変わったときに「増えていない」と読んでしまう。
+              # その周回で数えられなかったら unknown と覚える（「前は無かった」とは読まない）。
+              if [ "$summary_state" != "running" ] || [ "$summary_prev" != "running" ]; then
+                findings_baseline="$f"
+              fi
             fi
+            summary_prev="$summary_state"
             # `Reviewed commit` のコメントは、要約がこの head について一度も口を開いていないときだけ
             # 数える（要約が無い古い書式のための手がかり）。要約があるなら、要約に従う。
             if [ -n "$summary_last" ]; then
               c=0
             fi
-            if [ "$summary_state" = "running" ]; then
-              # **Codex はいまこの head を読んでいる。** 同じ head への前の回のレビューや受領コメントが
-              # あっても、それで先に通さない。先に通すと、いま読んでいるレビューはマージの後に届く
-              # （ERS #48 と同じ形）。終わらなければ、下の fail-open で通る。
-              echo "Codex is reviewing this head. ($i/40)"
-            elif [ "$n" -gt 0 ] || [ "$c" -gt 0 ] || [ "$summary_state" = "clean" ]; then
-              arrived=1
-              # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
-              # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
+            # 未解決のCodex指摘スレッド数。コミットを跨いで数える(古い未処理指摘も塞ぐ)。
+            # GraphQL失敗時は unknown のまま待ち続け、最終的に赤に倒す(安全側)。
+            # **到着の手がかりがある周回では、その場で通すかどうかに関わらず、必ず数えて覚える。**
+            # 読み直しの最中は下で通さずに待つが、数えるのまでやめると、未解決の指摘が残ったまま
+            # 読み直しが終わらなかったときに fail-open で通ってしまう（PR #92 Codex P2）。
+            unresolved=""
+            if [ "$n" -gt 0 ] || [ "$c" -gt 0 ] || [ "$summary_state" = "clean" ]; then
               unresolved=$(gh api graphql \
                 -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}' \
                 -f owner="$owner" -f name="$name" -F number="$PR" \
                 --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | select((.comments.nodes[0].author.login // "") | startswith("chatgpt-codex-connector"))] | length' \
                 2>/dev/null || echo "unknown")
               if [ "$unresolved" = "0" ]; then
-                if [ "$n" -gt 0 ] || [ "$c" -gt 0 ]; then
-                  echo "Codex review arrived ($((n + c)) review(s)) and no unresolved finding threads remain."
-                  echo "### Codex review gate: レビュー済み・未解決の指摘なし" >> "$GITHUB_STEP_SUMMARY"
-                else
-                  echo "Codex reviewed this head and reported no findings (summary comment); no unresolved finding threads remain."
-                  echo "### Codex review gate: レビュー済み・指摘なし（要約コメントが、いまの head を completed・指摘なしと報告）" >> "$GITHUB_STEP_SUMMARY"
-                fi
-                exit 0
+                open_findings=0
+              else
+                open_findings=1
               fi
-              echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
-            elif [ "$summary_state" = "findings" ]; then
-              # 要約は「いまの head に指摘あり」と言っているが、レビュー（指摘スレッド）がまだ見えない。
-              # 遅れて届くことがあるので待つ。最後まで見えなければ赤にする（fail-open で通さない）。
-              echo "Codex's summary reports findings for this head, but no review is visible yet. ($i/40)"
+            fi
+            if [ "$summary_state" = "running" ]; then
+              # **Codex はいまこの head を読んでいる。** 同じ head への前の回のレビューや受領コメントが
+              # あっても、それで先に通さない。先に通すと、いま読んでいるレビューはマージの後に届く
+              # （ERS #48 と同じ形）。終わらなければ、下の時間切れの判断へ進む。
+              echo "Codex is reviewing this head. ($i/40)"
+            elif [ -z "$unresolved" ]; then
+              if [ "$summary_state" = "findings" ]; then
+                # 要約は「いまの head に指摘あり」と言っているが、レビューがまだ見えない。
+                # 最後まで見えなければ赤にする（fail-open で通さない）。
+                echo "Codex's summary reports findings for this head, but no review is visible yet. ($i/40)"
+              else
+                echo "waiting for Codex review... ($i/40)"
+              fi
+            elif [ "$summary_state" = "findings" ] && { [ "$f" = "unknown" ] || [ "$f" -eq 0 ] || [ "$findings_baseline" = "unknown" ] || { [ -n "$findings_baseline" ] && [ "$f" -le "$findings_baseline" ]; }; }; then
+              # **証拠**: 要約が「いまの head に指摘あり」と言うなら、その指摘は、この head への
+              # Codex のコメントとして見えているはずである。見えているレビューが前の回のもの
+              # （指摘は解決済み）だけなら、未解決ゼロは「新しい指摘がまだ見えていない」だけかも
+              # しれない（PR #92 Codex P2）。次のどれかなら、まだ通さない。
+              #   - この head への Codex の指摘コメントを数えられなかった
+              #   - 1つも見えない
+              #   - 要約が「指摘あり」と言う前（読み始めを見た周回か、それより前）より増えていない。
+              #     その周回で数えられなかった場合も、増えたとは言えないので通さない
+              # 3つ目は、この実行が「指摘あり」より前の姿を見ていたときだけ判定できる。指摘を
+              # resolve して再実行した回は最初から「指摘あり」なので、前の2つだけを見る。
+              echo "Codex's summary reports findings for this head, but the comments that carry them are not visible yet. ($i/40)"
+            elif [ "$unresolved" = "0" ]; then
+              if [ "$n" -gt 0 ] || [ "$c" -gt 0 ]; then
+                echo "Codex review arrived ($((n + c)) review(s)) and no unresolved finding threads remain."
+                echo "### Codex review gate: レビュー済み・未解決の指摘なし" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "Codex reviewed this head and reported no findings (summary comment); no unresolved finding threads remain."
+                echo "### Codex review gate: レビュー済み・指摘なし（要約コメントが、いまの head を completed・指摘なしと報告）" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              exit 0
             else
-              echo "waiting for Codex review... ($i/40)"
+              echo "Codex review arrived; unresolved finding threads: $unresolved — address them in this PR. ($i/40)"
             fi
             sleep 30
           done
-          if [ "$arrived" -gt 0 ]; then
+          if [ "$open_findings" -gt 0 ]; then
             echo "::error::Codex findings are still unresolved after 20 min. Push a fix and/or resolve the threads, then re-run this check."
             exit 1
           fi
