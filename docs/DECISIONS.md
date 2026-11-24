@@ -3136,3 +3136,18 @@ tactical-swing-os の PR #230 でも同じことが起きた。ADR・コード�
 このゲートは今日までと同じ「20分待つ」に戻る（緑にはしない側へ倒れる）。気付く仕組みは
 入れていない。push の時刻を event の `updated_at` で代用していることと併せて、
 `docs/OPEN_QUESTIONS.md` に残した。
+
+**このPR自身（#92）で実測した。** 1つ目——開いた直後の自動レビューを読んで通ること。
+
+```
+2026-11-24T20:53:29Z PR を開く（head d8d2549）
+20:53:36Z ゲート開始: event=opened draft=false（run 45485471851、image ubuntu-26.04）
+20:53:37Z waiting for Codex review... (1/40)
+20:54:09Z Codex is reviewing this head. (2/40)   ← (5/40) まで同じ
+20:55:50Z Codex の要約が completed・指摘なしになる
+20:56:14Z Codex reviewed this head and reported no findings (summary comment); no unresolved finding threads remain.
+```
+
+開いてから2分45秒で緑になった。`pulls/92/reviews` は空で、`Reviewed commit` のコメントも
+無い——PR #89 と同じ形である。直す前の作りなら、40回待って 21:13 台に `no-review PR` で
+通していた。
