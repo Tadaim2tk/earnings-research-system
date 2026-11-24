@@ -2982,3 +2982,157 @@ Consequences: テスト 1400→1402。`tests/unit/test_workflow_runner_image.py`
 **失敗を知らせる job が、知らせる対象と同じ準備に依存している点は直していない。**
 今回は GitHub のメールが代わりになったが、それは本システムの通知ではない。
 どちらも `docs/OPEN_QUESTIONS.md` に残した。
+
+## ERS-ADR-0084
+
+Date: 2026-11-25
+
+Status: Accepted
+
+Approval: レビューゲートが二つのことを読み違えていた件の修理。push された head の扱いは
+ERS-ADR-0082 Amendment の決定をそのまま当てた（新しい方針は足していない）。
+
+Context: ERS-ADR-0039/0040/0082 の Codex review gate は「現在の head に対する Codex の
+レビューが届き、未解決の指摘スレッドがゼロ」で成功、20分来なければ fail-open で通す。
+ERS-ADR-0082 はそこへ二つを足した。push のたびにゲート自身が依頼を書くこと、そして
+指摘が無いときの「レビューではなく普通のコメント」（本文に `Reviewed commit: <sha>`）も
+到着として数えること。
+
+**どちらも、実物の動きと合っていなかった。** 2026-11-24 に tactical-swing-os の同型の
+ゲートで見つかり、本リポジトリの記録で確かめた。
+
+**1. 「指摘なし」を読めていなかった。**
+
+Codex は指摘が無いときレビューを作らない。返し方は依頼の入口で違う。
+
+| 入口 | 指摘なしの返し方 |
+| --- | --- |
+| コメントで依頼した | `Reviewed commit` を持つコメント（ERS-ADR-0082 Amendment が数えた形）＋要約コメントの更新 |
+| PR を開いた・draft を ready にした（自動） | **要約コメントの更新だけ** |
+
+要約コメントは `<!-- codex-pull-request-review-summary -->` で始まり、機械可読な状態を持つ。
+
+```
+<!-- codex-review-state:v1 {"code_review":{"commit_sha":"e7fea6fe653cd81a9dcb9a7b2571cc270ab1fff6","has_any_findings":false,"has_unresolved_findings":false,"status":"completed"},"security_review":{...}} -->
+```
+
+PR #89（2026-11-17）で実測した。
+
+```
+12:23:00Z PR を開く
+12:23:04Z ゲート開始（run 44082617376。ASK_OUTCOME: skipped）
+12:24:23Z Codex の要約が completed・指摘なしになる（開いてから1分24秒）
+12:43:37Z No Codex review within 20 min — gate passes as a no-review PR.
+```
+
+`pulls/89/reviews` は空で、`Reviewed commit` のコメントも無い。**読み終えたレビューを
+20分待ち、「レビュー無し」として通した。** ERS-ADR-0082 Amendment が塞いだはずの
+「Codexが止まっている」と「見て問題なかった」の取り違えが、自動レビューの側で残っていた。
+2026-09 の時点では要約コメントという形そのものが無く（PR #82 の返事は `Reviewed commit` の
+コメントだけだった）、その後に Codex の側が変わっている。
+
+**2. ゲートが書く依頼は、Codex に読まれていなかった。**
+
+PR #82（ERS-ADR-0082 を入れた PR 自身）のコメントを全部並べた。github-actions[bot] は
+依頼を8回書いている。Codex の返事は8回とも同じだった。
+
+```
+2026-09-06T13:27:34Z github-actions[bot]           @codex review
+2026-09-06T13:27:40Z chatgpt-codex-connector[bot]  To use Codex here, create a Codex account and connect to github
+2026-09-07T22:28:25Z github-actions[bot]           @codex review
+2026-09-07T22:28:31Z chatgpt-codex-connector[bot]  To use Codex here, create a Codex account and connect to github
+（22:37:22 / 22:52:04 / 23:05:09 / 23:12:04 / 23:22:56 / 23:31:42 の6回も同じ。返事は5〜9秒後）
+```
+
+この PR に届いたレビューは、どれも人のアカウントが書いた依頼へのものである
+（例: 13:11:48Z の依頼 → 13:15:08Z、23:32:16Z の依頼 → 23:37:12Z）。**依頼は、Codex に
+接続した人のアカウントからでないと通らない。** tactical-swing-os の PR #230
+（2026-11-24T13:16:00Z）でも同じ返事を確かめた。
+
+**入れた日から一度も働いていない。** それでも POST は成功するので、`ASK_OUTCOME` は
+`success` になる。ERS-ADR-0082 Amendment は「呼べなかった回を、レビューが来なかった回と
+同じに扱わない」と決めたが、その区別は POST の成否で付けていた。**読まれない依頼を
+書いた回は「呼べた」ことになり、push された head は20分後に `no-review PR` として通る。**
+ERS-ADR-0082 が消したと書いた「呼んでいないから来なかった」場合は、消えていなかった。
+
+既存のテスト（`tests/unit/test_review_gate_workflow.py`）は、依頼の手順が workflow に
+書いてあることを文字列で確かめていた。**手順が在ることと、働くことは別で、後者は一度も
+確かめていなかった。**
+
+Decision:
+
+- **要約コメントの状態を読む。** Codex の Bot が書いた要約のうち、`code_review.commit_sha` が
+  現在の head と40桁で一致するものを、clean（completed・指摘なし）/ findings（completed・
+  指摘あり）/ running / none に読む。clean は到着として数える。**成功条件は「未解決の
+  指摘スレッドがゼロ」のままで、変えていない。**
+- 要約が「現在の head に指摘あり」と言うのに、レビュー（指摘スレッド）が見えないまま
+  時間切れになったら赤にする。指摘があると分かっている head を fail-open で通さない。
+  一度見た「指摘あり」は、あとの周回で読めなくなっても忘れない。
+- `Reviewed commit` のコメントを数える述語（ERS-ADR-0082 Amendment）は残す。要約が無い
+  書式へ戻ったときの手がかりになる。ただし、**要約がその head について何か言っている
+  ときは要約に従う**（同じ head を読み直させている最中に、前の回のコメントで緑にしない）。
+- **依頼の手順を外す。** job 単位の `pull-requests: write` も外し、workflow の read に戻す。
+  このゲートは PR に何も書かない。
+- **push された head は、ERS-ADR-0082 Amendment の決定をそのまま当てる。** 「呼べていない
+  回は誰も見ていない」「fail-open は Codex 側の停止のための逃げ道で、こちらの手が
+  届かなかった場合に使うものではない」。ゲートが頼めない以上、頼んだかどうかは人の依頼で
+  決まる。`synchronize` の実行が時間切れになったとき、
+  - push（event が運ぶ PR の `updated_at`）以降に、このリポジトリの人が書いた依頼が1件も無く、
+    Codex がその head を読み始めた跡も無ければ、**赤**。何をすればよいかをその場で言う。
+    数えるのは、Bot でないアカウントのうち `author_association` が OWNER / MEMBER /
+    COLLABORATOR のものが、コメントの先頭に書いた依頼だけである。public repository の PR には
+    誰でもコメントできるので、外の人の1行で「赤」が「fail-open で通す」に変わらないようにする。
+  - 依頼があったかどうかを読めなければ、赤（読めないものを「頼んであった」にしない）。
+  - 人が頼んだのに来なかった、または Codex が読み始めて終わらなかった場合は、今までどおり
+    fail-open で通す。Codex 側の停止である。
+  - draft は対象にしない。ERS-ADR-0082 が「draft のうちは呼ばない」と決めたのと同じ理由で、
+    見てもらう場所は `ready_for_review` である。
+- opened / reopened / ready_for_review の扱いは変えない。Codex が来なければ fail-open で通す。
+- `concurrency` で古い実行を畳む作りは残す。
+
+採らなかったもの:
+
+- **人のアカウントの鍵を Secrets に置き、ゲートにその鍵で依頼を書かせる。** 鍵を作るのは
+  Human で、まだ無い。Codex がその依頼に応えるかも確かめていない。**確かめていない経路を
+  「働くはず」で入れるのは、ERS-ADR-0082 と同じ失敗になる。** 入れるなら、PR の上で
+  Codex が実際に応えることを見てからにする。
+- `pull_request_target` や専用の GitHub App。ERS-ADR-0082 Amendment が見送った理由
+  （public repository で書き込み可能な入口が増える）は変わっていない。
+- fail-open で通したことを PR 本体にコメントで残す通知（tactical-swing-os のゲートには
+  ある）。このゲートは書き込み権限を持たない形に戻したので、痕跡は実行のログと
+  step summary に出す。
+
+Consequences: テスト 1402→1424。
+
+- `tests/unit/test_review_gate_behavior.py` を足した（28本）。workflow から手順と jq の式を
+  取り出し、`gh` と `sleep` だけを偽物にしてそのまま bash で走らせる。偽の `gh` は手順が
+  渡した `--jq` の式を本物の jq に通すので、前からある述語（レビュー・`Reviewed commit` の
+  コメント・未解決スレッドの数え方）も初めて実際に動かして確かめている。直す前の workflow に
+  当てると、PR #89 の形と「誰も頼んでいない push」の両方で落ちる。
+- `tests/unit/test_review_gate_workflow.py` は 17本→11本。依頼の手順を固定していた7本
+  （呼ぶこと、synchronize 限定、失敗を許すこと、古い実行が投げないこと、draft では
+  呼ばないこと、再実行で頼み直さないこと、頼む側と待つ側の数え方の一致）は、固定する対象が
+  無くなったので外した。権限の検査と「頼めていない回を通さない」検査は、新しい形に
+  置き換えた。ADR の構造を見る3本はそのまま。「依頼の手順が無いこと」を足した。
+
+**運用で変わること:** 指摘を直して push したら、そのつど人のアカウントからレビュー依頼の
+コメントを書く。書かなければ、20分後にこの check は赤になる（これまでは黙って緑に
+なっていた）。赤になったら、依頼を書いて check を再実行すれば進む。PR #82 の記録では、
+push のたびに人のアカウントからも依頼が書かれており、手順としては既に行われている。
+branch を main に追従させるだけの push も `synchronize` なので、同じ扱いになる。
+
+**PR の説明文に、依頼の文言を例として書かない。** Codex は本文中の言及も呼び出しとして
+読む。PR #82 は説明文に依頼の文言を引用していたため、開いた10秒後に Codex が
+「To use Codex here, create an environment for this repo」と返し、自動レビューは
+始まらなかった（13:06:09Z に開き、人が 13:11:48Z に依頼して初めて届いた）。
+tactical-swing-os の PR #230 でも同じことが起きた。ADR・コード・commit message は
+読まれない。
+
+**fail-open は残る。** Codex が本当に止まっているとき、利用上限に達しているときは、
+今までどおり20分後に通る。**このゲートの緑は、レビューを読んだことの代わりにはならない。**
+元の設計文書に書いてあるとおりで、本ADRはその前提を変えない。
+
+**要約コメントの書式は Codex の側のもので、変わりうる。** 変わって読めなくなれば、
+このゲートは今日までと同じ「20分待つ」に戻る（緑にはしない側へ倒れる）。気付く仕組みは
+入れていない。push の時刻を event の `updated_at` で代用していることと併せて、
+`docs/OPEN_QUESTIONS.md` に残した。
