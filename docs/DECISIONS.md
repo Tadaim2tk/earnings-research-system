@@ -3151,3 +3151,27 @@ tactical-swing-os の PR #230 でも同じことが起きた。ADR・コード�
 開いてから2分45秒で緑になった。`pulls/92/reviews` は空で、`Reviewed commit` のコメントも
 無い——PR #89 と同じ形である。直す前の作りなら、40回待って 21:13 台に `no-review PR` で
 通していた。
+
+2つ目——依頼を書かずに push した head が赤になり、依頼を書いて再実行すると通ること。
+
+```
+2026-11-24T20:58:32Z 依頼を書かずに push（head f1bc5bf）
+20:58:41Z ゲート開始: event=synchronize draft=false pushed_at=2026-11-24T20:58:32Z（run 45486325586）
+20:58:42Z waiting for Codex review... (1/40)   ← (40/40) まで同じ
+21:19:31Z ::error::No one asked Codex to review this pushed head (no request at or after 2026-11-24T20:58:32Z), and pushes do not trigger Codex on their own. ...
+21:20:22Z 人のアカウントから依頼を書き、check を再実行する（同じ run の attempt 2）
+21:20:31Z ゲート開始: event=synchronize draft=false pushed_at=2026-11-24T20:58:32Z
+21:21:03Z Codex is reviewing this head. (2/40)   ← (4/40) まで同じ
+21:22:05Z Codex: Didn't find any major issues. Reviewed commit: f1bc5bfb3b
+21:22:37Z Codex reviewed this head and reported no findings (summary comment); no unresolved finding threads remain.
+```
+
+push から20分59秒で赤、依頼から2分15秒で緑になった。確かめられたこと:
+
+- **push では Codex は動かなかった。** 赤になるまでの21分間、要約コメントは前の head
+  （d8d2549）を指したままだった。
+- event が運ぶ `updated_at` は push の時刻と一致した（どちらも 20:58:32Z）。再実行にも同じ値が
+  渡り、あとから書いた依頼（21:20:22Z）が「push より後」として数えられた。
+- 人のアカウントからの依頼には、Codex は応えた。
+- 21:22:06Z の周回では、`Reviewed commit` のコメント（21:22:05Z）が既に付いていたが、要約が
+  まだ running だったので待ち、次の周回で通した。要約に従う、と決めたとおりの動きである。
