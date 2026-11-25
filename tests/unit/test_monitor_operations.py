@@ -820,13 +820,18 @@ def test_workflow_has_scoped_permissions_fixed_python_and_no_live_or_push():
         for step in monitor_steps
         if step.get("if") == "steps.recheck.outputs.due == 'true'"
     ]
+    # 再取得の1回目は、結果をあとの手順から読むために id（reread）を持つ（ERS-ADR-0085）。
+    # 手順そのものは同じで、名前も「Re-download uploaded artifact」のまま。やり直しの手順は
+    # 「前の試行が落ちたとき」だけを条件にするので、この集合には入らない
+    # （tests/unit/test_monitor_reread_retry.py が見る）。
     assert {step.get("id") or step.get("name") for step in gated} == {
         "run-monitor",
         "upload",
-        "Re-download uploaded artifact",
+        "reread",
         "Verify re-downloaded committed state",
         "handoff",
     }
+    assert monitor_steps[names.index("Re-download uploaded artifact")]["id"] == "reread"
 
 
 def test_schedule_uses_six_slots_in_event_window_and_on_event_day():

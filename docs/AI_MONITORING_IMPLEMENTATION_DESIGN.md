@@ -401,7 +401,7 @@ workflowは次を満たす。
 5. bounded retryだけを行い、回数とbackoffをrunへ記録する。
 6. source metadataを取得し、canonical fingerprintとreplacement indicatorsを比較する。
 7. stale gapをprofileから検査する。
-8. run/checkpoint bundleをcross-validateし、artifactとしてpublish後にread-after-write検証する。
+8. run/checkpoint bundleをcross-validateし、artifactとしてpublish後にread-after-write検証する。publish直後の再取得は、artifactが一覧に出ていないことがあるため、同じ固定actionで最大3回（直後、10秒後、さらに30秒後）試す。最後の試行まで取得できなければjobを失敗させ、再取得できないbundleから検証・handoff・通知へ進まない。やり直した回はActionsの注記に残す（ERS-ADR-0085）。
 9. change/errorだけIssue通知し、`no_change` はActions summaryに留める。
 10. source result、persistence result、notification resultを別々に記録する。
 11. Python `3.11.9` を固定し、project最低versionと一致させる。そのpatchのビルドがあるrunner image（現在 `ubuntu-24.04`）も固定する。`ubuntu-latest` の指す先が変わると、固定したpatchを取得できず全jobが準備で止まる（2026-11-15に発生。ERS-ADR-0083）。

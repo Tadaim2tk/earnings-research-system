@@ -247,8 +247,47 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: false
-      - name: Re-download uploaded artifact
+      - id: reread
+        name: Re-download uploaded artifact
         if: steps.recheck.outputs.due == 'true'
+        # 上げ終えた直後の成果物が、名前で探しても見つからないことがある（ERS-ADR-0085）。
+        # 2026-11-23 と 11-24 の夜、上げ終わりの 0.1〜0.4 秒後に探して
+        # `Artifact not found for name` になった。束は上がっているのに再取得できず、
+        # 続く通知が束を読めずに止まった。
+        #
+        # 見つからなければ、待ってやり直す。試行は3回まで（すぐ・10秒後・さらに30秒後）。
+        # 1回目と2回目は落ちても job を落とさず、**最後の試行だけは、落ちたらそのまま job が
+        # 落ちる。** 3回とも取れなければ、今までと同じ赤になる。
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ steps.run-monitor.outputs.artifact_name }}
+          path: .monitor/reread
+      - name: Wait before the second re-download
+        # やり直しが起きた回は緑で終わるので、起きたこと自体を実行の注記に残す。
+        # 前の試行が途中まで書いたものは消し、どの試行も「何も無い場所」から始める。
+        if: steps.reread.outcome == 'failure'
+        run: |
+          echo "::warning::The state artifact that was just uploaded could not be re-downloaded (attempt 1 of 3). Waiting 10 seconds before trying again."
+          rm -rf .monitor/reread
+          sleep 10
+      - id: reread-second
+        name: Re-download uploaded artifact (second attempt)
+        if: steps.reread.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ steps.run-monitor.outputs.artifact_name }}
+          path: .monitor/reread
+      - name: Wait before the last re-download
+        if: steps.reread-second.outcome == 'failure'
+        run: |
+          echo "::warning::The state artifact could not be re-downloaded (attempt 2 of 3). Waiting 30 seconds before the last attempt."
+          rm -rf .monitor/reread
+          sleep 30
+      - name: Re-download uploaded artifact (last attempt)
+        # continue-on-error を付けない。ここで取れなければ、束を読み直せないまま先へ進まない。
+        if: steps.reread-second.outcome == 'failure'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ steps.run-monitor.outputs.artifact_name }}
